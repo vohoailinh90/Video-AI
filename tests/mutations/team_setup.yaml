@@ -47,11 +47,11 @@ mutations:
   replace: "  true ||"
   test: tests.test_team.EgressScriptTests.test_check_refuses_a_worker_network_the_rules_do_not_match
 - label: "the check does not look for the DOCKER-USER rules"
-  find: "      || { echo \"team-egress: rule missing: DOCKER-USER from \\${subnet} to \\${dest}\" >&2; exit 1; }\n"
+  find: "      || fail \"rule missing: DOCKER-USER from \\${subnet} to \\${dest}\"\n"
   replace: "      || true\n"
   test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
 - label: "the check does not look for the INPUT rule"
-  find: "    || { echo \"team-egress: rule missing: INPUT from \\${subnet}\" >&2; exit 1; }\n"
+  find: "|| fail \"rule missing: INPUT from \\${subnet}\"\n"
   replace: "    || true\n"
   test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
 - label: "the proof does not name the verified network"
@@ -78,3 +78,35 @@ mutations:
   find: "systemctl enable --now team-egress-check.timer >/dev/null\n"
   replace: ""
   test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "a failed check leaves running containers on the unprotected network"
+  find: "    docker ps -q --filter \"network=\\${network}\" | xargs -r docker kill >/dev/null 2>&1 || true\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_a_failed_check_stops_the_containers_already_running_on_the_worker_network
+- label: "a failed check stops containers on another network"
+  find: "docker ps -q --filter \"network=\\${network}\""
+  replace: "docker ps -q --filter \"network=bridge\""
+  test: tests.test_team.EgressScriptTests.test_a_failed_check_stops_the_containers_already_running_on_the_worker_network
+- label: "the check prints nothing for the launch to read"
+  find: "  cat \"\\${ok}\"\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_check_writes_the_proof_the_conductor_reads_when_every_rule_is_live
+- label: "the sudo rule allows any argument"
+  find: "team-egress --check\\n' > \"${egress_rule}\""
+  replace: "team-egress *\\n' > \"${egress_rule}\""
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "the sudo rule is installed without being checked"
+  find: "visudo -cf \"${egress_rule}\" >/dev/null\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "the sudo rule is never installed"
+  find: "install -o root -g root -m 440 \"${egress_rule}\" /etc/sudoers.d/team-egress-check\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "setup does not install sudo"
+  find: "command -v visudo >/dev/null || need+=(sudo)\n"
+  replace: ""
+  test: tests.test_team.CodexTeamInstallTests.test_setup_requires_sudo_before_its_first_side_effect
+- label: "setup goes on without sudo"
+  find: "command -v visudo >/dev/null || { echo \"sudo is required (the egress check rule) and could not be installed\" >&2; exit 1; }\n"
+  replace: ""
+  test: tests.test_team.CodexTeamInstallTests.test_setup_requires_sudo_before_its_first_side_effect

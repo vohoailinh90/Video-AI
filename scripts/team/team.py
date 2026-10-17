@@ -241,28 +241,48 @@ SYSTEMD_RUNTIME = Path("/run/systemd/system")
 
 EGRESS_OK = Path("/run/team-egress.ok")
 EGRESS_OK_MAX_AGE_S = 90  # the check timer runs every 20 s (setup-vps-team.sh): a miss or two must not read as down
+EGRESS_CHECK = ["/usr/local/sbin/team-egress", "--check"]
 
 
-def egress_problem(network: str | None = None) -> str | None:
+def live_egress() -> tuple[str | None, str | None]:
+    """Run the root-owned check now: (the network it verified, None), or (None, why it could not)."""
+    argv = EGRESS_CHECK if os.geteuid() == 0 else ["sudo", "-n", *EGRESS_CHECK]  # one sudoers rule allows exactly this
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return None, f"{' '.join(argv)} timed out"
+    except OSError as exc:
+        return None, f"{' '.join(argv)}: {exc}"
+    if result.returncode:
+        return None, last_line(result.stderr) if result.stderr.strip() else f"{' '.join(argv)} exited {result.returncode}"
+    return result.stdout.strip(), None
+
+
+def egress_problem(network: str | None = None, live: bool = False) -> str | None:
     """Workers may reach the internet and nothing else because iptables rules, installed by the team-egress unit
     (setup-vps-team.sh), match the worker network's subnet. The unit is a oneshot that stays "active" after the rules are
-    flushed, so its state proves nothing: the root-owned check (`team-egress --check`, run by a timer) asks iptables about
-    every rule and the network's subnet and writes the name of the network it verified to EGRESS_OK. `network` is the one
-    about to be used."""
+    flushed, so its state proves nothing: the root-owned check (`team-egress --check`) asks iptables about every rule and
+    the network's subnet. `live` runs it now (a launch must: a cached answer can be up to a minute old); otherwise the
+    answer is the proof file a timer keeps fresh, which is enough for a diagnostic. `network` is the one about to be used."""
     if not SYSTEMD_RUNTIME.is_dir() or not shutil.which("systemctl"):
         return None  # no systemd to ask: a container, CI or a test
-    fix = "rerun setup-vps-team.sh; it needs iptables"
+    fix = "rerun setup-vps-team.sh; it needs iptables and sudo"
     if subprocess.run(["systemctl", "is-active", "--quiet", "team-egress.service"]).returncode:
         return f"team-egress.service is not active: worker containers are not limited to the internet ({fix})"
-    try:
-        verified = EGRESS_OK.read_text(encoding="utf-8").strip()
-        age = time.time() - EGRESS_OK.stat().st_mtime
-    except OSError:
-        return (f"the egress rules were never verified ({EGRESS_OK} is missing, or `team-egress --check` fails; "
-                f"see journalctl -u team-egress-check): workers may not be limited to the internet ({fix})")
-    if age > EGRESS_OK_MAX_AGE_S:
-        return (f"the egress rules were last verified {age:.0f}s ago (more than {EGRESS_OK_MAX_AGE_S}s): "
-                f"journalctl -u team-egress-check ({fix})")
+    if live:
+        verified, why = live_egress()
+        if why:
+            return f"the egress rules could not be verified just now ({why}): workers may not be limited to the internet ({fix})"
+    else:
+        try:
+            verified = EGRESS_OK.read_text(encoding="utf-8").strip()
+            age = time.time() - EGRESS_OK.stat().st_mtime
+        except OSError:
+            return (f"the egress rules were never verified ({EGRESS_OK} is missing, or `team-egress --check` fails; "
+                    f"see journalctl -u team-egress-check): workers may not be limited to the internet ({fix})")
+        if age > EGRESS_OK_MAX_AGE_S:
+            return (f"the egress rules were last verified {age:.0f}s ago (more than {EGRESS_OK_MAX_AGE_S}s): "
+                    f"journalctl -u team-egress-check ({fix})")
     if network and network != verified:
         return (f"network {network} is not covered by the egress rules (they were verified for {verified}): "
                 f"workers on it are not limited to the internet; use {verified}")
@@ -360,10 +380,10 @@ def verdict_of(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def warn(state: dict, message: str, review: bool = False) -> None:
+def warn(state: dict, message: str, round: str | None = None) -> None:
     state.setdefault("warnings", []).append(message)
-    if review:  # remembered apart, so the next review round can drop exactly these (drop_review_warnings)
-        state.setdefault("review_warnings", []).append(message)
+    if round:  # remembered apart, so the next round of that stage can drop exactly these (drop_round_warnings)
+        state.setdefault(f"{round}_warnings", []).append(message)
     say(f"warning: {message}")
 
 
@@ -648,7 +668,7 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
     network = network_of(argv)
     if network != "none":
         # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
-        problem = egress_problem(network or "docker's default bridge")
+        problem = egress_problem(network or "docker's default bridge", live=True)
         if problem:
             raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
@@ -740,6 +760,7 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
 # --------------------------------------------------------------------- roles
 
 def run_tester(f: Feature, cfg, keys, state: dict) -> bool:
+    drop_round_warnings(state, "tester")
     prompt = render(shipped(PROMPTS, "tester.md"), id=f.id)
     for model in models_for(cfg, "tester"):
         rc, _ = run_worker(cfg, f, "tester", model, handoff_mounts(f), prompt, keys)
@@ -805,16 +826,16 @@ def blockers(review: str) -> list[str]:
     return found
 
 
-def drop_review_warnings(state: dict) -> None:
-    """A warning the review stage raised describes that round (no reviewer answered, a fix not re-reviewed, blockers that
-    stand). A new round replaces it; warnings from other stages still apply and stay."""
-    stale = state.pop("review_warnings", [])
+def drop_round_warnings(state: dict, round: str) -> None:
+    """A warning a stage raised describes that round (no reviewer answered, a fix not re-reviewed, tests that already pass).
+    A new round of the stage replaces it; warnings from other stages still apply and stay."""
+    stale = state.pop(f"{round}_warnings", [])
     state["warnings"] = [w for w in state.get("warnings", []) if w not in stale]
 
 
 def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
     """One review round, from the pipeline or from `team work reviewer`: it replaces the last round's review and warnings."""
-    drop_review_warnings(state)
+    drop_round_warnings(state, "review")
     diff = f.out / "diff.patch"
     diff.write_text(git(f.repo, *readable_diff(f.repo), f"{merge_base(f, state)}..HEAD"), encoding="utf-8")
     mounts = handoff_mounts(f, {"diff.patch": diff, "gates.log": f.file("gates.log")})
@@ -832,7 +853,7 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
             state["reviewed_head"] = head(f.repo)
             return review
         say(f"reviewer: {model} returned no review block (exit {rc})")
-    warn(state, "no reviewer model returned a review", review=True)
+    warn(state, "no reviewer model returned a review", round="review")
     return None
 
 
@@ -968,7 +989,7 @@ def blocked(f: Feature, state: dict, reason: str) -> int:
 
 def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | None) -> int:
     for index, stage in enumerate(STAGES[STAGES.index(start):], STAGES.index(start)):
-        problem = None if stage == "pack" else egress_problem(cfg["TEAM_WORKER_NETWORK"])
+        problem = None if stage == "pack" else egress_problem(cfg["TEAM_WORKER_NETWORK"], live=True)
         if problem:
             state["next"] = stage
             return blocked(f, state, problem)
@@ -980,7 +1001,7 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
                 return blocked(f, state, "no tester model produced tests")
             if run_gates(f, cfg):
                 warn(state, "acceptance commands already pass after the tester stage: "
-                            "the new tests may not exercise the feature")
+                            "the new tests may not exercise the feature", round="tester")
         elif stage == "coder":
             if not run_coder(f, cfg, keys, state, feedback):
                 error = state.pop("coder_error", "")
@@ -993,13 +1014,13 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
                 before = head(f.repo)
                 fix = "A reviewer found blockers. Fix them; change nothing else.\n\n" + review
                 if run_coder(f, cfg, keys, state, fix, attempts=1):
-                    warn(state, "pre-review blockers were addressed by a fix commit that was not re-reviewed", review=True)
+                    warn(state, "pre-review blockers were addressed by a fix commit that was not re-reviewed", round="review")
                 else:
                     git(f.repo, "reset", "-q", "--hard", before)
                     state.pop("gate_feedback", None)  # belongs to the reverted fix, not to HEAD
                     run_gates(f, cfg)
                     warn(state, f"{len(blockers(review))} pre-review blocker(s) stand: the fix attempt broke "
-                                "the gates and was reverted", review=True)
+                                "the gates and was reverted", round="review")
         elif stage == "pack":
             if build_pack(f, cfg, state):
                 return blocked(f, state, "audit pack not built: over the size limit, or the gates did not run on this commit")

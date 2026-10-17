@@ -215,20 +215,20 @@ mutations:
   replace: ""
   test: tests.test_team.PipelineTests.test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack
 - label: a new review round keeps the previous round's review warnings
-  find: "    drop_review_warnings(state)\n    diff = f.out / \"diff.patch\"\n"
+  find: "    drop_round_warnings(state, \"review\")\n    diff = f.out / \"diff.patch\"\n"
   replace: "    diff = f.out / \"diff.patch\"\n"
   test: tests.test_team.PipelineTests.test_a_new_review_round_drops_the_previous_rounds_review_warnings
 - label: a standalone reviewer run keeps the previous round's review warnings
-  find: "    drop_review_warnings(state)\n    diff = f.out / \"diff.patch\"\n"
+  find: "    drop_round_warnings(state, \"review\")\n    diff = f.out / \"diff.patch\"\n"
   replace: "    diff = f.out / \"diff.patch\"\n"
   test: tests.test_team.PipelineTests.test_a_standalone_reviewer_run_drops_the_previous_rounds_review_warnings
 - label: a review round that gets no answer raises no warning
-  find: "    warn(state, \"no reviewer model returned a review\", review=True)\n    return None\n"
+  find: "    warn(state, \"no reviewer model returned a review\", round=\"review\")\n    return None\n"
   replace: "    return None\n"
   test: tests.test_team.PipelineTests.test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack
 - label: the pipeline warns twice about a review nobody answered
   find: "            review = run_reviewer(f, cfg, keys, state)\n"
-  replace: "            review = run_reviewer(f, cfg, keys, state)\n            if review is None:\n                warn(state, \"no reviewer model returned a review\", review=True)\n"
+  replace: "            review = run_reviewer(f, cfg, keys, state)\n            if review is None:\n                warn(state, \"no reviewer model returned a review\", round=\"review\")\n"
   test: tests.test_team.PipelineTests.test_a_pipeline_review_round_raises_its_warning_once
 - label: standalone gates run beside a running pipeline
   find: "    with run_lock(home):  # gates.log is also written by a running pipeline\n        return 0 if run_gates(f, cfg) else 1\n"
@@ -279,24 +279,24 @@ mutations:
   replace: "    if True:\n"
   test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
 - label: "a container is checked against no network at all"
-  find: "        problem = egress_problem(network or \"docker's default bridge\")\n"
+  find: "        problem = egress_problem(network or \"docker's default bridge\", live=True)\n"
   replace: "        problem = egress_problem()\n"
   test: tests.test_team.PipelineTests.test_a_container_may_only_use_the_network_whose_egress_rules_were_verified
 - label: "the pipeline starts a stage although the egress unit is down"
-  find: "        problem = None if stage == \"pack\" else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])\n"
+  find: "        problem = None if stage == \"pack\" else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"], live=True)\n"
   replace: "        problem = None\n"
   test: tests.test_team.PipelineTests.test_the_pipeline_is_blocked_before_any_container_starts_when_the_egress_unit_is_down
 - label: "the pipeline checks the wrong worker network"
-  find: "        problem = None if stage == \"pack\" else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])\n"
-  replace: "        problem = None if stage == \"pack\" else egress_problem(\"team-net\")\n"
+  find: "        problem = None if stage == \"pack\" else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"], live=True)\n"
+  replace: "        problem = None if stage == \"pack\" else egress_problem(\"team-net\", live=True)\n"
   test: tests.test_team.PipelineTests.test_the_pipeline_asks_about_the_configured_worker_network
 - label: "doctor checks the wrong worker network"
   find: "    egress = egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])\n"
   replace: "    egress = egress_problem()\n"
   test: tests.test_team.DoctorTests.test_doctor_reports_the_egress_problem
 - label: "a missing egress proof is trusted"
-  find: "    try:\n        verified = EGRESS_OK.read_text(encoding=\"utf-8\").strip()\n        age = time.time() - EGRESS_OK.stat().st_mtime\n    except OSError:\n"
-  replace: "    verified, age = (network or \"\"), 0.0\n    if False:\n"
+  find: "        try:\n            verified = EGRESS_OK.read_text(encoding=\"utf-8\").strip()\n            age = time.time() - EGRESS_OK.stat().st_mtime\n        except OSError:\n"
+  replace: "        verified, age = (network or \"\"), 0.0\n        if False:\n"
   test: tests.test_team.DoctorTests.test_an_active_egress_unit_is_not_proof_that_its_rules_are_still_there
 - label: "an old egress proof is trusted"
   find: "    if age > EGRESS_OK_MAX_AGE_S:\n"
@@ -334,3 +334,39 @@ mutations:
   find: "            state[\"reviewed_head\"] = head(f.repo)\n"
   replace: ""
   test: tests.test_team.PipelineTests.test_a_review_of_older_code_is_flagged_in_the_pack
+- label: "a container launch trusts the cached egress proof"
+  find: "egress_problem(network or \"docker's default bridge\", live=True)"
+  replace: "egress_problem(network or \"docker's default bridge\")"
+  test: tests.test_team.PipelineTests.test_a_container_may_only_use_the_network_whose_egress_rules_were_verified
+- label: "the pipeline trusts the cached egress proof"
+  find: "else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"], live=True)"
+  replace: "else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])"
+  test: tests.test_team.PipelineTests.test_the_pipeline_asks_about_the_configured_worker_network
+- label: "a live egress check reads the cached proof instead"
+  find: "    if live:\n        verified, why = live_egress()\n"
+  replace: "    if False:\n        verified, why = live_egress()\n"
+  test: tests.test_team.DoctorTests.test_a_launch_asks_the_root_check_itself_instead_of_trusting_a_cached_proof
+- label: "a failed live egress check is ignored"
+  find: "        if why:\n            return f\"the egress rules could not be verified just now"
+  replace: "        if False:\n            return f\"the egress rules could not be verified just now"
+  test: tests.test_team.DoctorTests.test_a_launch_asks_the_root_check_itself_instead_of_trusting_a_cached_proof
+- label: "the live egress check always goes through sudo"
+  find: "argv = EGRESS_CHECK if os.geteuid() == 0 else [\"sudo\", \"-n\", *EGRESS_CHECK]"
+  replace: "argv = [\"sudo\", \"-n\", *EGRESS_CHECK]"
+  test: tests.test_team.DoctorTests.test_a_launch_asks_the_root_check_itself_instead_of_trusting_a_cached_proof
+- label: "the live egress check may prompt for a password"
+  find: "[\"sudo\", \"-n\", *EGRESS_CHECK]  # one"
+  replace: "[\"sudo\", *EGRESS_CHECK]  # one"
+  test: tests.test_team.DoctorTests.test_a_launch_asks_the_root_check_itself_instead_of_trusting_a_cached_proof
+- label: "a new tester round keeps the previous round's warning"
+  find: "    drop_round_warnings(state, \"tester\")\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_new_tester_round_drops_the_previous_rounds_warning
+- label: "a standalone tester run keeps the previous round's warning"
+  find: "    drop_round_warnings(state, \"tester\")\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_standalone_tester_run_drops_the_previous_rounds_warning
+- label: "the tester warning is not remembered as a tester round's"
+  find: "\"the new tests may not exercise the feature\", round=\"tester\")"
+  replace: "\"the new tests may not exercise the feature\")"
+  test: tests.test_team.PipelineTests.test_a_new_tester_round_drops_the_previous_rounds_warning

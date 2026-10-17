@@ -64,7 +64,7 @@ Script chạy lại được nhiều lần. Mỗi khi `git pull` bản mới, ch
 nhật `/opt/team` và image. Script làm các việc sau:
 
 - cài docker/git nếu thiếu;
-- tạo mạng Docker `team-net` cho worker và service `team-egress` (iptables) để mạng đó chỉ ra được Internet; timer `team-egress-check` (20 giây một lần, chạy bằng root) hỏi lại iptables và subnet của `team-net`, rồi ghi bằng chứng vào `/run/team-egress.ok`. Conductor chỉ khởi động container có mạng khi bằng chứng đó mới (dưới 90 giây) và đúng mạng worker đang dùng;
+- tạo mạng Docker `team-net` cho worker và service `team-egress` (iptables) để mạng đó chỉ ra được Internet; timer `team-egress-check` (20 giây một lần, chạy bằng root) hỏi lại iptables và subnet của `team-net`, rồi ghi bằng chứng vào `/run/team-egress.ok`. Trước mỗi container có mạng, conductor chạy lại chính kiểm tra đó ngay lúc đó (`sudo -n /usr/local/sbin/team-egress --check`, qua một luật sudoers duy nhất `/etc/sudoers.d/team-egress-check`, khớp đúng dòng lệnh đó và không nhận tham số nào khác) và chỉ khởi động khi luật còn nguyên và đúng mạng worker đang dùng. Kiểm tra thất bại thì dừng luôn các container đang chạy trên `team-net`; `doctor` chỉ đọc bằng chứng của timer (dưới 90 giây);
 - thêm 4 GB swap nếu máy chưa có;
 - tạo user và thư mục;
 - tạo wrapper `/usr/local/bin/team`;
@@ -257,7 +257,7 @@ Không đảm bảo, cần bạn tự quản:
 | worker thoát ngay, log báo lỗi config OpenCode | phiên bản OpenCode bạn cài không nhận một khoá trong `scripts/team/opencode.json`: bỏ khoá đó, chạy lại setup. Kiểm tra: `docker run --rm team-worker opencode --version` |
 | "another pipeline is running" | mỗi lúc chỉ chạy một pipeline (máy 8 GB, dùng chung với CI); chờ hoặc xem `team status` |
 | `blocked: …` | xem `out/*.log` và `gates.log`, sửa spec hoặc model, rồi `team run ID` để chạy tiếp |
-| `BLOCKED: ... egress ...` / worker không gọi được API | conductor không khởi động container có mạng khi `team-egress` tắt, khi `/run/team-egress.ok` thiếu hoặc cũ hơn 90 giây (luật iptables đã bị xoá, `iptables -F`, firewall reload), hoặc khi `TEAM_WORKER_NETWORK`/`TEAM_GATES_NETWORK` không phải mạng đã được kiểm tra (chỉ `team-net` có luật); chạy lại `setup-vps-team.sh`. Kiểm tra: `sudo /usr/local/sbin/team-egress --check`, `journalctl -u team-egress-check`, `docker network inspect team-net`. Nếu bạn gọi model qua proxy trong mạng nội bộ, hãy sửa `/usr/local/sbin/team-egress`. |
+| `BLOCKED: ... egress ...` / worker không gọi được API | conductor không khởi động container có mạng khi `team-egress` tắt, khi `sudo -n team-egress --check` thất bại (luật iptables đã bị xoá, `iptables -F`, firewall reload, hoặc thiếu luật sudoers: chạy lại setup), hoặc khi `TEAM_WORKER_NETWORK`/`TEAM_GATES_NETWORK` không phải mạng đã được kiểm tra (chỉ `team-net` có luật); chạy lại `setup-vps-team.sh`. Kiểm tra: `sudo /usr/local/sbin/team-egress --check`, `journalctl -u team-egress-check`, `docker network inspect team-net`. Nếu bạn gọi model qua proxy trong mạng nội bộ, hãy sửa `/usr/local/sbin/team-egress`. |
 | `BLOCKED: every coder model run failed, last error: ... free-models-per-day` | hết quota `:free` trong ngày của OpenRouter: chờ sang ngày, nạp 5 credit, hoặc thêm model của provider khác vào `TEAM_MODELS_CODER` |
 | test cần cài thư viện | đặt `TEAM_GATES_SETUP` trong `team.env` (bước này có mạng, các lệnh gates thì không) |
 | pack quá dài | tách feature nhỏ hơn, hoặc `team pack ID --force` (tốn quota Claude hơn) |

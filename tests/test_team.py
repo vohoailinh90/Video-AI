@@ -467,6 +467,48 @@ class DoctorTests(Sandbox):
             problem, _ = self.egress_with(0, **kwargs)
             self.assertIn(expect, problem or "", kwargs)
 
+    def live_egress(self, returncode: int = 0, stdout: str = "team-net\n", stderr: str = "", root: bool = False,
+                    network: str = "team-net", raises: Exception | None = None, proof: str | None = None):
+        """team.egress_problem(network, live=True) when `team-egress --check` exits `returncode` right now."""
+        runtime = self.tmp / "systemd-runtime"
+        runtime.mkdir(exist_ok=True)
+        ok = self.tmp / "egress.ok"
+        ok.unlink(missing_ok=True)
+        if proof is not None:
+            ok.write_text(proof + "\n")
+        real_which = shutil.which
+        which = lambda n, *a, **k: "/bin/systemctl" if n == "systemctl" else real_which(n, *a, **k)  # noqa: E731
+        calls = []
+
+        def fake_run(argv, *a, **k):
+            calls.append(argv)
+            if argv[0] == "systemctl":
+                return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            if raises:
+                raise raises
+            return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+        with mock.patch.object(team, "SYSTEMD_RUNTIME", runtime), mock.patch.object(team, "EGRESS_OK", ok), \
+                mock.patch.object(team.os, "geteuid", lambda: 0 if root else 1001), \
+                mock.patch.object(team.shutil, "which", which), mock.patch.object(team.subprocess, "run", fake_run):
+            return team.egress_problem(network, live=True), calls
+
+    def test_a_launch_asks_the_root_check_itself_instead_of_trusting_a_cached_proof(self):
+        # Codex's ninth review: a proof file is up to 90 s old, and the rules can be flushed inside that window.
+        problem, calls = self.live_egress()
+        self.assertIsNone(problem)
+        self.assertIn(["sudo", "-n", "/usr/local/sbin/team-egress", "--check"], calls)
+        self.assertIsNone(self.live_egress(root=True)[0])
+        self.assertIn(["/usr/local/sbin/team-egress", "--check"], self.live_egress(root=True)[1])
+        self.assertIsNone(self.live_egress(proof=None)[0], "no proof file is needed when the check itself passes")
+        for kwargs, expect in (({"returncode": 1, "stdout": "", "stderr": "team-egress: rule missing: INPUT from 172.30.99.0/24\n"},
+                                "rule missing: INPUT"),
+                               ({"returncode": 1, "stdout": "", "stderr": "", "proof": "team-net"}, "exited 1"),
+                               ({"raises": FileNotFoundError("sudo")}, "sudo"),
+                               ({"raises": subprocess.TimeoutExpired("sudo", 30)}, "timed out"),
+                               ({"network": "bridge"}, "bridge")):
+            problem, _ = self.live_egress(**kwargs)
+            self.assertIn(expect, problem or "", kwargs)
+
     def test_the_egress_check_is_skipped_where_there_is_no_systemd(self):
         self.assertIsNone(self.egress_with(3, systemd=False)[0])
         self.assertIsNone(self.egress_with(None)[0])
@@ -475,12 +517,12 @@ class DoctorTests(Sandbox):
     def test_doctor_reports_the_egress_problem(self):
         asked = []
 
-        def down(network=None):
-            asked.append(network)
+        def down(network=None, live=False):
+            asked.append((network, live))
             return "team-egress.service is not active: test"
         with mock.patch.object(team, "egress_problem", down):
             self.assertIn("team-egress.service is not active: test", self.problems()[0])
-        self.assertEqual(asked, ["team-net"], "doctor checks the network the workers are configured to use")
+        self.assertEqual(asked, [("team-net", False)], "doctor reads the proof file; only a launch runs the check itself")
 
     def test_world_readable_keys_are_a_problem(self):
         (self.home / "workers.env").chmod(0o644)
@@ -700,6 +742,34 @@ class PipelineTests(Sandbox):
         self.assertEqual(self.run_pipeline()[0], 0)
         self.assertTrue(any("already pass" in w for w in f.load_state()["warnings"]))
 
+    def test_a_new_tester_round_drops_the_previous_rounds_warning(self):
+        # Codex's ninth review: after "acceptance commands already pass", a rerun from `tester` with corrected tests kept the
+        # warning, so the pack told the auditor the current tests already passed.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST + WRITE_FEATURE, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        self.assertTrue(any("already pass" in w for w in f.load_state()["warnings"]))
+        state = f.load_state()
+        state["warnings"].append("kept: a warning another stage raised and that still applies")
+        f.save_state(state)
+        failing = 'with open(work + "/tests/check_feature.py", "w") as fh:\n    fh.write("from feature import add\\nassert add(2, 3) == 6\\n")'
+        self.scenario(tester=failing, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        run_cli("run", "F1", "--from", "tester")
+        warnings = f.load_state()["warnings"]
+        self.assertFalse(any("already pass" in w for w in warnings), warnings)
+        self.assertIn("kept: a warning another stage raised and that still applies", warnings)
+
+    def test_a_standalone_tester_run_drops_the_previous_rounds_warning(self):
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST + WRITE_FEATURE, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        self.assertTrue(any("already pass" in w for w in f.load_state()["warnings"]))
+        more = 'with open(work + "/tests/check_feature.py", "a") as fh:\n    fh.write("\\n# a stricter case\\n")'
+        self.scenario(tester=more)
+        code, out = run_cli("work", "tester", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(any("already pass" in w for w in f.load_state().get("warnings", [])))
+
     def test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack(self):
         # Found by Codex's review of the Video-AI hand-over: a rerun from `review` (the repair round after a BLOCK) in which
         # every reviewer fails used to keep the last run's prereview.md, so the auditor read an obsolete review as current.
@@ -783,7 +853,7 @@ class PipelineTests(Sandbox):
         # the whole LAN and metadata endpoint, so no worker may start; doctor reporting it is not enough.
         f = self.new_feature()
         self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
-        with mock.patch.object(team, "egress_problem", lambda network=None: "team-egress.service is not active: test"):
+        with mock.patch.object(team, "egress_problem", lambda network=None, live=False: "team-egress.service is not active: test"):
             code, out = run_cli("run", "F1")
         self.assertEqual(code, 2, out)
         self.assertIn("team-egress.service is not active: test", out)
@@ -797,7 +867,7 @@ class PipelineTests(Sandbox):
         # The pre-stage check can be raced (the unit stops mid-run) and `team work` skips it: the launch itself refuses.
         self.new_feature()
         self.scenario(tester=WRITE_TEST)
-        with mock.patch.object(team, "egress_problem", lambda network=None: "team-egress.service is not active: test"):
+        with mock.patch.object(team, "egress_problem", lambda network=None, live=False: "team-egress.service is not active: test"):
             code, out = run_cli("work", "tester", "F1")
             self.assertNotEqual(code, 0)
             self.assertIn("team-egress.service is not active: test", out)
@@ -822,8 +892,8 @@ class PipelineTests(Sandbox):
         self.new_feature()
         asked = []
 
-        def verified(network=None):
-            asked.append(network)
+        def verified(network=None, live=False):
+            asked.append((network, live))
             return None if network == "team-net" else f"network {network} is not covered by the egress rules"
         work = self.tmp / "gate-work"
         work.mkdir()
@@ -838,7 +908,7 @@ class PipelineTests(Sandbox):
                 launch("bridge")
             self.assertIn("network bridge is not covered", str(refused.exception))
             self.assertEqual(launch("none"), 0)
-        self.assertEqual(asked, ["team-net", "bridge"], "a container without a network is not asked about")
+        self.assertEqual(asked, [("team-net", True), ("bridge", True)], "a launch re-proves the rules; a container without a network is not asked about")
 
     def test_the_pipeline_asks_about_the_configured_worker_network(self):
         f = self.new_feature()
@@ -846,15 +916,15 @@ class PipelineTests(Sandbox):
         self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
         asked = []
 
-        def verified(network=None):
-            asked.append(network)
+        def verified(network=None, live=False):
+            asked.append((network, live))
             return None if network == "team-net" else f"network {network} is not covered by the egress rules"
         with mock.patch.object(team, "egress_problem", verified):
             code, out = run_cli("run", "F1")
         self.assertEqual(code, 2, out)
         self.assertIn("network my-net is not covered", f.load_state()["stage"])
         self.assertEqual(self.docker_runs(), [])
-        self.assertEqual(asked[0], "my-net")
+        self.assertEqual(asked[0], ("my-net", True))
 
     def test_gates_run_for_other_acceptance_commands_do_not_vouch_for_the_pack(self):
         # Codex's eighth review: acceptance.md is not in the git checkout, so editing its commands after a gate run leaves
@@ -1570,7 +1640,11 @@ class EgressScriptTests(unittest.TestCase):
         self.rules, self.subnet, self.ok = self.tmp / "rules", self.tmp / "subnet", self.tmp / "egress.ok"
         (self.bin / "iptables").write_text(
             '#!/bin/sh\ncase "$1" in\n  -C) shift; grep -qxF -- "$*" "$FAKE_RULES" ;;\n  -I) shift; echo "$*" >> "$FAKE_RULES" ;;\nesac\n')
-        (self.bin / "docker").write_text('#!/bin/sh\ncat "$FAKE_SUBNET"\n')
+        self.running, self.killed = self.tmp / "running", self.tmp / "killed"
+        self.running.write_text("")
+        (self.bin / "docker").write_text(
+            '#!/bin/sh\ncase "$1 $2" in\n  "network inspect") cat "$FAKE_SUBNET" ;;\n  "ps -q") case "$*" in *network=team-net*) cat "$FAKE_RUNNING" ;; esac ;;\n'
+            '  "kill "*) shift; printf "%s\\n" "$@" >> "$FAKE_KILLED" ;;\nesac\n')
         for fake in self.bin.iterdir():
             fake.chmod(0o755)
         self.set_state(self.RULES, "172.30.99.0/24")
@@ -1581,8 +1655,9 @@ class EgressScriptTests(unittest.TestCase):
 
     def run_script(self, *args: str) -> subprocess.CompletedProcess:
         env = {**os.environ, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "FAKE_RULES": str(self.rules),
-               "FAKE_SUBNET": str(self.subnet), "TEAM_EGRESS_OK": str(self.ok)}
+               "FAKE_SUBNET": str(self.subnet), "FAKE_RUNNING": str(self.running), "FAKE_KILLED": str(self.killed)}
         # umask 077: without the chmod in the script the proof would be unreadable to the team user.
+        args = [*args, str(self.ok)] if args == ("--check",) else args  # the proof path is the second argument
         return subprocess.run(["bash", "-c", 'umask 077; exec bash "$0" "$@"', str(self.script), *args],
                               capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
 
@@ -1590,6 +1665,7 @@ class EgressScriptTests(unittest.TestCase):
         result = self.run_script("--check")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.ok.read_text(), "team-net\n")
+        self.assertEqual(result.stdout, "team-net\n", "a launch reads the verified network from the check's own output")
         self.assertEqual(stat.S_IMODE(self.ok.stat().st_mode), 0o644, "the team user must be able to read it")
 
     def test_check_removes_the_proof_when_a_rule_is_gone(self):
@@ -1601,6 +1677,15 @@ class EgressScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, gone)
             self.assertFalse(self.ok.exists(), f"stale proof left behind after {gone} went missing")
             self.assertIn("missing", result.stderr, gone)
+
+    def test_a_failed_check_stops_the_containers_already_running_on_the_worker_network(self):
+        # Codex's ninth review: removing the proof does not stop a container that started before the rules went away.
+        self.running.write_text("c1\nc2\n")
+        self.assertEqual(self.run_script("--check").returncode, 0)
+        self.assertFalse(self.killed.exists(), "nothing is stopped while the rules are live")
+        self.set_state(self.RULES[1:], "172.30.99.0/24")
+        self.assertNotEqual(self.run_script("--check").returncode, 0)
+        self.assertEqual(self.killed.read_text().split(), ["c1", "c2"])
 
     def test_check_refuses_a_worker_network_the_rules_do_not_match(self):
         self.set_state(self.RULES, "10.5.0.0/24")
@@ -1623,6 +1708,12 @@ class EgressScriptTests(unittest.TestCase):
         self.assertIn("/etc/systemd/system/team-egress-check.timer", script)
         self.assertIn("ExecStart=/usr/local/sbin/team-egress --check", script)
         self.assertIn("systemctl enable --now team-egress-check.timer", script)
+        # the conductor runs the check itself before every launch, as root, through exactly one sudo rule
+        self.assertIn("printf 'team ALL=(root) NOPASSWD: /usr/local/sbin/team-egress --check\\n'", script)
+        self.assertIn("/etc/sudoers.d/team-egress-check", script)
+        self.assertLess(script.index("/etc/sudoers.d/team-egress-check"), script.index("systemctl enable --now team-egress-check.timer"))
+        self.assertLess(script.index('visudo -cf "${egress_rule}"'), script.index("/etc/sudoers.d/team-egress-check"),
+                        "the rule is checked before it is installed")
         self.assertRegex(script, r"OnUnitActiveSec=\d+")
         timer_seconds = int(re.search(r"OnUnitActiveSec=(\d+)", script)[1])
         self.assertLess(timer_seconds * 2, team.EGRESS_OK_MAX_AGE_S, "a missed run must not make the proof stale")
@@ -1709,6 +1800,13 @@ class CodexTeamInstallTests(unittest.TestCase):
         self.assertRegex(script, r'command -v iptables >/dev/null \|\| \{ echo "[^"]*iptables[^"]*" >&2; exit 1; \}')
         early = script.index("command -v iptables >/dev/null || {")
         self.assertLess(early, script.index("useradd --system"), "checked before the first side effect")
+
+    def test_setup_requires_sudo_before_its_first_side_effect(self):
+        # The per-launch egress check goes through a sudoers rule, which setup can only install and check with sudo's visudo.
+        script = "\n".join(self.setup_lines())
+        self.assertIn("command -v visudo >/dev/null || need+=(sudo)", script)
+        guard = script.index("command -v visudo >/dev/null || {")
+        self.assertLess(guard, script.index("useradd --system"), "checked before the first side effect")
 
     def test_setup_installs_the_video_team_only_when_asked(self):
         script = "\n".join(self.setup_lines())

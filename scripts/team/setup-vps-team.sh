@@ -80,6 +80,8 @@ command -v git >/dev/null || need+=(git)
 command -v python3 >/dev/null || need+=(python3)
 # Worker egress is limited with iptables (below); without it every worker would reach this host and the cloud metadata service.
 command -v iptables >/dev/null || need+=(iptables)
+# The conductor's per-launch egress check and the team wrapper both go through sudo (and its visudo, to check the rule).
+command -v visudo >/dev/null || need+=(sudo)
 # Codex's Linux sandbox is bubblewrap: without it codex-lead's commands cannot run.
 if [ "${WITH_CODEX}" -eq 1 ]; then command -v bwrap >/dev/null || need+=(bubblewrap); fi
 if [ "${#need[@]}" -gt 0 ]; then
@@ -87,6 +89,7 @@ if [ "${#need[@]}" -gt 0 ]; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${need[@]}"
 fi
 command -v iptables >/dev/null || { echo "iptables is required to limit worker egress and could not be installed" >&2; exit 1; }
+command -v visudo >/dev/null || { echo "sudo is required (the egress check rule) and could not be installed" >&2; exit 1; }
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || { echo "python3 >= 3.9 is required" >&2; exit 1; }
 getent group docker >/dev/null || { echo "no docker group: install Docker from its apt package" >&2; exit 1; }
 
@@ -169,29 +172,36 @@ echo "== worker network team-net (internet only)"
 docker network inspect team-net >/dev/null 2>&1 || docker network create --subnet "${WORKER_SUBNET}" team-net >/dev/null
 cat > /usr/local/sbin/team-egress <<EGRESS
 #!/usr/bin/env bash
-# team-egress          install the rules (the team-egress unit runs this at boot)
-# team-egress --check  prove they are live: ask iptables about every rule and docker about the subnet, then write the
-#                      name of the verified network to \${ok}, which the conductor reads before it starts a worker.
-#                      Any miss removes that proof. A oneshot unit stays "active" after its rules are flushed, which is
-#                      why the unit's state alone is not trusted.
+# team-egress                  install the rules (the team-egress unit runs this at boot)
+# team-egress --check [PROOF]  prove they are live: ask docker for the subnet and iptables about every rule. The answer is
+#                              the verified network's name on stdout and in PROOF (default /run/team-egress.ok, which a
+#                              timer keeps fresh). Any miss removes PROOF, stops every container still running on the
+#                              worker network and exits 1. The conductor runs this through sudo before each container it
+#                              starts, so a flushed firewall refuses the launch instead of being noticed a minute later.
 set -euo pipefail
 network=team-net
 subnet=${WORKER_SUBNET}
-ok="\${TEAM_EGRESS_OK:-/run/team-egress.ok}"
 dests="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10"
 if [ "\${1:-}" = "--check" ]; then
+  ok="\${2:-/run/team-egress.ok}"
   rm -f "\${ok}"
-  actual="\$(docker network inspect "\${network}" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | xargs)"
-  [ "\${actual}" = "\${subnet}" ] || { echo "team-egress: \${network} has subnet '\${actual}', the rules cover '\${subnet}'" >&2; exit 1; }
+  fail() {
+    echo "team-egress: \$*" >&2
+    docker ps -q --filter "network=\${network}" | xargs -r docker kill >/dev/null 2>&1 || true
+    exit 1
+  }
+  actual="\$(docker network inspect "\${network}" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | xargs)" \\
+    || fail "cannot inspect \${network}"
+  [ "\${actual}" = "\${subnet}" ] || fail "\${network} has subnet '\${actual}', the rules cover '\${subnet}'"
   for dest in \${dests}; do
     iptables -C DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP 2>/dev/null \\
-      || { echo "team-egress: rule missing: DOCKER-USER from \${subnet} to \${dest}" >&2; exit 1; }
+      || fail "rule missing: DOCKER-USER from \${subnet} to \${dest}"
   done
-  iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null \\
-    || { echo "team-egress: rule missing: INPUT from \${subnet}" >&2; exit 1; }
+  iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null || fail "rule missing: INPUT from \${subnet}"
   printf '%s\\n' "\${network}" > "\${ok}.tmp"
   chmod 644 "\${ok}.tmp"
   mv -f "\${ok}.tmp" "\${ok}"
+  cat "\${ok}"
   exit 0
 fi
 for dest in \${dests}; do
@@ -240,6 +250,14 @@ AccuracySec=1s
 [Install]
 WantedBy=timers.target
 UNIT
+# The conductor runs as user team and cannot read iptables. It re-proves the rules before every container it starts, as
+# root, through this one rule: the command line must match exactly, so no other argument (a different proof path
+# included) is allowed.
+egress_rule="$(mktemp)"
+printf 'team ALL=(root) NOPASSWD: /usr/local/sbin/team-egress --check\n' > "${egress_rule}"
+visudo -cf "${egress_rule}" >/dev/null
+install -o root -g root -m 440 "${egress_rule}" /etc/sudoers.d/team-egress-check
+rm -f "${egress_rule}"
 # iptables was required above, so there is no "continue without limits" path: a failure here stops setup (set -e).
 systemctl daemon-reload
 systemctl enable --now team-egress.service >/dev/null
