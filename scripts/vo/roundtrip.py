@@ -57,7 +57,7 @@ def items_from_video(video: Path, lines_path: Path, label: str, work: Path) -> l
             check=True,
         )
         items.append({"engine": label, "voice": "mix", "id": line["id"], "group": "narration",
-                      "text": line["text"], "path": str(wav)})
+                      "text": line.get("speak", line["text"]), "path": str(wav)})
     return items
 
 

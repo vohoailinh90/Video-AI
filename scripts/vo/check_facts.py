@@ -7,7 +7,8 @@ A script decides, not a model, the way github-radar's gates do:
     path must exist;
   * every number and every Latin-letter token (a name, an acronym, a command) in a line's text must occur in the fields that line
     cites; Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
-  * the same two checks run on the text a viewer reads in index.html (script and style are skipped), against the whole source;
+  * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
+    fixed labels, are skipped), against the whole source;
   * each command in try_it.commands must appear on screen exactly as the digest gives it.
 
 Numbers are compared without thousands separators (62.958 on screen equals 62958 in the facts). A Vietnamese word typed without
@@ -31,24 +32,30 @@ SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
 class Visible(HTMLParser):
-    """Text a viewer can read: everything in <body> except script, style and template."""
+    """Text a viewer can read: everything in <body> except script, style and template, and except elements marked data-label
+    (fixed labels of the video template, which are not facts about the digest)."""
     SKIP = {"script", "style", "template", "title", "head"}
+    VOID = {"br", "img", "meta", "link", "input", "hr", "source", "wbr"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.depth = 0
+        self.stack = []      # (tag, skipped) for every open element
         self.parts = []
 
     def handle_starttag(self, tag, attrs):
-        if tag in self.SKIP:
-            self.depth += 1
+        if tag in self.VOID:
+            return
+        skipped = tag in self.SKIP or any(name == "data-label" for name, _ in attrs)
+        self.stack.append((tag, skipped))
 
     def handle_endtag(self, tag):
-        if tag in self.SKIP and self.depth:
-            self.depth -= 1
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                return
 
     def handle_data(self, data):
-        if not self.depth and data.strip():
+        if data.strip() and not any(skipped for _, skipped in self.stack):
             self.parts.append(data.strip())
 
 
