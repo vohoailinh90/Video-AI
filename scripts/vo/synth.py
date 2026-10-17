@@ -1,6 +1,7 @@
 """Synthesize narration clips with VieNeu-TTS (CPU/ONNX) from a voiceover.json file.
 
-Writes one <id>.wav per line (48 kHz mono) and a manifest.json that roundtrip.py and revoice.py understand.
+Writes one <id>.wav per line (48 kHz mono) and a manifest.json that roundtrip.py and revoice.py understand. A line's `speak`,
+when it has one, is what is synthesized (and what roundtrip.py compares against); `text` is what the viewer reads.
 Synthesis is sampled, so two runs give slightly different clips: use --only to redo a single line until it checks out.
 
 usage:
@@ -52,14 +53,15 @@ def main() -> int:
     for line in lines:
         if wanted and line["id"] not in wanted:
             continue
-        audio = tts.infer(line["text"], voice=args.voice)
+        spoken = line.get("speak", line["text"])  # numbers spelled out by scripts/radar/numbers_vi.py, for example
+        audio = tts.infer(spoken, voice=args.voice)
         path = out / f"{line['id']}.wav"
         tts.save(audio, str(path))
         info = sf.info(str(path))
         seconds = info.frames / info.samplerate
         entries[line["id"]] = {
             "engine": "vieneu-v3-turbo", "voice": args.voice, "id": line["id"], "group": "narration",
-            "text": line["text"], "path": str(path), "audio_seconds": round(seconds, 3), "sample_rate": info.samplerate,
+            "text": spoken, "path": str(path), "audio_seconds": round(seconds, 3), "sample_rate": info.samplerate,
         }
         print(f"{line['id']}: {seconds:.2f} s, {info.samplerate} Hz, {info.channels} ch", flush=True)
 

@@ -1,0 +1,356 @@
+{
+  "draft": {
+    "analogy": "Giống như một người quản đốc điều phối cùng lúc nhiều thợ lập trình làm việc trên các bản sao công trình độc lập, sau đó chọn bản hoàn thiện tốt nhất để ghép lại.",
+    "caveats": [
+      "Dự án được khởi tạo từ năm 2026 và có lượng lớn open issues phản ánh tốc độ cập nhật liên tục.",
+      "Người dùng phải tự chuẩn bị tài khoản và gói thuê bao cá nhân cho từng CLI agent sử dụng.",
+      "Tương tác qua điện thoại cần cài thêm ứng dụng di động và thiết lập kết nối relay."
+    ],
+    "facebook": {
+      "caption": "Orca: ADE điều phối song song hàng loạt AI coding agent\n- Chạy Claude Code, Codex, Pi cùng lúc trên từng worktree\n- Terminal chia nhỏ không giới hạn render WebGL\n- Giám sát và điều khiển agent trực tiếp từ điện thoại",
+      "hashtags": [
+        "Orca",
+        "AIAgents",
+        "DevTools",
+        "OpenSource"
+      ]
+    },
+    "glossary": [
+      {
+        "meaning": "Agent Development Environment - Môi trường chuyên dụng để phát triển và điều phối các AI agent.",
+        "term": "ADE"
+      },
+      {
+        "meaning": "Tính năng của Git cho phép làm việc trên nhiều nhánh mã nguồn đồng thời trong các thư mục tách biệt.",
+        "term": "Worktree"
+      },
+      {
+        "meaning": "Tính năng chia nhỏ một màn hình dòng lệnh thành nhiều khung nhìn song song cạnh nhau.",
+        "term": "Terminal Split"
+      }
+    ],
+    "guide": {
+      "next": [
+        "Ghép nối ứng dụng Mobile Companion trên iOS hoặc Android để nhận thông báo khi agent hoàn thành công việc.",
+        "Khai thác chế độ Design Mode trong cửa sổ Chromium để gửi HTML, CSS và ảnh chụp trực tiếp vào prompt của agent."
+      ],
+      "outcome": "Cài đặt thành công Orca Desktop để chạy song song các CLI agent trên các git worktree độc lập, có thể theo dõi tiến độ từ máy tính hoặc điện thoại.",
+      "requirements": [
+        {
+          "detail": "Orca cung cấp bộ cài đặt trực tiếp cho macOS (Apple Silicon / Intel), Windows (.exe) và Linux (AppImage).",
+          "evidence": "README",
+          "item": "Hệ điều hành macOS, Windows hoặc Linux",
+          "link_ref": 0
+        },
+        {
+          "detail": "Tùy chọn thay thế nếu bạn muốn cài đặt qua dòng lệnh thay vì tải file bộ cài đặt trực tiếp.",
+          "evidence": "README",
+          "item": "Trình quản lý gói Homebrew (macOS) hoặc yay (Arch Linux)",
+          "link_ref": null
+        },
+        {
+          "detail": "Bất kỳ CLI agent nào như Claude Code, Codex, OpenCode, Cursor, Pi hoặc Goose.",
+          "evidence": "README",
+          "item": "Gói thuê bao và công cụ dòng lệnh của agent",
+          "link_ref": null
+        }
+      ],
+      "steps": [
+        {
+          "commands": [
+            "brew install --cask stablyai/orca/orca"
+          ],
+          "do": [
+            "Mở terminal trên macOS và chạy lệnh brew install.",
+            "Nếu dùng Arch Linux, gõ lệnh yay thay thế, hoặc tải file cài đặt trực tiếp theo hệ điều hành tương ứng."
+          ],
+          "evidence": "README",
+          "expect": "Orca được tải về và cài đặt hoàn tất vào thư mục ứng dụng của máy tính.",
+          "if_fails": "Kiểm tra kết nối mạng hoặc chuyển sang tải trực tiếp bộ cài đặt cho hệ điều hành của bạn.",
+          "link_ref": 0,
+          "snippet_ref": null,
+          "title": "Cài đặt Orca Desktop trên máy tính",
+          "why": "Cài đặt ứng dụng ADE vào hệ thống để bắt đầu điều phối công việc."
+        },
+        {
+          "commands": [],
+          "do": [
+            "Mở ứng dụng Orca vừa cài đặt trên máy tính.",
+            "Sử dụng tính năng Parallel Worktrees để tách một yêu cầu prompt ra các git worktree biệt lập."
+          ],
+          "evidence": "README",
+          "expect": "Các git worktree được khởi tạo riêng biệt cho từng agent trong giao diện điều phối.",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Tạo worktree độc lập cho từng agent",
+          "why": "Cách ly không gian làm việc giữa các agent để tránh xung đột mã nguồn khi chạy song song."
+        },
+        {
+          "commands": [],
+          "do": [
+            "Chạy các CLI agent (Codex, Claude Code, OpenCode...) trong từng cửa sổ terminal split.",
+            "So sánh kết quả giữa các agent và hợp nhất (merge) phiên bản tốt nhất.",
+            "Cài thêm ứng dụng Mobile Companion trên điện thoại nếu muốn theo dõi và điều khiển từ xa."
+          ],
+          "evidence": "README",
+          "expect": "Các agent chạy song song trong các terminal split hiển thị WebGL, diff mã nguồn hiển thị trực tiếp để chú thích và hợp nhất.",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Chạy agent song song và theo dõi kết quả",
+          "why": "Khởi động các CLI agent đã cài sẵn và quản lý tiến độ xử lý tác vụ."
+        }
+      ],
+      "troubleshooting": [],
+      "verify": "Mở Orca Desktop, các phân vùng terminal split hiển thị đầy đủ, gõ lệnh gọi agent hoạt động bình thường trên từng worktree."
+    },
+    "hook": "Chạy Codex, Claude Code và Pi song song trên từng git worktree riêng biệt trong một cửa sổ.",
+    "how_it_works": {
+      "components": [
+        {
+          "evidence": "README",
+          "icon": "monitor",
+          "name": "Orca Desktop",
+          "role": "Môi trường phát triển tích hợp (ADE) chứa trình biên tập, git worktree và terminal splits."
+        },
+        {
+          "evidence": "README",
+          "icon": "bot",
+          "name": "CLI Coding Agents",
+          "role": "Các trợ lý dòng lệnh như Claude Code, Codex, Pi chạy trực tiếp trong terminal."
+        },
+        {
+          "evidence": "README",
+          "icon": "git-branch",
+          "name": "Git Worktrees",
+          "role": "Không gian làm việc mã nguồn biệt lập cho từng agent xử lý song song."
+        },
+        {
+          "evidence": "README",
+          "icon": "smartphone",
+          "name": "Mobile Companion",
+          "role": "Ứng dụng trên iOS và Android để giám sát tiến độ và gửi lệnh theo dõi từ xa."
+        }
+      ],
+      "flow": [
+        [
+          0,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          0
+        ]
+      ],
+      "steps": [
+        {
+          "evidence": "README",
+          "text": "Orca chia một câu prompt thành nhiều nhánh git worktree biệt lập, cho phép nhiều agent cùng giải một bài toán mà không đè mã của nhau.",
+          "title": "Tách nhánh Parallel Worktrees"
+        },
+        {
+          "evidence": "README",
+          "text": "Tích hợp công nghệ terminal Ghostty với khả năng chia cửa sổ vô hạn, render WebGL và lưu trữ lịch sử scrollback ngay cả khi khởi động lại.",
+          "title": "Hiển thị terminal WebGL"
+        },
+        {
+          "evidence": "README",
+          "text": "Hệ thống relay hỗ trợ ghép nối ứng dụng di động với máy tính cá nhân hoặc kết nối SSH tới máy chủ từ xa có cấu hình mạnh.",
+          "title": "Đồng bộ đa nền tảng"
+        }
+      ]
+    },
+    "learn": [
+      "Sử dụng Git Worktree để cô lập môi trường làm việc khi cho nhiều AI cùng chỉnh sửa một dự án.",
+      "Tối ưu giao diện terminal bằng WebGL để duy trì hiệu năng cao khi mở nhiều tab chia nhỏ.",
+      "Kết nối thiết bị di động với môi trường runtime máy tính để quản trị tác vụ nền linh hoạt."
+    ],
+    "one_liner": "ADE mã nguồn mở cho phép chạy song song nhiều AI coding agent bằng gói thuê bao cá nhân trên máy tính để bàn, điện thoại và máy chủ từ xa.",
+    "problem": "Lập trình viên muốn thử nghiệm nhiều agent AI cùng lúc trên cùng một dự án nhưng gặp khó khăn khi quản lý xung đột mã nguồn, tài nguyên dòng lệnh và phải liên tục chuyển đổi ngữ cảnh làm việc.",
+    "title": "Orca: Môi trường ADE điều phối song song nhiều AI coding agent",
+    "who_for": [
+      "Lập trình viên muốn so sánh song song giải pháp của nhiều AI coding agent như Codex, Claude Code, OpenCode.",
+      "Kỹ sư phần mềm cần quản lý nhiều nhánh git và agent độc lập mà không bị gián đoạn mạch làm việc.",
+      "Người xây dựng sản phẩm muốn giám sát và phản hồi tiến độ chạy code của agent từ điện thoại."
+    ]
+  },
+  "facts": {
+    "bucket": "ai",
+    "forks": 6040,
+    "full_name": "stablyai/orca",
+    "language": "TypeScript",
+    "license": "MIT",
+    "links": [
+      [
+        "Download Orca",
+        "https://onorca.dev/download"
+      ],
+      [
+        "macOS Apple Silicon",
+        "https://github.com/stablyai/orca/releases/latest/download/orca-macos-arm64.dmg"
+      ],
+      [
+        "macOS Intel",
+        "https://github.com/stablyai/orca/releases/latest/download/orca-macos-x64.dmg"
+      ],
+      [
+        "Windows .exe",
+        "https://github.com/stablyai/orca/releases/latest/download/orca-windows-setup.exe"
+      ],
+      [
+        "Linux AppImage",
+        "https://github.com/stablyai/orca/releases/latest/download/orca-linux.AppImage"
+      ],
+      [
+        "All builds",
+        "https://github.com/stablyai/orca/releases/latest"
+      ],
+      [
+        "Install guide",
+        "https://www.onorca.dev/docs/android-apk"
+      ],
+      [
+        "Docs →",
+        "https://www.onorca.dev/docs/cli/overview"
+      ],
+      [
+        "Quick open",
+        "https://www.onorca.dev/docs/model/quick-open"
+      ],
+      [
+        "Account switcher &amp; usage tracking",
+        "https://www.onorca.dev/docs/agents/usage-tracking"
+      ],
+      [
+        "Rich repo previews",
+        "https://www.onorca.dev/docs/editing/markdown"
+      ],
+      [
+        "Computer Use",
+        "https://www.onorca.dev/docs/cli/computer-use"
+      ],
+      [
+        "Notifications and unread state",
+        "https://www.onorca.dev/docs/notifications"
+      ],
+      [
+        "Claude Code",
+        "https://docs.anthropic.com/claude/docs/claude-code"
+      ],
+      [
+        "Codex",
+        "https://github.com/openai/codex"
+      ],
+      [
+        "Grok",
+        "https://x.ai/cli"
+      ],
+      [
+        "Cursor",
+        "https://cursor.com/cli"
+      ],
+      [
+        "GitHub Copilot",
+        "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli"
+      ],
+      [
+        "Muse",
+        "https://dev.meta.ai/docs/muse-code"
+      ],
+      [
+        "DeepSeek Harness",
+        "https://deepseek-harness.github.io/deepseek-harness/"
+      ],
+      [
+        "ZCode",
+        "https://zcode.z.ai/en/docs"
+      ],
+      [
+        "OpenCode",
+        "https://opencode.ai/docs/cli/"
+      ],
+      [
+        "MiMo Code",
+        "https://mimo.xiaomi.com/coder"
+      ],
+      [
+        "Amp",
+        "https://ampcode.com/manual#install"
+      ],
+      [
+        "OpenClaude",
+        "https://openclaude.gitlawb.com/"
+      ],
+      [
+        "Antigravity",
+        "https://antigravity.google/docs/cli-overview"
+      ],
+      [
+        "Pi",
+        "https://pi.dev"
+      ],
+      [
+        "oh-my-pi",
+        "https://omp.sh"
+      ],
+      [
+        "Hermes Agent",
+        "https://hermes-agent.nousresearch.com/docs/"
+      ],
+      [
+        "Devin",
+        "https://devin.ai/cli"
+      ],
+      [
+        "Goose",
+        "https://block.github.io/goose/docs/quickstart/"
+      ],
+      [
+        "Auggie",
+        "https://docs.augmentcode.com/cli/overview"
+      ],
+      [
+        "Autohand Code",
+        "https://github.com/autohandai/code-cli"
+      ],
+      [
+        "Charm",
+        "https://github.com/charmbracelet/crush"
+      ],
+      [
+        "Cline",
+        "https://docs.cline.bot/cline-cli/overview"
+      ],
+      [
+        "CodeBuddy",
+        "https://www.codebuddy.ai/cli"
+      ],
+      [
+        "Codebuff",
+        "https://www.codebuff.com/docs/help/quick-start"
+      ],
+      [
+        "Freebuff",
+        "https://freebuff.com"
+      ],
+      [
+        "Command Code",
+        "https://commandcode.ai/docs/quickstart"
+      ],
+      [
+        "Continue",
+        "https://docs.continue.dev/guides/cli"
+      ]
+    ],
+    "scanned": "2026-10-17",
+    "stars": 94489,
+    "url": "https://github.com/stablyai/orca"
+  },
+  "lang": "vi",
+  "position": 1
+}

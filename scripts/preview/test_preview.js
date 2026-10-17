@@ -62,11 +62,14 @@ const settled = (page) =>
 
     if (name.startsWith("A") && playing) {
       await page.screenshot({ path: path.join(outDir, "desktop.png"), fullPage: true });
-      await page.click('.timeline button[data-t="4.1"]');
+      const buttons = page.locator(".timeline button");
+      const second = (await buttons.count()) > 1 ? 1 : 0;
+      const target = +(await buttons.nth(second).getAttribute("data-t"));
+      await buttons.nth(second).click();
       await page.waitForTimeout(1500);
       const seek = await page.evaluate(() => { const v = document.getElementById("player"); return { t: +v.currentTime.toFixed(2), paused: v.paused }; });
-      console.log("  after clicking the 0:04 line:", JSON.stringify(seek));
-      if (seek.t < 4.1 || seek.paused) failed++;
+      console.log(`  after clicking the line that starts at ${target} s:`, JSON.stringify(seek));
+      if (seek.t < target || seek.paused) failed++;
 
       const voices = await page.$$(".voice");
       if (voices.length > 1) {
@@ -79,7 +82,7 @@ const settled = (page) =>
           return { src: v.currentSrc, t: +v.currentTime.toFixed(2), paused: v.paused, pressed: [...document.querySelectorAll(".voice")].map((b) => b.getAttribute("aria-pressed")) };
         });
         console.log("  after switching voice:", JSON.stringify({ srcChanged: after.src !== before, t: after.t, paused: after.paused, pressed: after.pressed }));
-        if (after.src === before || after.t < 4.1 || after.pressed.join() !== "false,true") failed++;
+        if (after.src === before || after.t < target || after.pressed.join() !== "false,true") failed++;
       }
       await page.setViewportSize({ width: 390, height: 800 });
       await page.screenshot({ path: path.join(outDir, "phone.png"), fullPage: true });

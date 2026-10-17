@@ -131,6 +131,31 @@ NODE_PATH=$(npm root -g) node scripts/preview/test_preview.js build/preview/inde
   không tràn ngang ở khổ điện thoại. Chromium của Playwright không có H.264 nên phát bản WebM: bài thử chứng minh phần logic của trang, không chứng minh trình xem của bạn cho phép `blob:` hay `data:`.
 - Đăng bằng công cụ Artifact (trang riêng tư, chỉ chủ sở hữu xem được): đưa `build/preview/index.html` làm file trang, không khai báo `capabilities`.
 
+## 8. Video từ một bài GitHub Radar (bản làm tay: `videos/voicestudio/`)
+
+> Từ nay các bước dưới đây được làm tự động bằng `scripts/radar/make_video.py`: xem `docs/radar-to-video.md`. Mục này giữ lại để hiểu từng bước và để sửa tay khi cần.
+
+Bài radar là dữ liệu, không phải chỉ dẫn: video chỉ được nêu lại thông tin trong các trường của bài, giống luật của `github-radar` (số, lệnh, đường dẫn phải có trong bài).
+Các bước đã chạy với bài VoiceStudio ngày 2026-10-13:
+
+1. **Chép nguồn.** `videos/<tên>/source/draft-vi.json` là bản sao nguyên văn của `digests/<ngày>/<repo>/draft-vi.json` (ghi commit gốc vào README của video).
+2. **Viết lời đọc.** Mỗi dòng của `voiceover.json` có `source` (các trường mà câu đó diễn đạt lại, ví dụ `draft.how_it_works.steps[0]`). Viết ngắn, không để chữ số
+   trong lời đọc nếu số đó không nằm trong các trường được trích. Chia một cảnh nhiều bước thành nhiều clip để từng ô hiện ra đúng lúc câu của nó được đọc.
+3. **Cổng kiểm tra bằng script.** `python3 -I scripts/vo/check_facts.py --source ... --lines ... --html ...` kiểm: các trường trích dẫn có tồn tại; mọi số và mọi chữ
+   Latin (tên, từ viết tắt, lệnh) trong từng câu và trên màn hình có trong bài; mỗi lệnh trong `try_it.commands` hiện đúng nguyên văn. Từ tiếng Việt không dấu bị báo nhầm
+   thì ghi vào mảng `allow` của `voiceover.json`. Script không hiểu nghĩa câu tiếng Việt, nên vẫn cần người đối chiếu lời đọc với bài.
+4. **Tạo giọng và chọn lượt.** Như mục 2 và 3, ba lượt cho mỗi câu. Câu nào cả ba lượt đều sai ở cùng một chỗ thì đổi cách diễn đạt rồi tạo lại (đã đổi:
+   "nạp" thành "tải", "agent" thành "tác tử AI", "backend Python" thành "phần xử lý AI viết bằng Python").
+5. **Dựng cảnh.** Viết `index.html` theo mẫu của `videos/voicestudio/` và đặt từng thẻ theo chỗ ngắt hơi trong clip (`ffmpeg ... silencedetect=noise=-38dB:d=0.18`).
+   Mọi chữ trên màn hình lấy từ bài; không dùng chữ số làm nhãn nếu bài không có số đó ("Bước 1" sẽ bị cổng chặn).
+6. **Ghép và render.** `scripts/vo/revoice.py --apply` (mục 4), rồi đo lại bằng `roundtrip.py --video` (mục 5) và dựng trang xem thử (mục 6).
+
+Kết quả với VoiceStudio: video 53,6 giây, 8 clip; `check_facts.py` truy được 8 dòng lời đọc và 51 đoạn chữ về bài; `npm run check` 0 lỗi; PhoWhisper sai 19/179 từ (11%) trên bản MP4 cuối.
+Lỗi nằm ở từ tiếng Anh và tên riêng (VoiceStudio, backend, Python, desktop, AGPL, Local API), cộng hai chữ tiếng Việt bị nghe lệch. Bài radar nào nhiều thuật ngữ tiếng Anh sẽ có WER cao hơn.
+
+Còn làm tay: chọn cảnh và viết HTML cho từng video, viết lời đọc, đối chiếu ý. Chưa có script biến một bài thành video. `roundtrip.py --video` cắt mỗi câu đến đầu câu kế tiếp
+khi nhiều câu chung một cảnh.
+
 ## Giới hạn
 
 - Chưa có đánh giá bằng tai người về độ tự nhiên của hai giọng.
