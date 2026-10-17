@@ -33,6 +33,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -123,6 +124,7 @@ DEFAULTS = {
     "TEAM_GATE_TIMEOUT": "900",
     "TEAM_PACK_MAX_LINES": "1500",
     "TEAM_PACK_MAX_BYTES": "250000",
+    "TEAM_LOG_MAX_BYTES": "20000000",
     "TEAM_MAP_MAX_LINES": "600",
     "TEAM_GIT_NAME": "team-bot",
     "TEAM_GIT_EMAIL": "team-bot@localhost",
@@ -662,9 +664,11 @@ def network_of(argv: list[str]) -> str | None:
     return argv[argv.index("--network") + 1] if "--network" in argv else None
 
 
-def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path) -> tuple[int, str]:
-    """Run a container, streaming its output to `log`; return the exit code and
-    the last OUTPUT_TAIL_BYTES of output (a looping model can print gigabytes)."""
+def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path,
+               max_bytes: int = 20_000_000) -> tuple[int, str]:
+    """Run a container; return the exit code and the last OUTPUT_TAIL_BYTES of its output. The output goes to `log` only
+    until `max_bytes` (a looping model or test can print gigabytes for the whole timeout); the rest is read and dropped so
+    the container never blocks on a full pipe, and the tail is kept in memory."""
     network = network_of(argv)
     if network != "none":
         # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
@@ -672,18 +676,42 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
         if problem:
             raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    tail = bytearray()
+    written = 0
+
+    def pump(pipe, sink) -> None:
+        nonlocal written
+        truncated = False
+        for chunk in iter(lambda: pipe.read1(65536), b""):
+            tail.extend(chunk)
+            if len(tail) > 2 * OUTPUT_TAIL_BYTES:
+                del tail[:len(tail) - OUTPUT_TAIL_BYTES]
+            room = max_bytes - written
+            if room > 0:
+                sink.write(chunk[:room])
+                written += min(len(chunk), room)
+            if len(chunk) > room and not truncated:
+                truncated = True
+                sink.write(f"\n[team] output truncated at {max_bytes} bytes; the end of it is kept in memory\n".encode())
+        sink.flush()
+
     with open(log, "ab") as sink:
-        start = sink.tell()
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        reader = threading.Thread(target=pump, args=(proc.stdout, sink), daemon=True)
+        reader.start()
         try:
-            rc = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
-                                timeout=timeout, env=env).returncode
+            rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)
             rc = 124
-            sink.write(f"\n[team] timed out after {timeout}s\n".encode())
-    with open(log, "rb") as source:
-        source.seek(max(start, log.stat().st_size - OUTPUT_TAIL_BYTES))
-        return rc, ANSI_RE.sub("", source.read().decode("utf-8", "replace"))
+            note = f"\n[team] timed out after {timeout}s\n".encode()
+            tail.extend(note)
+        reader.join(timeout=30)
+        if rc == 124:
+            sink.write(note)
+    return rc, ANSI_RE.sub("", bytes(tail[-OUTPUT_TAIL_BYTES:]).decode("utf-8", "replace"))
 
 
 def run_worker(cfg, f: Feature, role: str, model: str, mounts: dict[str, Path], prompt: str,
@@ -693,7 +721,7 @@ def run_worker(cfg, f: Feature, role: str, model: str, mounts: dict[str, Path], 
     log = f.out / f"{role}-{time.strftime('%Y%m%d-%H%M%S')}.log"
     log.write_text(f"# {role} {model} {now()}\n", encoding="utf-8")
     return run_docker(argv, container_name(f, role), int(cfg["TEAM_WORKER_TIMEOUT"]),
-                      worker_env(cfg, keys, model), log)
+                      worker_env(cfg, keys, model), log, int(cfg["TEAM_LOG_MAX_BYTES"]))
 
 
 def handoff_mounts(f: Feature, extra: dict[str, Path] | None = None) -> dict[str, Path]:
@@ -741,14 +769,14 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
             # Setup installs what the (possibly model-edited) dependency files name,
             # so it gets the workers' egress-limited network, never the host's.
             rc, output = run_docker(gate_argv(cfg, work, setup, cfg["TEAM_WORKER_NETWORK"], name),
-                                    name, timeout, base_env(), raw)
+                                    name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]))
             lines += [f"## SETUP exit {rc}: {setup}", tail_text(output, 20)]
             if rc:
                 commands = []
         for command in commands:
             started = time.monotonic()
             rc, output = run_docker(gate_argv(cfg, work, command, cfg["TEAM_GATES_NETWORK"], name),
-                                    name, timeout, base_env(), raw)
+                                    name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]))
             passed += rc == 0
             lines += [f"## {'PASS' if rc == 0 else 'FAIL'} exit {rc} ({time.monotonic() - started:.1f}s): {command}",
                       tail_text(output, 40)]
@@ -775,6 +803,9 @@ def run_tester(f: Feature, cfg, keys, state: dict) -> bool:
         if rc == 0 and commit_all(f.repo, f"test({f.id}): acceptance tests [{model}]", merge_base(f, state)):
             state["tester_commit"] = head(f.repo)
             state["tester_model"] = model
+            if run_gates(f, cfg):
+                warn(state, "acceptance commands already pass after the tester stage: "
+                            "the new tests may not exercise the feature", round="tester")
             return True
         discard(f.repo)
         say(f"tester: {model} produced no usable tests (exit {rc})")
@@ -895,17 +926,33 @@ def test_paths_changed(f: Feature, tester_commit: str) -> list[str]:
 GATES_HEAD_RE = re.compile(r"# gates \S+ @ ([0-9a-f]{12}) acceptance:([0-9a-f]{12})")
 
 
+def gates_problem(f: Feature) -> str | None:
+    """Why gates.log is no verdict on what would be audited or published: it ran on another commit or other acceptance
+    commands, or it did not pass."""
+    log = read(f.file("gates.log"))
+    ran = GATES_HEAD_RE.match(log)
+    commands = commands_digest(acceptance_commands(read(f.file("acceptance.md"))))
+    if not ran:
+        return f"gates.log has no run on record: run `{team_lead().command} gates {f.id}` first"
+    if ran[1] != head(f.repo)[:12]:
+        return f"gates.log is for {ran[1]}, HEAD is {head(f.repo)[:12]}: run `{team_lead().command} gates {f.id}` first"
+    if ran[2] != commands:
+        return (f"gates.log ran other acceptance commands than acceptance.md has now: "
+                f"run `{team_lead().command} gates {f.id}` first")
+    result = next((row for row in reversed(log.splitlines()) if row.startswith("RESULT")), "")
+    if not result.startswith("RESULT: PASS"):
+        return f"the gates did not pass ({result or 'no result'}): fix the code and run `{team_lead().command} gates {f.id}`"
+    return None
+
+
 def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     pack = f.file("audit-pack.md")
-    # The pack quotes gates.log as the verdict on this code. It is one only if the gates ran on this HEAD; --force
-    # lifts the size limit, never this.
-    ran = GATES_HEAD_RE.match(read(f.file("gates.log")))
-    commands = commands_digest(acceptance_commands(read(f.file("acceptance.md"))))
-    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:
+    # The pack quotes gates.log as the verdict on this code. It is one only if the gates ran on this HEAD with these
+    # commands and passed; --force lifts the size limit, never this.
+    problem = gates_problem(f)
+    if problem:
         pack.unlink(missing_ok=True)
-        what = (f"gates.log is for {ran[1]}, HEAD is {head(f.repo)[:12]}" if ran and ran[1] != head(f.repo)[:12] else
-                "gates.log ran other acceptance commands than acceptance.md has now" if ran else "gates.log has no run on record")
-        print(f"{what}: run `{team_lead().command} gates {f.id}` first", file=sys.stderr)
+        print(problem, file=sys.stderr)
         return 1
     base = merge_base(f, state)
     sections = [f"# Audit pack {f.id}",
@@ -1008,9 +1055,6 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
         if stage == "tester":
             if not run_tester(f, cfg, keys, state):
                 return blocked(f, state, "no tester model produced tests")
-            if run_gates(f, cfg):
-                warn(state, "acceptance commands already pass after the tester stage: "
-                            "the new tests may not exercise the feature", round="tester")
         elif stage == "coder":
             if not run_coder(f, cfg, keys, state, feedback):
                 error = state.pop("coder_error", "")
@@ -1188,6 +1232,9 @@ def cmd_push(args, home, cfg) -> int:
             if state.get("pack_handoff") != handoff_digest(f):
                 raise SystemExit("spec.md or acceptance.md changed after the audit pack was built: "
                                  "rebuild the pack and audit again")
+            problem = gates_problem(f)  # a later gate run at this HEAD may have failed
+            if problem:
+                raise SystemExit(problem)
             if f.file("verdict.md").stat().st_mtime < f.file("audit-pack.md").stat().st_mtime:
                 raise SystemExit("verdict.md is older than audit-pack.md: audit the current pack")
             source = state["pack_head"]
@@ -1260,7 +1307,8 @@ def smoke(cfg) -> tuple[list[str], list[str]]:
         for label, command, found in (("render", SMOKE_RENDER, problems), ("narration", SMOKE_NARRATION, notes)):
             name = f"{team_lead().container}-doctor-{label}"
             rc, output = run_docker(gate_argv(cfg, work, command, "none", name), name,
-                                    int(cfg["TEAM_GATE_TIMEOUT"]), base_env(), work / f"{label}.log")
+                                    int(cfg["TEAM_GATE_TIMEOUT"]), base_env(), work / f"{label}.log",
+                                    int(cfg["TEAM_LOG_MAX_BYTES"]))
             if rc:
                 found.append(f"smoke {label} failed in {cfg['TEAM_IMAGE']} (exit {rc}): {last_line(output)}"
                              + ("" if label == "render" else

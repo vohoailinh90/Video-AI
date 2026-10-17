@@ -759,16 +759,31 @@ class PipelineTests(Sandbox):
         self.assertFalse(any("already pass" in w for w in warnings), warnings)
         self.assertIn("kept: a warning another stage raised and that still applies", warnings)
 
-    def test_a_standalone_tester_run_drops_the_previous_rounds_warning(self):
+    def test_a_standalone_tester_run_replaces_the_previous_rounds_warning(self):
         f = self.new_feature()
         self.scenario(tester=WRITE_TEST + WRITE_FEATURE, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
         self.assertEqual(self.run_pipeline()[0], 0)
         self.assertTrue(any("already pass" in w for w in f.load_state()["warnings"]))
+        failing = 'with open(work + "/tests/check_feature.py", "w") as fh:\n    fh.write("from feature import add\\nassert add(2, 3) == 6\\n")'
+        self.scenario(tester=failing)
+        code, out = run_cli("work", "tester", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(any("already pass" in w for w in f.load_state().get("warnings", [])), "tests that fail are what was wanted")
+
+    def test_a_standalone_tester_run_checks_whether_its_tests_already_pass(self):
+        # Codex's fifteenth review: only the pipeline's tester stage ran the gates and raised the warning, so a standalone
+        # `team work tester` against existing code left the pack without the warning that the tests pass at once.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        self.assertFalse(any("already pass" in w for w in f.load_state().get("warnings", [])))
         more = 'with open(work + "/tests/check_feature.py", "a") as fh:\n    fh.write("\\n# a stricter case\\n")'
         self.scenario(tester=more)
         code, out = run_cli("work", "tester", "F1")
         self.assertEqual(code, 0, out)
-        self.assertFalse(any("already pass" in w for w in f.load_state().get("warnings", [])))
+        self.assertTrue(any("already pass" in w for w in f.load_state()["warnings"]), f.load_state().get("warnings"))
+        self.assertEqual(run_cli("pack", "F1")[0], 0, "the standalone round left gates.log current for this HEAD")
+        self.assertIn("already pass", f.file("audit-pack.md").read_text())
 
     def test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack(self):
         # Found by Codex's review of the Video-AI hand-over: a rerun from `review` (the repair round after a BLOCK) in which
@@ -1038,6 +1053,32 @@ class PipelineTests(Sandbox):
         self.assertEqual(run_cli("pack", "F1", "--force")[0], 0)
         self.assertGreater(len(f.file("audit-pack.md").read_text()), 20000)
 
+    def test_a_pack_or_push_needs_gates_that_passed(self):
+        # Codex's fifteenth review: gates.log was checked for the commit and the commands it ran, not for its result, so a
+        # failing run at the current HEAD could be packed, audited and published.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        (f.repo / "feature.py").write_text("def add(a, b):\n    return a - b\n")
+        git(f.repo, "commit", "-q", "-am", "break it")
+        self.assertEqual(run_cli("gates", "F1")[0], 1)
+        code, out = run_cli("pack", "F1")
+        self.assertEqual(code, 1, out)
+        self.assertIn("gates did not pass", out)
+        self.assertFalse(f.file("audit-pack.md").exists(), "an old pack must not stay behind looking current")
+        git(f.repo, "revert", "--no-edit", "HEAD")
+        self.assertEqual(run_cli("gates", "F1")[0], 0)
+        self.assertEqual(run_cli("pack", "F1")[0], 0)
+        f.file("verdict.md").write_text("VERDICT: APPROVE\n")
+        pack_time = f.file("audit-pack.md").stat().st_mtime
+        os.utime(f.file("verdict.md"), (pack_time + 5, pack_time + 5))
+        log = f.file("gates.log")
+        log.write_text(log.read_text().replace("RESULT: PASS", "RESULT: FAIL"))  # a later run at this HEAD that failed
+        code, out = run_cli("push", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("gates did not pass", out)
+        self.assertEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "")
+
     def test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack(self):
         # Codex's eleventh review: the pack quotes spec.md and acceptance.md, which live outside the git checkout, so editing
         # them after the audit left pack_head and the verdict timestamp valid and the branch publishable.
@@ -1058,6 +1099,52 @@ class PipelineTests(Sandbox):
             f.file(name).write_text(original)
         self.assertEqual(run_cli("push", "F1")[0], 0, "unchanged again: the audited work is published")
         self.assertIn("team/F1", git(self.origin, "branch", "--list", "team/F1"))
+
+    def test_container_output_is_capped_while_it_is_written(self):
+        # Codex's fifteenth review: output went straight into a file for the whole timeout and only the read-back was
+        # limited, so a looping process could fill the disk.
+        log = self.tmp / "loop.log"
+        code = ("import sys\n"
+                "for i in range(40000):\n"
+                "    sys.stdout.write('line %d ' % i + 'x' * 100 + '\\n')\n"
+                "sys.stdout.write('THE-LAST-LINE\\n')\n")
+        rc, output = team.run_docker([sys.executable, "-c", code], "t-loop", 60, team.base_env(), log, max_bytes=100_000)
+        self.assertEqual(rc, 0)
+        self.assertLess(log.stat().st_size, 100_000 + 1000, "the file stops growing at the cap")
+        self.assertIn("output truncated", log.read_text())
+        self.assertIn("THE-LAST-LINE", output, "the caller still gets the end of the output")
+        self.assertIn("line 0 ", log.read_text(), "and the log keeps the beginning")
+        small = self.tmp / "small.log"
+        rc, output = team.run_docker([sys.executable, "-c", "print('hello')"], "t-small", 60, team.base_env(), small, max_bytes=100_000)
+        self.assertEqual((rc, output.strip()), (0, "hello"))
+        self.assertNotIn("truncated", small.read_text())
+
+    def test_every_container_the_conductor_starts_is_held_to_the_output_cap(self):
+        f = self.new_feature()
+        self.write_env({**MODELS, "TEAM_LOG_MAX_BYTES": "20000"})
+        loud_coder = WRITE_FEATURE + "for i in range(3000):\n    print('coder line %d ' % i + 'c' * 80)\n"
+        f.file("acceptance.md").write_text(
+            "# Acceptance\n\n```bash\npython3 tests/check_feature.py && python3 -c \"print('gate ' * 20000)\"\n```\n")
+        self.scenario(tester=WRITE_TEST, coder=loud_coder, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        coder_logs = sorted(f.out.glob("coder-*.log"))
+        self.assertTrue(coder_logs)
+        for log in coder_logs:
+            self.assertLess(log.stat().st_size, 21_000, log.name)
+        self.assertIn("output truncated", coder_logs[-1].read_text())
+        self.assertLess(f.out.joinpath("gates-raw.log").stat().st_size, 21_000, "a gate command's output is capped too")
+        self.write_env({**MODELS, "TEAM_LOG_MAX_BYTES": "20000",
+                        "TEAM_GATES_SETUP": "python3 -c \"print('setup ' * 20000)\""})
+        f.file("acceptance.md").write_text(ACCEPTANCE)
+        self.assertEqual(run_cli("gates", "F1")[0], 0)
+        raw = f.out.joinpath("gates-raw.log").read_text()
+        self.assertIn("output truncated", raw, "the setup command's output is capped too")
+        self.assertLess(len(raw), 21_000)
+
+    def test_the_output_cap_is_configurable_and_documented(self):
+        self.assertEqual(int(team.DEFAULTS["TEAM_LOG_MAX_BYTES"]), 20_000_000)
+        for name in ("team.env.example", "team.env.video.example"):
+            self.assertIn("TEAM_LOG_MAX_BYTES", (ROOT / "scripts" / "team" / name).read_text(), name)
 
     def test_a_pack_is_refused_when_the_gates_ran_on_other_code(self):
         # Codex's sixth review: `pack` embedded whatever gates.log said, so after a new commit it showed PASS for older code.
@@ -2276,7 +2363,7 @@ class VideoTeamTests(Sandbox):
         """team.smoke() with a docker that exits `results[label]` for the render and narration containers."""
         calls = []
 
-        def fake(argv, name, timeout, env, log):
+        def fake(argv, name, timeout, env, log, max_bytes=None):
             calls.append((argv, name))
             label = name.rsplit("-", 1)[1]
             return results[label], "" if results[label] == 0 else "Chrome exited\nsegfault"

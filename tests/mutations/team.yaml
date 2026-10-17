@@ -306,18 +306,6 @@ mutations:
   find: "    if network and network != verified:\n"
   replace: "    if False:\n"
   test: tests.test_team.DoctorTests.test_an_active_egress_unit_is_not_proof_that_its_rules_are_still_there
-- label: "the audit pack quotes gates that ran on other code"
-  find: "    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:\n"
-  replace: "    if False:\n"
-  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_the_gates_ran_on_other_code
-- label: "the audit pack is built without any gates.log"
-  find: "    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:\n"
-  replace: "    if ran and (ran[1] != head(f.repo)[:12] or ran[2] != commands):\n"
-  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_there_is_no_gates_log
-- label: "the audit pack quotes gates that ran other acceptance commands"
-  find: "    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:\n"
-  replace: "    if not ran or ran[1] != head(f.repo)[:12]:\n"
-  test: tests.test_team.PipelineTests.test_gates_run_for_other_acceptance_commands_do_not_vouch_for_the_pack
 - label: "the acceptance digest changes on every call"
   find: "hashlib.sha256(json.dumps(commands).encode(\"utf-8\"))"
   replace: "hashlib.sha256((json.dumps(commands) + str(time.time())).encode(\"utf-8\"))"
@@ -365,7 +353,7 @@ mutations:
 - label: "a standalone tester run keeps the previous round's warning"
   find: "    drop_round_warnings(state, \"tester\")\n"
   replace: ""
-  test: tests.test_team.PipelineTests.test_a_standalone_tester_run_drops_the_previous_rounds_warning
+  test: tests.test_team.PipelineTests.test_a_standalone_tester_run_replaces_the_previous_rounds_warning
 - label: "the tester warning is not remembered as a tester round's"
   find: "\"the new tests may not exercise the feature\", round=\"tester\")"
   replace: "\"the new tests may not exercise the feature\")"
@@ -402,3 +390,51 @@ mutations:
   find: "    for name in (\"spec.md\", \"acceptance.md\"):\n        digest.update("
   replace: "    for name in (\"spec.md\",):\n        digest.update("
   test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
+- label: "the audit pack quotes gates that ran on other code"
+  find: "    if ran[1] != head(f.repo)[:12]:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_the_gates_ran_on_other_code
+- label: "the audit pack is built without any gates.log"
+  find: "    if not ran:\n        return f\"gates.log has no run on record"
+  replace: "    if False:\n        return f\"gates.log has no run on record"
+  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_there_is_no_gates_log
+- label: "the audit pack quotes gates that ran other acceptance commands"
+  find: "    if ran[2] != commands:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_gates_run_for_other_acceptance_commands_do_not_vouch_for_the_pack
+- label: "an audit pack is built from gates that failed"
+  find: "    if not result.startswith(\"RESULT: PASS\"):\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_pack_or_push_needs_gates_that_passed
+- label: "push does not look at the gate result again"
+  find: "            problem = gates_problem(f)  # a later gate run at this HEAD may have failed\n            if problem:\n                raise SystemExit(problem)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_pack_or_push_needs_gates_that_passed
+- label: "a standalone tester run does not run the gates"
+  find: "            if run_gates(f, cfg):\n                warn(state, \"acceptance commands already pass after the tester stage: \""
+  replace: "            if False:\n                warn(state, \"acceptance commands already pass after the tester stage: \""
+  test: tests.test_team.PipelineTests.test_a_standalone_tester_run_checks_whether_its_tests_already_pass
+- label: "container output is not capped while it is written"
+  find: "            room = max_bytes - written\n"
+  replace: "            room = 1 << 62\n"
+  test: tests.test_team.PipelineTests.test_container_output_is_capped_while_it_is_written
+- label: "the end of a container's output is not kept"
+  find: "            tail.extend(chunk)\n"
+  replace: "            pass\n"
+  test: tests.test_team.PipelineTests.test_container_output_is_capped_while_it_is_written
+- label: "a truncated log does not say so"
+  find: "            if len(chunk) > room and not truncated:\n"
+  replace: "            if False:\n"
+  test: tests.test_team.PipelineTests.test_container_output_is_capped_while_it_is_written
+- label: "a worker's output is not held to the cap"
+  find: "worker_env(cfg, keys, model), log, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))"
+  replace: "worker_env(cfg, keys, model), log)"
+  test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
+- label: "a gate command's output is not held to the cap"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            passed += rc == 0"
+  replace: "name, timeout, base_env(), raw)\n            passed += rc == 0"
+  test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
+- label: "the gates setup output is not held to the cap"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            lines += [f\"## SETUP"
+  replace: "name, timeout, base_env(), raw)\n            lines += [f\"## SETUP"
+  test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap

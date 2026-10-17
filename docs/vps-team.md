@@ -198,7 +198,7 @@ Mẹo giữ quota Pro:
 | `team check-spec ID` | spec ≤120 dòng; mỗi task có `Files:`, `Do not touch:`, `Verify:`; acceptance có lệnh; không còn `TODO(` |
 | `team run ID [--from tester\|coder\|review\|pack\|verdict] [--detach]` | chạy pipeline; khi bị chặn, chạy lại sẽ tiếp tục từ bước hỏng |
 | `team work tester\|coder\|reviewer ID [--model M]` | chạy riêng một vai một lần |
-| `team gates ID` / `team pack ID [--force]` | chạy riêng gates hoặc đóng gói audit (từ chối nếu đang có pipeline khác chạy, vì cùng ghi `gates.log`/`audit-pack.md`) |
+| `team gates ID` / `team pack ID [--force]` | chạy riêng gates hoặc đóng gói audit (từ chối nếu đang có pipeline khác chạy, vì cùng ghi `gates.log`/`audit-pack.md`). `pack` và `push` chỉ chấp nhận `gates.log` của đúng commit HEAD, đúng các lệnh trong `acceptance.md` hiện tại và có kết quả `RESULT: PASS` |
 | `team status [ID]` | trạng thái mọi feature |
 | `team prompt NAME ID` | in prompt (`claude-spec`, `claude-audit`, `tester`, …) |
 | `team models PROVIDER [--free]` | liệt kê model id provider đang có |
