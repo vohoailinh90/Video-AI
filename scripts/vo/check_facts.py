@@ -65,7 +65,10 @@ MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; sc
 TEMPLATE_TAGS = {"audio", "b", "body", "div", "em", "h1", "h2", "head", "html", "i", "meta", "p", "script", "section", "small", "span",
                  "strong", "style"}
 TEMPLATE_ATTRIBUTES = {"*": {"id", "class", "style", "lang"}, "audio": {"src"}, "script": {"src"}, "meta": {"charset", "name", "content"}}
-# any data-* attribute is allowed (data-start, data-duration, data-label ...): nothing draws it, because content is only ever empty
+# the data-* attributes of the template (HyperFrames reads data-composition-src and the like to load other files, so not just any
+# data-* is allowed)
+TEMPLATE_DATA = {"data-composition-id", "data-duration", "data-height", "data-label", "data-start", "data-track-index", "data-volume",
+                 "data-width"}
 JS_NAMES = {"E", "__timelines", "arrow", "at", "clipPath", "const", "delay", "draw", "dur", "duration", "ease", "end", "fadeOut", "forEach",
             "from", "fromTo", "gsap", "i", "id", "opacity", "paused", "pop", "rise", "scale", "scaleX", "seek", "sel", "set", "timeline",
             "tl", "to", "true", "window", "x", "y", "yPercent"}     # and S1, S2 ... (scene start times)
@@ -115,7 +118,7 @@ class Visible(HTMLParser):
         self.scripts = []    # the trusted script files the page loads
 
     def handle_starttag(self, tag, attrs):
-        self.look_at_code(tag, dict(attrs))
+        self.look_at_code(tag, attrs)
         if tag in self.VOID:
             return
         is_label = any(name == "data-label" for name, _ in attrs)
@@ -136,8 +139,11 @@ class Visible(HTMLParser):
         if tag not in TEMPLATE_TAGS:
             self.code.append(f"<{tag}>, which the template never uses")
             return
-        for name, value in attrs.items():
-            if name.startswith("data-") or name in TEMPLATE_ATTRIBUTES["*"] or name in TEMPLATE_ATTRIBUTES.get(tag, ()):
+        names = [name for name, _ in attrs]
+        for name in sorted({n for n in names if names.count(n) > 1}):       # dict() would keep the last, a browser keeps the first
+            self.code.append(f"the attribute {name} twice on <{tag}>")
+        for name, value in dict(attrs).items():
+            if name in TEMPLATE_DATA or name in TEMPLATE_ATTRIBUTES["*"] or name in TEMPLATE_ATTRIBUTES.get(tag, ()):
                 if name == "style":
                     self.code += [f"an inline style that sets {problem}" for problem in css_problems(value or "", inline=True)]
                 elif name == "src" and tag == "script":

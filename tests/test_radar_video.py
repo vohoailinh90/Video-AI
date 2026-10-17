@@ -638,7 +638,7 @@ class ReviewFindings(unittest.TestCase):
             status, output = run_gate(digest, doc, changed, files)
             self.assertEqual(status, 1, name)
             self.assertIn("put words on the screen or load code", output, name)
-        same_file = html.replace('src="gsap.min.js"', 'src="gsap.min.js" data-x', 1)                       # an attribute is not a file
+        same_file = html.replace('src="gsap.min.js"', 'src="gsap.min.js" data-start="0"', 1)                       # an attribute is not a file
         self.assertEqual(run_gate(digest, doc, same_file)[0], 0)
 
     def test_elements_and_attributes_the_template_never_uses_are_refused(self):
@@ -656,7 +656,12 @@ class ReviewFindings(unittest.TestCase):
                 ("object", html.replace("</body>", '<object data="evil.html"></object></body>', 1)),
                 ("svg", html.replace("</body>", '<svg><text>ElevenLabs 99999</text></svg></body>', 1)),
                 ("title", html.replace("<head>", '<head><title>ElevenLabs</title>', 1)),
-                ("event handler", html.replace("<body>", '<body onload="x()">', 1))):
+                ("event handler", html.replace("<body>", '<body onload="x()">', 1)),
+                ("sub-composition", html.replace("<body>", '<body><div data-composition-src="evil.html"></div>', 1)),
+                ("another data attribute", html.replace("<body>", '<body><div data-anything="x"></div>', 1)),
+                ("script src twice", html.replace('<script src="gsap.min.js">', '<script src="evil.js" src="gsap.min.js">', 1)),
+                ("script src twice, reversed", html.replace('<script src="gsap.min.js">', '<script src="gsap.min.js" src="evil.js">', 1)),
+                ("id twice", html.replace("<body>", '<body><div id="a" id="b"></div>', 1))):
             status, output = run_gate(digest, doc, changed)
             self.assertEqual(status, 1, name)
             self.assertIn("put words on the screen or load code", output, name)
