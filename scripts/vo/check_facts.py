@@ -44,7 +44,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
-from numbers_vi import speak_text  # noqa: E402
+from numbers_vi import MINUS, PERCENT_CLASS, PERCENT_SIGNS, PLUS, SIGNS, speak_text  # noqa: E402
 
 # The video template's own words. An element marked data-label is skipped by the trace only when its text is exactly one of these;
 # any other text in such an element is read like the rest of the page. scripts/radar/compose.py takes its labels from here.
@@ -114,8 +114,8 @@ thu ti to toi tu tua tui va vai van vao ve vi vo vua xa xe xi xo xu y yeu
 
 # a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
 # or 10-20, and a plus after one, as in 1+1 or x+5, are not signs) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
-NUMBER = re.compile(r"(?:(?<![\w.,\-−+])[-−+])?\d[\d.,]*(?:\s?[%％﹪٪]|\s+phần\s+trăm\b)?", re.I)    # PHẦN TRĂM is the same words
-PERCENT = re.compile(r"[%％﹪٪]|phần\s+trăm", re.I)
+NUMBER = re.compile(rf"(?:(?<![\w.,{SIGNS}])[{SIGNS}])?\d[\d.,]*(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b)?", re.I)    # PHẦN TRĂM is the same words
+PERCENT = re.compile(rf"[{PERCENT_CLASS}]|phần\s+trăm", re.I)
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
@@ -367,9 +367,9 @@ def canonical(number: str) -> str:
     """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
     three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus or plus sign and a percent sign belong
     to the value: -19 is not 19, +19% is not 19%, and 19% (or 19 phần trăm) is not 19."""
-    sign = "-" if number[:1] in "-−" else "+" if number[:1] == "+" else ""
+    sign = "-" if number[:1] in MINUS else "+" if number[:1] in PLUS else ""
     percent = "%" if PERCENT.search(number) else ""
-    number = re.sub(r"\s?[%％﹪٪]$|\s+phần\s+trăm$", "", number.lstrip("-−+"), flags=re.I).rstrip(".,")
+    number = re.sub(rf"\s?[{PERCENT_CLASS}]$|\s+phần\s+trăm$", "", number.lstrip(MINUS + PLUS), flags=re.I).rstrip(".,")
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
         return sign + re.sub(r"[.,]", "", number) + percent
     return sign + number.replace(",", ".") + percent
@@ -413,13 +413,30 @@ def glued_names(chunk: str):
             yield name
 
 
+SPLIT_KEEP = re.compile(f"({SPLIT.pattern})")      # the same, keeping what it split on
+GAP = re.compile(r"[^\S\n\r]+")                         # spaces within a line: letters apart by these are still a row of letters
+
+
 def ascii_chunks(text: str, need_letter: bool = True):
     """The chunks of a text made only of ASCII (names, acronyms, commands, addresses; a chunk ends at a space or at one of SPLIT).
+    Single letters apart by spaces only (G P T) are read as the name they spell, GPT: a voice says it as one acronym.
     A character outside ASCII that is not a letter (a symbol like (tm) or an emoji) ends a word and hides nothing, while one that draws
     nothing (a zero-width character, see `shown`) does not end it; a chunk with a non-ASCII letter is a Vietnamese word unless it is not one (see glued_names)."""
     text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in shown(text))
-    for chunk in SPLIT.split(text):
+    pieces = SPLIT_KEEP.split(text)
+    spelled = []        # the single letters in a row
+    for chunk, gap in zip(pieces[0::2], pieces[1::2] + [""]):
         chunk = chunk.strip(".:,;")
+        letter = len(chunk) == 1 and chunk.isascii() and chunk.isalpha()
+        if letter:
+            spelled.append(chunk)
+            if GAP.fullmatch(gap):
+                continue                    # the next chunk may be one more letter of the same name
+        if spelled:
+            yield "".join(spelled)
+            spelled = []
+        if letter:
+            continue
         if re.search(r"[^\x00-\x7f]", chunk):
             for name in glued_names(chunk):
                 if not need_letter or re.search(r"[A-Za-z]", name):

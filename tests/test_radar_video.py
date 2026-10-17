@@ -812,9 +812,9 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("G​P​T", check_facts.blob({"field": "dùng GPT"})), [])        # the name the source has
         self.assertEqual(check_facts.numbers("tăng 1​9%"), {"19%"})                                   # nor a number
         self.assertEqual(untraced("1​9%"), ["number 19%"])                                           # 1 and 9% are in the source, 19% is not
-        # a symbol or a space is drawn or is a gap, so it still breaks a word
-        self.assertEqual(untraced("G™P™T"), [])
-        self.assertEqual(untraced("G P　T"), [])
+        # a symbol or a space is drawn or is a gap, so it still separates the letters (letters apart like that spell the name, see below)
+        self.assertEqual(untraced("G™P™T"), ["token 'GPT'"])
+        self.assertEqual(untraced("G P　T"), ["token 'GPT'"])
 
     def test_a_percentage_is_read_whatever_the_case_of_its_words(self):
         for text in ("19 phần trăm", "19 PHẦN TRĂM", "19 Phần Trăm", "19 phần  trăm", "19 phần trăm", "19%", "19 %", "19％", "19﹪", "19٪"):
@@ -825,6 +825,34 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.untraced("19 PHẦN TRĂM", check_facts.blob({"fact": "19 phần trăm"}), set()), [])
         self.assertEqual(check_facts.numbers("19 PHẦN TRĂM".replace("Ầ", "Ầ")), {"19%"})        # decomposed, as pasted text can be
         self.assertEqual(numbers_vi.speak_text("tăng 19％ và 5﹪"), "tăng mười chín phần trăm và năm phần trăm")
+
+    def test_a_look_alike_of_a_sign_is_the_sign(self):
+        for text, value in (("＋19%", "+19%"), ("﹢19%", "+19%"), ("➕19", "+19"), ("⁺3,5", "+3.5"),
+                            ("－19%", "-19%"), ("﹣19%", "-19%"), ("➖3", "-3"), ("⁻3", "-3"), ("‐3", "-3"), ("−3", "-3")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        plain = check_facts.blob({"fact": "tăng 19%"})
+        for text in ("＋19%", "﹢19%", "－19%", "➖19%"):
+            self.assertEqual(check_facts.untraced(text, plain, set()), [f"number {'+' if text[0] in '＋﹢' else '-'}19%"], text)   # the sign is the part that is not in the source
+        self.assertEqual(check_facts.untraced("＋19%", check_facts.blob({"fact": "+19%"}), set()), [])
+        # the voice says what the gate traced
+        self.assertEqual(numbers_vi.speak_text("tăng ＋19% và ﹢5"), "tăng cộng mười chín phần trăm và cộng năm")
+        self.assertEqual(numbers_vi.speak_text("giảm －19%, ➖3,5 và ⁻2"), "giảm âm mười chín phần trăm, âm ba phẩy năm và âm hai")
+        self.assertEqual(numbers_vi.speak_text("AGPL－3.0"), numbers_vi.speak_text("AGPL-3.0"))        # a version, not a negative number
+        # after a letter or a digit it is not a sign, as for the ASCII ones
+        self.assertEqual(check_facts.numbers("1＋1 và x＋5 và 10‐20 và AGPL－3.0"), {"1", "5", "10", "20", "3.0"})
+
+    def test_single_letters_apart_by_spaces_are_read_as_the_name_they_spell(self):
+        source = check_facts.blob({"fact": "VoiceStudio chạy cục bộ"})
+        untraced = lambda text, source=source: check_facts.untraced(text, source, set())
+        self.assertEqual(untraced("G P T"), ["token 'GPT'"])
+        self.assertEqual(untraced("G  P T"), ["token 'GPT'"])                           # any spaces within the line
+        self.assertEqual(untraced("G P T", check_facts.blob({"fact": "dùng GPT"})), [])        # the name the source has
+        self.assertEqual(untraced("G P T", check_facts.blob({"fact": "dùng G P T"})), [])      # or spelled the same way
+        # not a row: a comma, a line break or a longer word between them
+        self.assertEqual(untraced("A và B, C"), [])
+        self.assertEqual(untraced("G, P, T"), [])
+        self.assertEqual(untraced("G\nP\nT"), [])
+        self.assertEqual(untraced("G (P) T"), [])
 
     def test_the_narration_has_to_be_in_the_render_not_just_the_music(self):
         with tempfile.TemporaryDirectory() as tmp:
