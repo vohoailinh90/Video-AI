@@ -22,6 +22,8 @@ not generative (Sora/Veo-style) footage.
 - A project holds `index.html` (root composition), `compositions/`, `assets/`, `hyperframes.json`, `meta.json`. `init` also writes
   that project's own `AGENTS.md` and `CLAUDE.md`; keep them, they carry the project contract and the pinned CLI version.
 - Commit sources and assets. Never commit `renders/`, `snapshots/`, `.hyperframes/`, `node_modules/` or `.env` (see `.gitignore`).
+- `scripts/vo/` (Vietnamese voice-over: synthesize, round-trip check, re-voice and render) and `scripts/preview/` (a playable preview
+  page) are shared tooling, not part of any video. Their output goes to `build/`, which is gitignored.
 
 ## Commands
 
@@ -58,6 +60,9 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
   103% word error rate on the demo narration and 58% on plain Vietnamese, so that voice is unintelligible. For Vietnamese narration use
   a TTS that supports Vietnamese. VieNeu-TTS v3 Turbo (CPU, Apache-2.0) was tested and understood 100% on plain sentences, but it
   reads English loanwords the Vietnamese way. Put one clip per scene in `assets/`, and set each `data-duration` from `ffprobe`.
+- A video with a Vietnamese voice-over keeps its lines in `videos/<name>/voiceover.json` (id, start, scene_end, scene, text), the default
+  clips in `assets/vo-N.wav` and any other voice in `voices/<voice>/vo-N.wav`. The workflow that was run end to end (VieNeu-TTS, PhoWhisper
+  round-trip check, `scripts/vo/revoice.py`, preview page) is in `docs/voiceover-workflow.md`; follow it instead of rebuilding it.
 - `docs/vietnamese-audio.md` ranks the GitHub repos with Vietnamese TTS and speech recognition (stars, licenses, install
   commands, which are non-commercial) and records what was run here: PhoWhisper-small, VieNeu-TTS v3 Turbo and Kokoro. The
   others have not been run. Read its licence notes before using a voice in a video that will be published.
@@ -83,3 +88,7 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
   environment uses Custom network access with the Hugging Face domains added; the list is in `docs/vietnamese-audio.md`, section 4.
   Loading ONNX models from the Hugging Face cache can fail with `External data path escapes model directory`; the fix is in
   section 0 of the same file.
+- The Artifact viewer refused a video attached as a file or stored as an asset ("No video with supported format and MIME type found")
+  even though the MP4 was ordinary H.264 + AAC. What played was a single HTML page with the MP4 and a WebM copy embedded as base64
+  and the source built in JavaScript. Build it with `scripts/preview/build_preview.py` and publish `build/preview/index.html` as the
+  page file (16 MB limit per page); details in `docs/voiceover-workflow.md`, section 6.

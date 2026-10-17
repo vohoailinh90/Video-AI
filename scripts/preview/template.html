@@ -1,0 +1,234 @@
+<title>__TITLE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one column, voice switch and video first, the narration as a clickable timeline under it. */
+  :root {
+    --bg: #f3f4f6;
+    --panel: #ffffff;
+    --ink: #14161a;
+    --muted: #5b616b;
+    --line: #d9dce1;
+    --accent: #a85200;
+    --accent-soft: rgba(168, 82, 0, 0.1);
+    --stage: #0b0c10;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0c10;
+      --panel: #13151b;
+      --ink: #f1f2f4;
+      --muted: #9aa1ab;
+      --line: #262a33;
+      --accent: #ff9d2e;
+      --accent-soft: rgba(255, 157, 46, 0.14);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0c10;
+    --panel: #13151b;
+    --ink: #f1f2f4;
+    --muted: #9aa1ab;
+    --line: #262a33;
+    --accent: #ff9d2e;
+    --accent-soft: rgba(255, 157, 46, 0.14);
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    padding-block: 32px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+  .eyebrow { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.12; font-weight: 600; letter-spacing: -0.02em; margin: 6px 0 8px; text-wrap: balance; }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0; }
+
+  .voices { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .voice {
+    all: unset; box-sizing: border-box; cursor: pointer; padding: 8px 14px; font-weight: 500;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  }
+  .voice:hover { background: var(--accent-soft); }
+  .voice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .voice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .stage { background: var(--stage); border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+  video { display: block; width: 100%; max-width: 100%; aspect-ratio: 16 / 9; background: var(--stage); }
+  .status { margin: 10px 2px 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+
+  h2 { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; margin: 0 0 12px; }
+
+  dl.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 24px; margin: 0; padding: 18px 0; border-block: 1px solid var(--line); }
+  .facts div { min-width: 0; }
+  .facts dt { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .facts dd { margin: 2px 0 0; font-weight: 500; overflow-wrap: anywhere; }
+
+  ol.timeline { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .timeline li + li { border-top: 1px solid var(--line); }
+  .timeline button {
+    all: unset; box-sizing: border-box; cursor: pointer; width: 100%;
+    display: grid; grid-template-columns: 64px 1fr; gap: 16px; align-items: baseline;
+    padding: 14px 16px;
+  }
+  .timeline button:hover { background: var(--accent-soft); }
+  .timeline button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .timeline time { font-family: var(--font-mono); font-size: 14px; color: var(--accent); }
+  .timeline .line { min-width: 0; overflow-wrap: anywhere; }
+  .timeline .scene { display: block; font-size: 13px; color: var(--muted); }
+
+  .note { color: var(--muted); font-size: 14px; max-width: 70ch; margin: 0; }
+  .note + .note { margin-top: 8px; }
+
+  @media (max-width: 480px) {
+    .timeline button { grid-template-columns: 48px 1fr; gap: 12px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .timeline button, .voice { transition: background-color 120ms ease; }
+  }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">__EYEBROW__</div>
+    <h1>__TITLE__</h1>
+    <p class="lede">__LEDE__</p>
+  </header>
+
+  <section aria-label="Video">
+    __VOICES__
+    <div class="stage">
+      <video id="player" controls playsinline preload="auto"></video>
+    </div>
+    <p class="status" id="status" role="status">Đang tải video…</p>
+  </section>
+
+  <dl class="facts">
+__FACTS__
+  </dl>
+
+  <section aria-labelledby="vo-heading">
+    <h2 id="vo-heading">Lời đọc theo cảnh (bấm để nghe từ đó)</h2>
+    <ol class="timeline">
+__LINES__
+    </ol>
+  </section>
+
+  <section>
+__NOTES__
+  </section>
+</main>
+
+<!-- The videos travel inside the page (base64), so playing one needs no extra request. -->
+__MEDIA__
+<script>
+  (function () {
+    var DEFAULT_VOICE = "__DEFAULT_VOICE__";
+    var video = document.getElementById("player");
+    var statusEl = document.getElementById("status");
+    var CANDS = [
+      { key: "mp4", label: "MP4 (H.264)", mime: "video/mp4", probe: 'video/mp4; codecs="avc1.640028, mp4a.40.2"' },
+      { key: "webm", label: "WebM (VP9)", mime: "video/webm", probe: 'video/webm; codecs="vp9, opus"' }
+    ];
+    var support = CANDS.map(function (c) { return c.label + ": " + (video.canPlayType(c.probe) || "không"); }).join(" · ");
+
+    var voice = DEFAULT_VOICE, attempts = [], current = null, token = 0, ready = false, lastCode = "?", resume = null;
+
+    function dataOf(c) {
+      var el = document.getElementById("b64-" + voice + "-" + c.key);
+      return el ? el.textContent.trim() : "";
+    }
+    function sourceFor(c, mode) {
+      var b64 = dataOf(c);
+      if (!b64) throw new Error("no data");
+      if (mode === "data") return "data:" + c.mime + ";base64," + b64;
+      var bin = atob(b64), n = bin.length, bytes = new Uint8Array(n);
+      for (var i = 0; i < n; i++) bytes[i] = bin.charCodeAt(i);
+      return URL.createObjectURL(new Blob([bytes], { type: c.mime }));
+    }
+    function fail() {
+      statusEl.textContent = "Không phát được video trong trình xem này (mã lỗi " + lastCode + "). Hỗ trợ của trình duyệt: " + support + ". Hãy chụp màn hình dòng này gửi lại.";
+    }
+    function next() {
+      var a = attempts.shift();
+      if (!a) { fail(); return; }
+      current = a;
+      var mine = ++token;
+      statusEl.textContent = "Đang tải video (" + a[0].label + ", " + a[1] + ")…";
+      try {
+        video.src = sourceFor(a[0], a[1]);
+        video.load();
+      } catch (e) {
+        lastCode = "ngoại lệ: " + (e && e.name);
+        next();
+        return;
+      }
+      setTimeout(function () { if (!ready && token === mine) next(); }, 8000);
+    }
+    function start() {
+      // Formats the browser says it can play first, the rest as a last resort; blob URL first, data URL second.
+      attempts = []; ready = false; lastCode = "?";
+      CANDS.forEach(function (c) { if (video.canPlayType(c.probe)) attempts.push([c, "blob"], [c, "data"]); });
+      CANDS.forEach(function (c) { if (!video.canPlayType(c.probe)) attempts.push([c, "blob"], [c, "data"]); });
+      next();
+    }
+
+    video.addEventListener("loadedmetadata", function () {
+      ready = true;
+      statusEl.textContent = "Đang dùng " + current[0].label + " (" + current[1] + ").";
+      if (resume) {
+        try {
+          video.currentTime = Math.min(resume.t, (video.duration || resume.t) - 0.05);
+          if (resume.playing) { var p = video.play(); if (p && p.catch) p.catch(function () {}); }
+        } catch (err) {}
+        resume = null;
+      }
+    });
+    video.addEventListener("error", function () {
+      if (ready) return;
+      lastCode = video.error ? video.error.code : "?";
+      next();
+    });
+
+    var voiceButtons = document.querySelectorAll(".voice");
+    for (var i = 0; i < voiceButtons.length; i++) {
+      voiceButtons[i].addEventListener("click", function (e) {
+        var key = e.currentTarget.getAttribute("data-voice");
+        if (key === voice) return;
+        resume = { t: video.currentTime || 0, playing: !video.paused };
+        voice = key;
+        for (var j = 0; j < voiceButtons.length; j++) {
+          voiceButtons[j].setAttribute("aria-pressed", voiceButtons[j].getAttribute("data-voice") === voice ? "true" : "false");
+        }
+        video.pause();
+        start();
+      });
+    }
+
+    var lineButtons = document.querySelectorAll(".timeline button");
+    for (var k = 0; k < lineButtons.length; k++) {
+      lineButtons[k].addEventListener("click", function (e) {
+        var t = parseFloat(e.currentTarget.getAttribute("data-t"));
+        try {
+          video.currentTime = t;
+          var p = video.play();
+          if (p && p.catch) p.catch(function () {});
+        } catch (err) {}
+      });
+    }
+
+    start();
+  })();
+</script>

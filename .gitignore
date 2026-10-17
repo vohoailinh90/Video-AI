@@ -5,6 +5,9 @@ node_modules/
 renders/
 snapshots/
 
+# Output of the voiceover and preview tools (scripts/vo, scripts/preview)
+build/
+
 # HyperFrames runtime state: an edit-history cache that records machine-specific paths,
 # check reports, lock dirs, and Lambda stack metadata (it identifies an AWS account)
 .hyperframes/
