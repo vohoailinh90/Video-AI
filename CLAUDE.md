@@ -55,8 +55,11 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
 - The system font Inter renders Vietnamese diacritics correctly; check any other font for Vietnamese coverage.
 - `npx hyperframes tts` (Kokoro-82M) has **no Vietnamese voice** (it covers English, Spanish, French, Hindi, Italian,
   Portuguese, Japanese and Chinese). An English voice reading espeak `vi` phonemes loses the tones and was never checked for
-  intelligibility. For Vietnamese narration, prefer a TTS service that supports Vietnamese: put one clip per scene in
+  intelligibility. For Vietnamese narration, prefer a TTS that supports Vietnamese: put one clip per scene in
   `assets/`, and set each `data-duration` from `ffprobe`.
+- `docs/vietnamese-audio.md` ranks the GitHub repos with Vietnamese TTS and speech recognition (stars, licenses, install
+  commands, which are non-commercial). None of them has been run yet. Read its licence notes before using a voice in a
+  video that will be published.
 
 ## Safety and privacy
 
