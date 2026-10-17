@@ -9,7 +9,7 @@
 
 <pack> is a JSON file or a directory (pack.json + videos/<id>.json). Output goes to build/autovideo/<batch>/ (gitignored).
 Exit codes: 0 all good, 1 a video failed, failed QA, is missing or stale (rendered from an older version of the pack), or `plan` finds a setup that
-cannot run; 2 the pack or the arguments are wrong. --json (plan, run, status) prints machine-readable output.
+cannot run; 2 the pack or the arguments are wrong; 3 another run holds the batch (`run` and `qa` write its state). --json (plan, run, status) prints machine-readable output.
 """
 from __future__ import annotations
 
@@ -104,6 +104,9 @@ def cmd_run(args) -> int:
             pack, env, Path(args.out), only=only, force=args.force, retries=args.retries, timeout=args.timeout,
             log=lambda line: print(line, file=sys.stderr),
         )
+    except runner.BatchBusy as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -128,7 +131,7 @@ def cmd_status(args) -> int:
     rows = []
     for job in pack.jobs:
         entry = state.get(job.id)
-        status = runner.job_status(entry, job, Path(args.out) / pack.batch / job.id, engine_mpt.bgm_digest(env, job) if env else None)
+        status = runner.job_status(entry, job, Path(args.out) / pack.batch / job.id, engine_mpt.input_digests(env, job) if env else None)
         rows.append({"id": job.id, "status": status, "attempts": (entry or {}).get("attempts", 0), "error": (entry or {}).get("error")})
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
@@ -142,6 +145,9 @@ def cmd_qa(args) -> int:
     pack = _load(args)
     try:
         rows = runner.requalify(pack, Path(args.out), [i for i in (args.only or "").split(",") if i], _env_if_any(args))
+    except runner.BatchBusy as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -201,22 +201,28 @@ class PackTests(unittest.TestCase):
         self.assertIsNone(runner.preflight(env, job(bgm="missing.mp3", bgm_volume=0)))
         self.assertIn("music file missing.mp3", runner.preflight(env, job(bgm="missing.mp3", bgm_volume=0.2)))
 
-    def test_bgm_digest_follows_the_music_file_mpt_will_read(self):
-        env = fake_mpt(self.root)
+    def test_input_digests_follow_the_files_mpt_reads_by_name(self):
+        env = fake_mpt(self.root)  # has resource/fonts/BeVietnamPro-Bold.ttf, empty
         songs = env.home / "resource" / "songs"
         songs.mkdir()
         job = lambda **d: packmod.load_pack(write_pack(self.root, [video()], d)).jobs[0]
+        empty = hashlib.sha256(b"").hexdigest()
+        self.assertEqual(engine_mpt.input_digests(env, job(bgm="none")), {"font": empty})  # no custom music: only the subtitle font
         (songs / "foo.mp3").write_bytes(b"aaaa")
-        first = engine_mpt.bgm_digest(env, job(bgm="foo.mp3"))
-        self.assertEqual(first, hashlib.sha256(b"aaaa").hexdigest())
+        first = engine_mpt.input_digests(env, job(bgm="foo.mp3"))
+        self.assertEqual(first, {"bgm": hashlib.sha256(b"aaaa").hexdigest(), "font": empty})
         (songs / "foo.mp3").write_bytes(b"bbbb")  # same name, same size, other music
-        self.assertNotEqual(engine_mpt.bgm_digest(env, job(bgm="foo.mp3")), first)
+        self.assertNotEqual(engine_mpt.input_digests(env, job(bgm="foo.mp3")), first)
         (env.home / "storage" / "bgm").mkdir(parents=True)
         (env.home / "storage" / "bgm" / "foo.mp3").write_bytes(b"cccc")  # MPT looks in storage/bgm before resource/songs
-        self.assertEqual(engine_mpt.bgm_digest(env, job(bgm="foo.mp3")), hashlib.sha256(b"cccc").hexdigest())
+        self.assertEqual(engine_mpt.input_digests(env, job(bgm="foo.mp3"))["bgm"], hashlib.sha256(b"cccc").hexdigest())
+        (env.home / "resource" / "fonts" / "BeVietnamPro-Bold.ttf").write_bytes(b"other font")
+        self.assertEqual(engine_mpt.input_digests(env, job(bgm="none"))["font"], hashlib.sha256(b"other font").hexdigest())
+        self.assertNotIn("font", engine_mpt.input_digests(env, job(subtitles=False)))  # MPT reads the font only for subtitles
         for kind in ({"bgm": "none"}, {"bgm": "random"}, {"bgm": "foo.mp3", "bgm_volume": 0}):
-            self.assertIsNone(engine_mpt.bgm_digest(env, job(**kind)), kind)  # no custom music that is read
-        self.assertEqual(engine_mpt.bgm_digest(env, job(bgm="missing.mp3")), engine_mpt.BGM_MISSING)  # music that is asked for and gone
+            self.assertNotIn("bgm", engine_mpt.input_digests(env, job(**kind)), kind)  # no custom music that is read
+        self.assertEqual(engine_mpt.input_digests(env, job(bgm="missing.mp3"))["bgm"], engine_mpt.FILE_MISSING)  # asked for and gone
+        self.assertEqual(engine_mpt.input_digests(env, job(font="Gone.ttf"))["font"], engine_mpt.FILE_MISSING)
 
     def test_preflight_names_a_missing_ffmpeg_or_ffprobe(self):
         env = fake_mpt(self.root)
@@ -432,6 +438,33 @@ class RunnerTests(FakeMptCase):
         self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
         self.assertEqual(self.renders(), 2)
 
+    def test_replacing_the_subtitle_font_file_renders_the_job_again(self):
+        font = self.env.home / "resource" / "fonts" / "BeVietnamPro-Bold.ttf"
+        self.run_pack([video()])
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["skipped"]), (0, 1))
+        font.write_bytes(b"a newer version of the font")
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
+        self.assertEqual(self.renders(), 2)
+        font.write_bytes(b"x")
+        summary, _ = self.run_pack([video(subtitles=False)])  # a job without subtitles never reads the font
+        self.assertEqual(self.renders(), 3)  # (it is a different job anyway: subtitles changed)
+        font.write_bytes(b"y")
+        summary, _ = self.run_pack([video(subtitles=False)])
+        self.assertEqual((summary["done"], summary["skipped"]), (0, 1))  # and a changed font does not matter to it
+
+    def test_a_batch_that_another_run_holds_is_refused(self):
+        pack = packmod.load_pack(write_pack(self.root, [video()]))
+        with runner.batch_lock(self.out / "test-batch"):
+            with self.assertRaises(runner.BatchBusy):
+                runner.run(pack, self.env, self.out, log=self.logs.append)
+            with self.assertRaises(runner.BatchBusy):
+                runner.requalify(pack, self.out)
+            runner.read_state(self.out / "test-batch")  # reading is not a write: no lock needed
+        self.assertEqual(runner.run(pack, self.env, self.out, log=self.logs.append)["done"], 1)  # free again once the holder is done
+        self.assertEqual(self.renders(), 1)
+
     def test_a_deleted_custom_music_file_is_not_skipped_over(self):
         songs = self.env.home / "resource" / "songs"
         songs.mkdir(parents=True)
@@ -601,6 +634,28 @@ class CliTests(FakeMptCase):
         (songs / "foo.mp3").unlink()
         self.assertEqual(status(mpt), "stale")  # the music it needs is gone
         self.assertEqual(status(no_mpt), "done")  # without MPT the file cannot be read, so nothing is claimed about it
+
+    def test_status_notices_a_replaced_font_when_it_can_find_mpt(self):
+        path = write_pack(self.root, [video()])
+        mpt = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        no_mpt = ["--out", str(self.out), "--mpt-home", str(self.root / "no-mpt-here")]
+        self.call("run", str(path), *mpt)
+        status = lambda args: json.loads(self.call("status", str(path), "--json", *args)[1])[0]["status"]
+        (self.env.home / "resource" / "fonts" / "BeVietnamPro-Bold.ttf").write_bytes(b"a newer version of the font")
+        self.assertEqual(status(mpt), "stale")
+        self.assertEqual(self.call("qa", str(path), *mpt)[0], 1)
+        self.assertEqual(status(no_mpt), "done")
+
+    def test_run_exits_3_while_another_run_holds_the_batch(self):
+        path = write_pack(self.root, [video()])
+        mpt = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        with runner.batch_lock(self.out / "test-batch"):
+            code, _, err = self.call("run", str(path), *mpt)
+            self.assertEqual(code, 3)
+            self.assertIn("another", err)
+            self.assertEqual(self.call("qa", str(path), *mpt)[0], 3)
+            self.assertIn(self.call("status", str(path), "--json", *mpt)[0], (0, 1))  # status only reads
+        self.assertEqual(self.call("run", str(path), *mpt)[0], 0)
 
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)

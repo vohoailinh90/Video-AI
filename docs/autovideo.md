@@ -63,7 +63,7 @@ python3 scripts/autovideo/main.py status   batches/meo-lam-video      # pending 
 python3 scripts/autovideo/main.py qa       batches/meo-lam-video      # chạy lại QA trên video đã có, không render
 ```
 
-Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`, tính cả file thật và ngưỡng QA hiện tại), 1 có video lỗi, không qua QA, chưa render, mất file, hoặc là bản cũ so với gói (`stale`) (với `plan`: không tìm thấy MPT, hoặc thiếu khóa/font/nhạc khiến `run` không chạy được), 2 gói hoặc tham số sai (kể cả `--retries` âm, `--timeout` không dương). Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
+Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`, tính cả file thật và ngưỡng QA hiện tại), 1 có video lỗi, không qua QA, chưa render, mất file, hoặc là bản cũ so với gói (`stale`) (với `plan`: không tìm thấy MPT, hoặc thiếu khóa/font/nhạc khiến `run` không chạy được), 2 gói hoặc tham số sai (kể cả `--retries` âm, `--timeout` không dương), 3 một lần chạy khác đang giữ batch. Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
 
 ```
 state.json  summary.json  summary.md
@@ -78,7 +78,8 @@ muốn nghe lại thì dùng `scripts/vo/roundtrip.py` (PhoWhisper).
 Mỗi video được đo trên file thật. Mục `error` mà trượt thì không đăng: đọc được, có một luồng hình, có tiếng, đúng khổ, độ dài trong `target_seconds`,
 tiếng không im lặng (trung bình dưới -50 dB), phụ đề có đủ, đúng thứ tự, không vượt độ dài video, và phủ ít nhất 80% từ của lời đọc. Mục `warn`: độ dài video lệch quá 3 giây so với tiếng.
 Đổi `target_seconds` không làm render lại: `run` và `qa` chỉ kiểm lại video có sẵn (`status` báo `unchecked` cho tới khi kiểm). Video vẫn trượt thì giữ `qa_failed`; sửa gói hoặc ngưỡng, hoặc `run --force --only <id>` để render lại.
-Tên file nhạc tùy chỉnh (`bgm`) nằm trong thư mục của MPT, ngoài gói: tool ghi băm nội dung file khi render, và `run` render lại khi file bị thay (`status` và `qa` cũng báo `stale` khi tìm được MPT; không tìm được MPT thì không nói gì về file nhạc).
+File nhạc tùy chỉnh (`bgm`, khi âm lượng > 0) và font phụ đề (khi bật phụ đề) nằm trong thư mục của MPT, ngoài gói: tool ghi băm nội dung hai file đó khi render, và `run` render lại khi file bị thay hoặc mất (`status` và `qa` cũng báo `stale` khi tìm được MPT; không tìm được MPT thì không nói gì về hai file này). Thứ gói không nêu tên (config.toml của MPT, phiên bản MPT) không được theo dõi.
+`run` và `qa` ghi state và báo cáo nên giữ khoá `<batch>/.lock` (`flock`, chỉ Linux/macOS) trong suốt lần chạy: chạy hai lần cùng một batch thì lần sau thoát với mã 3 thay vì ghi đè state của nhau. `status` chỉ đọc nên không cần khoá. Các batch khác nhau độc lập với nhau; MPT khuyên không render hai video cùng lúc, và tool không chặn việc đó giữa các batch.
 Khóa API trong log của MPT bị thay bằng `***` trước khi lưu.
 
 ## Đã kiểm tra gì, chưa kiểm tra gì

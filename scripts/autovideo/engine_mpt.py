@@ -20,7 +20,7 @@ from pathlib import Path
 from .pack import NO_VOICE, Job
 
 DEFAULT_HOME = Path("~/MoneyPrinterTurbo")
-BGM_MISSING = "missing"  # what bgm_digest says when the job needs a custom music file and it is not there (never a hex digest)
+FILE_MISSING = "missing"  # what input_digests says for a file the job needs and MPT's directories do not have (never a hex digest)
 SECRET_KEY = re.compile(r"key|token|secret|password", re.I)
 
 
@@ -108,20 +108,27 @@ def video_params(job: Job) -> dict:
     return params
 
 
-def bgm_digest(env: MptEnv, job: Job) -> str | None:
-    """SHA-256 of the custom music file the job names, found where MPT looks for it (storage/bgm, then resource/songs).
-
-    None when the job reads no custom music (none, random, or a volume of zero), BGM_MISSING when it needs a file that is not there,
-    else the digest. The file lives in MPT's own directories, outside the pack, so the job's fingerprint cannot cover it: the digest is
-    kept beside the fingerprint instead."""
-    if job.bgm in ("none", "random") or job.bgm_volume <= 0:
-        return None
-    for folder in ("storage/bgm", "resource/songs"):
-        path = env.home / folder / job.bgm
+def _digest_in(env: MptEnv, name: str, folders: tuple[str, ...]) -> str:
+    for folder in folders:
+        path = env.home / folder / name
         if path.is_file():
             with open(path, "rb") as handle:
                 return hashlib.file_digest(handle, "sha256").hexdigest()
-    return BGM_MISSING
+    return FILE_MISSING
+
+
+def input_digests(env: MptEnv, job: Job) -> dict[str, str]:
+    """SHA-256 of the files the pack names that MPT reads from its own directories: the custom music (only when its volume is above zero;
+    MPT looks in storage/bgm, then resource/songs) and the subtitle font (only when subtitles are on; resource/fonts).
+
+    A file that is needed and not there is FILE_MISSING. These files are outside the pack, so the job's fingerprint cannot cover them:
+    the digests are kept beside the fingerprint instead. What the pack does not name (MPT's config.toml, MPT itself) is not covered."""
+    digests: dict[str, str] = {}
+    if job.bgm not in ("none", "random") and job.bgm_volume > 0:
+        digests["bgm"] = _digest_in(env, job.bgm, ("storage/bgm", "resource/songs"))
+    if job.subtitles:
+        digests["font"] = _digest_in(env, job.font, ("resource/fonts",))
+    return digests
 
 
 def _secrets(value, key: str = "") -> list[str]:
