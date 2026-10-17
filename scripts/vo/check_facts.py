@@ -33,6 +33,7 @@ usage: python -I scripts/vo/check_facts.py --source videos/voicestudio/source/dr
 exit status: 0 when everything is traced, 1 otherwise (each problem is printed).
 """
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -79,6 +80,17 @@ CSS_PROPERTIES = {
     "font-weight", "gap", "height", "inset", "justify-content", "left", "letter-spacing", "line-height", "margin", "margin-right",
     "margin-top", "max-width", "min-height", "min-width", "opacity", "overflow", "overflow-wrap", "padding", "padding-bottom",
     "padding-top", "position", "right", "top", "transform-origin", "vertical-align", "white-space", "width"}    # and custom properties --x
+# The style blocks a page may have: the one scripts/radar/compose.py writes (the same for every digest) and the one of the hand-made
+# pilot videos/voicestudio, each by the fingerprint of its text with the white space folded. Properties like display, opacity and
+# left are fine in them, but in any other block they could hide a row that this check counts as shown; a block that is not one of
+# these is refused. Changing compose.py's CSS therefore means updating this on purpose (a test says so).
+TRUSTED_STYLES = {"897723d181cb1efc", "4a606a93b7e2556f"}
+
+
+def style_fingerprint(css: str) -> str:
+    return hashlib.sha256(re.sub(r"\s+", " ", css).strip().encode("utf-8")).hexdigest()[:16]
+
+
 CSS_FUNCTIONS = {"linear-gradient", "radial-gradient", "rgba", "var"}      # image-set(), url(), element() ... can load or draw a picture
 INLINE_PROPERTIES = {"font-size"}                                        # what the template sets inline; display, opacity, left ... could hide a row
 # The only file a page may load: the template's GSAP, named exactly so and identical to the copy vendored in scripts/radar/assets.
@@ -118,6 +130,8 @@ class Visible(HTMLParser):
         self.parts = []
         self.code = []       # problems with the page's code: what it could write, load or run
         self.scripts = []    # the trusted script files the page loads
+        self.audio = []      # (id, src) of every <audio> element
+        self.style = None    # the text of the <style> element being read
 
     def handle_starttag(self, tag, attrs):
         self.look_at_code(tag, attrs)
@@ -126,7 +140,15 @@ class Visible(HTMLParser):
         is_label = any(name == "data-label" for name, _ in attrs)
         self.stack.append([tag, tag in self.SKIP, [] if is_label else None])
 
+    def check_style(self):
+        if self.style is not None and style_fingerprint(self.style) not in TRUSTED_STYLES:
+            details = css_problems(self.style)
+            self.code.append("a style that is not the template's" + (f" ({'; '.join(details[:4])})" if details else ""))
+        self.style = None
+
     def handle_endtag(self, tag):
+        if tag == "style":
+            self.check_style()
         for index in range(len(self.stack) - 1, -1, -1):
             if self.stack[index][0] == tag:
                 for _, _, buffer in self.stack[index:][::-1]:
@@ -141,6 +163,10 @@ class Visible(HTMLParser):
         if tag not in TEMPLATE_TAGS:
             self.code.append(f"<{tag}>, which the template never uses")
             return
+        if tag == "style":
+            self.style = ""
+        if tag == "audio":
+            self.audio.append((dict(attrs).get("id"), dict(attrs).get("src")))
         names = [name for name, _ in attrs]
         for name in sorted({n for n in names if names.count(n) > 1}):       # dict() would keep the last, a browser keeps the first
             self.code.append(f"the attribute {name} twice on <{tag}>")
@@ -163,6 +189,7 @@ class Visible(HTMLParser):
 
     def close(self):
         super().close()
+        self.check_style()
         for _, _, buffer in self.stack[::-1]:      # an element that was never closed still shows what it holds
             if buffer is not None:
                 text = " ".join(buffer).strip()
@@ -178,7 +205,7 @@ class Visible(HTMLParser):
         if inside and inside[-1] == "script":
             self.code += [f"script that uses {problem}" for problem in js_problems(data)]
         elif inside:
-            self.code += [f"a style that sets {problem}" for problem in css_problems(data)]
+            self.style = (self.style or "") + data
         for entry in reversed(self.stack):
             if entry[2] is not None:          # inside a data-label element: held back until we know it is a fixed label
                 entry[2].append(text)
@@ -395,6 +422,15 @@ def main() -> int:
     parser = Visible()
     parser.feed(Path(args.html).read_text(encoding="utf-8"))
     parser.close()
+    wanted = {line["id"]: f"assets/{line['id']}.wav" for line in lines}
+    wanted["music-bed"] = "assets/pad.wav"
+    for audio_id, src in parser.audio:                  # revoice.py sets times and levels, never which file an element plays
+        if audio_id not in wanted:
+            parser.code.append(f"an audio element {audio_id!r} that is neither a line of voiceover.json nor the music bed")
+        elif src != wanted[audio_id]:
+            parser.code.append(f"the audio element {audio_id!r} plays {src!r}, not {wanted[audio_id]!r}")
+    present = {audio_id for audio_id, _ in parser.audio}
+    parser.code += [f"no audio element for the line {line_id!r}" for line_id in wanted if line_id != "music-bed" and line_id not in present]
     for name in sorted(set(parser.scripts)):         # the one trusted file must really be the template's, not a file with its name
         loaded = Path(args.html).resolve().parent / name
         if not loaded.is_file() or not TRUSTED_COPY.is_file() or loaded.read_bytes() != TRUSTED_COPY.read_bytes():

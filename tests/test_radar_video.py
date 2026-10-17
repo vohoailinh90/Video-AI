@@ -627,9 +627,6 @@ class ReviewFindings(unittest.TestCase):
             status, output = run_gate(digest, doc, changed)
             self.assertEqual(status, 1, name)
             self.assertIn("put words on the screen or load code", output, name)
-        # harmless code stays harmless: a local script, an empty `content`, justify-content
-        calm = html.replace("</head>", '<style>.x::before { content: ""; content: none } .y { justify-content: center }</style></head>', 1)
-        self.assertEqual(run_gate(digest, doc, calm)[0], 0)
         # a file next to the page is not trusted for being local: only the template's own gsap.min.js, byte for byte
         for name, changed, files in (
                 ("other script", html.replace("</head>", '<script src="evil.js"></script></head>', 1), {"evil.js": "document.title = 1"}),
@@ -777,6 +774,56 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(make_video.silent_narration(project, doc, music_only), ["vo-1"])           # the music alone clears -45 dB, and is not a voice
             self.assertEqual(make_video.silent_narration(project, doc, with_voice), [])
             self.assertTrue(make_video.whole_file_levels(music_only)[0] > make_video.AUDIBLE_DB)
+
+    def test_the_style_block_is_the_templates_so_it_cannot_hide_a_row(self):
+        digest = digest_with(lambda d: d["draft"]["try_it"].update(commands=["bun run dev", "bun run build"]))
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        for what, changed in (("hide commands", html.replace("</style>", ".term .cmd { display: none }</style>", 1)),
+                              ("transparent", html.replace("</style>", ".term .cmd { color: transparent }</style>", 1)),
+                              ("off screen", html.replace("</style>", ".term .cmd { position: absolute; left: -9999px }</style>", 1)),
+                              ("any other change", html.replace("overflow: hidden", "overflow: visible", 1)),
+                              ("a second block", html.replace("</head>", "<style>.a { color: red }</style></head>", 1)),
+                              ("no block", re.sub(r"<style>.*?</style>", "", html, flags=re.S))):
+            self.assertNotEqual(changed, html, what)
+            status, output = run_gate(digest, doc, changed)
+            if what == "no block":
+                self.assertEqual(status, 0, what)       # no style at all hides nothing, and is not a way to put words on the screen
+                continue
+            self.assertEqual(status, 1, what)
+            self.assertIn("a style that is not the template's", output, what)
+        # compose.py's style and the hand-made pilot's are the two the check knows; changing either one has to be a decision
+        norm = lambda css: check_facts.style_fingerprint(css)
+        self.assertIn(norm(re.search(r"<style>(.*?)</style>", html, re.S).group(1)), check_facts.TRUSTED_STYLES)
+        pilot = (REPO / "videos" / "voicestudio" / "index.html").read_text(encoding="utf-8")
+        self.assertIn(norm(re.search(r"<style>(.*?)</style>", pilot, re.S).group(1)), check_facts.TRUSTED_STYLES)
+        auto = (REPO / "videos" / "voicestudio-auto" / "index.html").read_text(encoding="utf-8")
+        self.assertIn(norm(re.search(r"<style>(.*?)</style>", auto, re.S).group(1)), check_facts.TRUSTED_STYLES)
+        # whitespace in the block does not matter
+        reflowed = re.sub(r"<style>(.*?)</style>", lambda m: "<style>" + re.sub(r"\s+", "\n  ", m.group(1)) + "</style>", html, flags=re.S)
+        self.assertEqual(run_gate(digest, doc, reflowed)[0], 0)
+
+    def test_each_voice_line_plays_its_own_clip(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        ids = [line["id"] for line in doc["lines"]]
+        self.assertGreaterEqual(len(ids), 3)
+        for what, changed in (
+                ("every line plays the first clip", re.sub(r'(id="vo-(?!1")\d+" src=")assets/vo-\d+\.wav', r"\1assets/vo-1.wav", html)),
+                ("one clip is another's", html.replace('src="assets/vo-2.wav"', 'src="assets/vo-1.wav"', 1)),
+                ("a clip from elsewhere", html.replace('src="assets/vo-2.wav"', 'src="assets/../vo-2.wav"', 1)),
+                ("a line without its clip", re.sub(r'<audio id="vo-3"[^>]*></audio>', "", html)),
+                ("an audio element nobody asked for", html.replace("</body>", '<audio id="extra" src="assets/vo-1.wav" data-start="0" data-duration="1"></audio></body>', 1)),
+                ("the music bed is a voice clip", html.replace('src="assets/pad.wav"', 'src="assets/vo-1.wav"', 1))):
+            self.assertNotEqual(changed, html, what)
+            status, output = run_gate(digest, doc, changed)
+            self.assertEqual(status, 1, what)
+            self.assertIn("audio", output, what)
 
     def rendered_plan(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
