@@ -391,7 +391,8 @@ def shown(text: str) -> str:
 
 # the marks beyond ASCII that the text of a video may use: quotes, dashes, the ellipsis, arrows, bullets, units and the like, and the full-width
 # brackets, colons and commas that stand around a name in another script (plain_char reads those as their ASCII twins)
-MARKS = set("“”‘’‚„«»‹›–—…→←↔·•©®°×÷±≈≠≤≥∞€£¥′″§¶†‡‰（）：，；！？［］。、「」『』〈〉《》【】～")
+# A mark that is the unit of a number the check reads, as % is (‰, the per mille sign), is not in the list: the check would not read the figure.
+MARKS = set("“”‘’‚„«»‹›–—…→←↔·•©®°×÷±≈≠≤≥∞€£¥′″§¶†‡（）：，；！？［］。、「」『』〈〉《》【】～")
 
 
 def compat_problems(text: str) -> list:

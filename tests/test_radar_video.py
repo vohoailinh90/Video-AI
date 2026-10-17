@@ -893,7 +893,7 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(len(problems), 1, char)
             self.assertIn(f"U+{ord(char):04X}", problems[0], char)
         # a punctuation mark or a symbol outside the known marks is refused too: a Unicode hyphen, slash or colon can stand in a name
-        for char in ("\u2011", "\u2010", "\u2215", "\u2044", "\u2236", "\U0001F680", "\u2116", "\u2796", "\u2212"):
+        for char in ("\u2011", "\u2010", "\u2215", "\u2044", "\u2236", "\U0001F680", "\u2116", "\u2796", "\u2212", "\u2030", "\u2031"):
             problems = check_facts.compat_problems(f"Open{char}AI")
             self.assertEqual(len(problems), 1, repr(char))
             self.assertIn(f"U+{ord(char):04X}", problems[0], repr(char))
