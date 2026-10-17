@@ -9,6 +9,8 @@ A script decides, not a model, the way github-radar's gates do:
     cites; Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
+  * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
+    traced;
   * each command in try_it.commands must appear on screen exactly as the digest gives it (voiceover.json's `commands_shown`, when
     present, limits this to the first N commands, for a terminal that cannot show them all).
 
@@ -27,6 +29,9 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
+from numbers_vi import speak_text  # noqa: E402
 
 NUMBER = re.compile(r"\d[\d.,]*")
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
@@ -132,6 +137,10 @@ def main() -> int:
             print(f"{line['id']}: a cited field does not exist in the source: {cited}")
             failures += 1
             continue
+        if "speak" in line and line["speak"] != speak_text(line["text"]):
+            print(f"{line['id']}: `speak` is what the viewer hears and must be the spelled-out form of `text` "
+                  f"(numbers_vi.speak_text), not other words; reword `text` instead")
+            failures += 1
         problems = untraced(line["text"], blob(fields), allow)
         if problems:
             print(f"{line['id']}: not in the cited fields {cited}: {', '.join(problems)}")

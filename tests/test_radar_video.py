@@ -360,23 +360,60 @@ class Narration(unittest.TestCase):
         self.assertIn("ElevenLabs", output)
         self.assertIn("number 10", output)
 
-    def test_speak_is_refreshed_before_synthesis(self):
+    def test_speak_always_follows_text(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
         tl = planlib.timeline(plan, estimated_durations(plan))
         doc = make_video.voiceover_doc(plan, tl)
         caveat = next(l for l in doc["lines"] if l["unit"] == "caveat:0")
         self.assertIn("ba chấm không", caveat["speak"])
-        caveat.pop("speak")                         # a scaffold made before the AGPL-3.0 rule existed
-        self.assertTrue(make_video.refresh_speak(doc, plan))
+        caveat.pop("speak")                          # a scaffold made before the AGPL-3.0 rule existed
+        self.assertTrue(make_video.refresh_speak(doc))
         self.assertIn("ba chấm không", caveat["speak"])
-        self.assertFalse(make_video.refresh_speak(doc, plan))
+        self.assertFalse(make_video.refresh_speak(doc))
+        # a line reworded by hand: the old generated `speak` must not survive, or the old sentence would be read
+        caveat["text"] = "Mã nguồn dùng giấy phép AGPL-3.0; còn trọng số có điều kiện riêng."
+        self.assertTrue(make_video.refresh_speak(doc))
+        self.assertEqual(caveat["speak"], "Mã nguồn dùng giấy phép AGPL ba chấm không; còn trọng số có điều kiện riêng.")
+        kept = make_video.voiceover_doc(plan, tl, doc)
+        self.assertEqual(next(l for l in kept["lines"] if l["unit"] == "caveat:0")["speak"], caveat["speak"])
+        # a reworded line without digits has no `speak` at all
         step = next(l for l in doc["lines"] if l["unit"] == "step:1")
-        step["text"] = "Chạy trong 5 phút."          # reworded by hand: gets its own speak
-        make_video.refresh_speak(doc, plan)
-        self.assertEqual(step["speak"], "Chạy trong năm phút.")
-        step["speak"] = "Chạy trong năm phút đồng hồ."   # written by hand: kept
-        make_video.refresh_speak(doc, plan)
-        self.assertEqual(step["speak"], "Chạy trong năm phút đồng hồ.")
+        step["text"], step["speak"] = "Chạy trong năm phút.", "Chạy trong 5 phút."
+        make_video.refresh_speak(doc)
+        self.assertNotIn("speak", step)
+
+    def test_the_gate_refuses_a_speak_that_is_not_the_spelled_out_text(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html = compose.render(plan, tl)
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        line = next(l for l in doc["lines"] if l["unit"] == "step:0")
+        line["speak"] = "ElevenLabs nhanh hơn chín mươi chín nghìn lần"
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn(f"{line['id']}: `speak`", output)
+
+    def test_the_narrator_named_in_the_report_is_the_one_in_readme_and_preview(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        for voice, slug in (("Mai Anh", "mai-anh"), ("Hải Đăng", "hai-dang"), ("Thái Sơn", "thai-son")):
+            report = {"voice": {"voice": voice}, "render": {"duration": 60.0, "check": "ok"}}
+            with tempfile.TemporaryDirectory() as tmp:
+                project = Path(tmp) / "p"
+                (project / "source").mkdir(parents=True)
+                doc = make_video.write_composition(project, plan, tl)
+                make_video.write_preview_json(project, plan, report)
+                make_video.write_readme(project, plan, doc, report)
+                preview = (project / "preview.json").read_text(encoding="utf-8")
+                readme = (project / "README.md").read_text(encoding="utf-8")
+            self.assertIn(voice, preview)
+            self.assertIn(voice, readme)
+            self.assertIn(f'"key": "{slug}"', preview)
+            for other in {"Mai Anh", "Hải Đăng", "Thái Sơn"} - {voice}:
+                self.assertNotIn(other, preview + readme)
 
     def test_speak_is_set_only_when_it_differs(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "impeccable.json"))

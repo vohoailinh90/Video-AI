@@ -25,16 +25,19 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))  # the modules next to this file; -I does not add the script's folder
+sys.path.insert(0, str(REPO / "scripts" / "vo"))  # numbers_vi, shared with check_facts.py
 
 import compose  # noqa: E402
 import plan as planlib  # noqa: E402
 from numbers_vi import speak_text  # noqa: E402
 
+DEFAULT_VOICE = "Hải Đăng"          # the same default as scripts/vo/synth.py
 HYPERFRAMES_VERSION = "0.8.168"   # pinned into each project's package.json by `hyperframes init`
 VO = REPO / "scripts" / "vo"
 TAKE_WORRY = 0.30                  # a chosen take with more than this share of wrong words is flagged in the report
@@ -118,14 +121,12 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
                 "scene": planlib.unit_label(plan, unit), "text": unit["text"]}
         if unit["key"] in old and old[unit["key"]].get("text") != unit["text"]:     # reworded by hand
             line["text"] = old[unit["key"]]["text"]
-            spoken = old[unit["key"]].get("speak") or speak_text(line["text"])
-            if spoken != line["text"]:
-                line["speak"] = spoken
             line["source"] = old[unit["key"]].get("source", unit["source"])
         else:
-            if "speak" in unit:
-                line["speak"] = unit["speak"]
             line["source"] = unit["source"]
+        spoken = speak_text(line["text"])
+        if spoken != line["text"]:
+            line["speak"] = spoken
         lines.append(line)
     doc = {"allow": (existing or {}).get("allow", [])}
     if plan["try"] and plan["try"]["commands"]:
@@ -134,21 +135,14 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
     return doc
 
 
-def refresh_speak(doc, plan) -> bool:
-    """Bring each line's `speak` up to date before synthesizing. A line still worded as in the digest takes the plan's current
-    `speak` (the number rules may have changed since the scaffold); a reworded line gets one if it has none. A `speak` a person
-    wrote on a reworded line stays. Returns True when something changed."""
-    units = {u["key"]: u for u in plan["units"]}
+def refresh_speak(doc) -> bool:
+    """Make every line's `speak` the spelled-out form of its current `text` before synthesizing. `speak` is derived, never written
+    by hand: scripts/vo/check_facts.py refuses a line whose `speak` is anything else, because `speak` is what the viewer hears.
+    Returns True when something changed."""
     changed = False
     for line in doc["lines"]:
-        unit = units[line["unit"]]
-        if line["text"] == unit["text"]:
-            wanted = unit.get("speak")
-        elif "speak" in line:
-            continue
-        else:
-            wanted = speak_text(line["text"])
-            wanted = wanted if wanted != line["text"] else None
+        spoken = speak_text(line["text"])
+        wanted = spoken if spoken != line["text"] else None
         if wanted != line.get("speak"):
             changed = True
             if wanted:
@@ -272,7 +266,7 @@ def cmd_voice(args, project=None) -> dict:
     if not args.tts_python:
         fail("voice needs --tts-python (the Python of the VieNeu-TTS environment, see docs/voiceover-workflow.md)")
     digest, plan, doc = load_project(project)
-    if refresh_speak(doc, plan):
+    if refresh_speak(doc):
         write_json(project / "voiceover.json", doc)
     ids = [l["id"] for l in doc["lines"]]
     only = [i for i in (args.only.split(",") if args.only else ids)]
@@ -396,7 +390,14 @@ def cmd_render(args, project=None) -> dict:
     return report
 
 
+def voice_slug(name: str) -> str:
+    """hai-dang for "Hải Đăng": what build_preview.py wants in a key."""
+    plain = unicodedata.normalize("NFD", name.replace("đ", "d").replace("Đ", "D"))
+    return re.sub(r"[^a-z0-9]+", "-", "".join(c for c in plain if not unicodedata.combining(c)).lower()).strip("-") or "voice"
+
+
 def write_preview_json(project: Path, plan, report):
+    voice = report.get("voice", {}).get("voice", DEFAULT_VOICE)
     render = report.get("render", {})
     final = render.get("final_mix")
     measured = (f"PhoWhisper-small nghe lại âm thanh cắt từ chính file video này, sai {final['edits']} trên {final['ref_words']} từ "
@@ -405,12 +406,12 @@ def write_preview_json(project: Path, plan, report):
     doc = {
         "title": f"Video tự động {plan['name']}",
         "eyebrow": f"Video-AI · từ bài GitHub Radar {plan['scan']}".strip(),
-        "lede": (f"Video {render.get('duration', 0):.0f} giây tự động dựng từ một bài radar: lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền. "
+        "lede": (f"Video {render.get('duration', 0):.0f} giây tự động dựng từ một bài radar: lời đọc tiếng Việt giọng {voice} (VieNeu-TTS) và nhạc nền. "
                  "Mọi số, tên và lệnh trên màn hình lấy từ các trường của bài, và một script đã kiểm tra điều đó."),
         "lines": "voiceover.json",
         "facts": [["Độ dài", f"{render.get('duration', 0):.1f} giây".replace(".", ",")], ["Hình ảnh", "1920×1080, 30 khung hình/giây"],
-                  ["Lời đọc", "VieNeu-TTS v3 Turbo, giọng Hải Đăng"], ["Nguồn", f"{plan['full_name']}, bài quét ngày {plan['scan']}"]],
-        "voices": [{"key": "hai-dang", "label": "Giọng nam · Hải Đăng", "mp4": f"renders/{project.name}.mp4"}],
+                  ["Lời đọc", f"VieNeu-TTS v3 Turbo, giọng {voice}"], ["Nguồn", f"{plan['full_name']}, bài quét ngày {plan['scan']}"]],
+        "voices": [{"key": voice_slug(voice), "label": f"Giọng đọc · {voice}", "mp4": f"renders/{project.name}.mp4"}],
         "notes": ["Mức dễ hiểu đã được kiểm tra bằng máy: " + measured if final else measured,
                   "Chưa có người nghe đánh giá độ tự nhiên và độ dễ hiểu của giọng. Script kiểm tra chỉ bắt số, tên và lệnh bịa; "
                   "câu tiếng Việt viết lại cần người đối chiếu với bài."],
@@ -420,6 +421,7 @@ def write_preview_json(project: Path, plan, report):
 
 def write_readme(project: Path, plan, doc, report):
     base, voice, render = rel(project), report.get("voice", {}), report.get("render", {})
+    narrator = voice.get("voice", DEFAULT_VOICE)
     prov = json.loads((project / "source" / "provenance.json").read_text(encoding="utf-8")) if (project / "source" / "provenance.json").exists() else {}
     rows = []
     for line in doc["lines"]:
@@ -439,7 +441,7 @@ def write_readme(project: Path, plan, doc, report):
               f"({100 * final['edits'] / max(final['ref_words'], 1):.0f}%)" if final else "Mức dễ hiểu chưa được đo")
     text = f"""# Video thử: {plan['name']} (tự động từ bài GitHub Radar {plan['scan']})
 
-Video {render.get('duration', 0):.1f} giây, 1920×1080, 30 khung hình/giây, {len(plan['scenes'])} cảnh, lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền tự tạo.
+Video {render.get('duration', 0):.1f} giây, 1920×1080, 30 khung hình/giây, {len(plan['scenes'])} cảnh, lời đọc tiếng Việt giọng {narrator} (VieNeu-TTS) và nhạc nền tự tạo.
 File này do `scripts/radar/make_video.py` tạo ra; cách làm và giới hạn: `docs/radar-to-video.md`.
 
 ## Nguồn
@@ -493,7 +495,7 @@ def add_voice_args(sub):
     sub.add_argument("--tts-hf-home", help="HF_HOME of the TTS environment (also sets HF_HUB_OFFLINE=1)")
     sub.add_argument("--asr-hf-home", help="HF_HOME of the ASR environment (also sets HF_HUB_OFFLINE=1)")
     sub.add_argument("--takes", type=int, default=3, help="takes per line (default: %(default)s)")
-    sub.add_argument("--voice", default="Hải Đăng", help="VieNeu-TTS preset voice (default: %(default)s)")
+    sub.add_argument("--voice", default=DEFAULT_VOICE, help="VieNeu-TTS preset voice (default: %(default)s)")
 
 
 def main() -> int:

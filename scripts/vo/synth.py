@@ -53,7 +53,7 @@ def main() -> int:
     for line in lines:
         if wanted and line["id"] not in wanted:
             continue
-        spoken = line.get("speak", line["text"])  # numbers spelled out by scripts/radar/numbers_vi.py, for example
+        spoken = line.get("speak", line["text"])  # numbers spelled out by numbers_vi.py; check_facts.py refuses any other `speak`
         audio = tts.infer(spoken, voice=args.voice)
         path = out / f"{line['id']}.wav"
         tts.save(audio, str(path))
