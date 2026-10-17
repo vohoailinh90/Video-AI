@@ -113,13 +113,22 @@ def cmd_run(args) -> int:
     return 1 if summary["failed"] or summary["qa_failed"] else 0
 
 
+def _env_if_any(args):
+    """The MPT checkout when it can be found, else None: `status` and `qa` work without it, but then cannot look at the music file."""
+    try:
+        return engine_mpt.locate(args.mpt_home, args.mpt_python)
+    except engine_mpt.MptError:
+        return None
+
+
 def cmd_status(args) -> int:
     pack = _load(args)
     state = runner.read_state(Path(args.out) / pack.batch)["jobs"]
+    env = _env_if_any(args)
     rows = []
     for job in pack.jobs:
         entry = state.get(job.id)
-        status = runner.job_status(entry, job, Path(args.out) / pack.batch / job.id)
+        status = runner.job_status(entry, job, Path(args.out) / pack.batch / job.id, engine_mpt.bgm_digest(env, job) if env else None)
         rows.append({"id": job.id, "status": status, "attempts": (entry or {}).get("attempts", 0), "error": (entry or {}).get("error")})
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
@@ -132,7 +141,7 @@ def cmd_status(args) -> int:
 def cmd_qa(args) -> int:
     pack = _load(args)
     try:
-        rows = runner.requalify(pack, Path(args.out), [i for i in (args.only or "").split(",") if i])
+        rows = runner.requalify(pack, Path(args.out), [i for i in (args.only or "").split(",") if i], _env_if_any(args))
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

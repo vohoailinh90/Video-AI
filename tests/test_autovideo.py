@@ -3,6 +3,7 @@
     python3 -m unittest discover -s tests -v
 """
 import contextlib
+import hashlib
 import io
 import os
 import json
@@ -13,6 +14,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -198,6 +200,30 @@ class PackTests(unittest.TestCase):
         self.assertIn("font Missing.ttf", runner.preflight(env, job(font="Missing.ttf", subtitles=True)))
         self.assertIsNone(runner.preflight(env, job(bgm="missing.mp3", bgm_volume=0)))
         self.assertIn("music file missing.mp3", runner.preflight(env, job(bgm="missing.mp3", bgm_volume=0.2)))
+
+    def test_bgm_digest_follows_the_music_file_mpt_will_read(self):
+        env = fake_mpt(self.root)
+        songs = env.home / "resource" / "songs"
+        songs.mkdir()
+        job = lambda **d: packmod.load_pack(write_pack(self.root, [video()], d)).jobs[0]
+        (songs / "foo.mp3").write_bytes(b"aaaa")
+        first = engine_mpt.bgm_digest(env, job(bgm="foo.mp3"))
+        self.assertEqual(first, hashlib.sha256(b"aaaa").hexdigest())
+        (songs / "foo.mp3").write_bytes(b"bbbb")  # same name, same size, other music
+        self.assertNotEqual(engine_mpt.bgm_digest(env, job(bgm="foo.mp3")), first)
+        (env.home / "storage" / "bgm").mkdir(parents=True)
+        (env.home / "storage" / "bgm" / "foo.mp3").write_bytes(b"cccc")  # MPT looks in storage/bgm before resource/songs
+        self.assertEqual(engine_mpt.bgm_digest(env, job(bgm="foo.mp3")), hashlib.sha256(b"cccc").hexdigest())
+        for kind in ({"bgm": "none"}, {"bgm": "random"}, {"bgm": "foo.mp3", "bgm_volume": 0}, {"bgm": "missing.mp3"}):
+            self.assertIsNone(engine_mpt.bgm_digest(env, job(**kind)), kind)  # no custom music that is read
+
+    def test_preflight_names_a_missing_ffmpeg_or_ffprobe(self):
+        env = fake_mpt(self.root)
+        job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]
+        self.assertIsNone(runner.preflight(env, job))
+        for gone in ("ffmpeg", "ffprobe"):
+            with mock.patch.object(runner.shutil, "which", lambda name, gone=gone: None if name == gone else f"/usr/bin/{name}"):
+                self.assertIn(gone, runner.preflight(env, job))
 
     def test_locate_refuses_a_python_that_cannot_run(self):
         env = fake_mpt(self.root)
@@ -393,6 +419,18 @@ class RunnerTests(FakeMptCase):
         with self.assertRaises(ValueError):
             self.run_pack([video()], retries=-1)
 
+    def test_replacing_the_custom_music_file_renders_the_job_again(self):
+        songs = self.env.home / "resource" / "songs"
+        songs.mkdir(parents=True)
+        (songs / "foo.mp3").write_bytes(b"aaaa")
+        self.run_pack([video()], {"bgm": "foo.mp3"})
+        summary, _ = self.run_pack([video()], {"bgm": "foo.mp3"})
+        self.assertEqual((summary["done"], summary["skipped"]), (0, 1))
+        (songs / "foo.mp3").write_bytes(b"bbbb")  # same name and size, other music
+        summary, _ = self.run_pack([video()], {"bgm": "foo.mp3"})
+        self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
+        self.assertEqual(self.renders(), 2)
+
     def test_a_python_that_cannot_start_is_a_startup_failure_not_a_traceback(self):
         broken = engine_mpt.MptEnv(self.env.home, (str(self.root / "gone" / "python"),))
         summary, _ = self.run_pack([video("01-a"), video("02-b")], env=broken, retries=2)
@@ -532,6 +570,21 @@ class CliTests(FakeMptCase):
         for command in ("plan", "status"):
             code, out, _ = self.call(command, str(path), "--json", *base)
             json.loads(out)  # these do print JSON
+
+    def test_status_and_qa_notice_a_replaced_music_file_when_they_can_find_mpt(self):
+        songs = self.env.home / "resource" / "songs"
+        songs.mkdir(parents=True)
+        (songs / "foo.mp3").write_bytes(b"aaaa")
+        path = write_pack(self.root, [video()], {"bgm": "foo.mp3"})
+        mpt = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        no_mpt = ["--out", str(self.out), "--mpt-home", str(self.root / "no-mpt-here")]
+        self.call("run", str(path), *mpt)
+        status = lambda args: json.loads(self.call("status", str(path), "--json", *args)[1])[0]["status"]
+        self.assertEqual(status(mpt), "done")
+        (songs / "foo.mp3").write_bytes(b"bbbb")
+        self.assertEqual(status(mpt), "stale")  # the music changed after the render
+        self.assertEqual(self.call("qa", str(path), *mpt)[0], 1)  # and QA does not pass the old video for the new music
+        self.assertEqual(status(no_mpt), "done")  # without MPT the file cannot be read, so nothing is claimed about it
 
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)

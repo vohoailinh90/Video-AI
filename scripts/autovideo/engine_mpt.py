@@ -6,6 +6,7 @@ reads the JSON summary MPT prints. MPT's keys stay in MPT's own config.toml; the
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -104,6 +105,21 @@ def video_params(job: Job) -> dict:
     else:
         params["video_terms"] = list(job.terms)
     return params
+
+
+def bgm_digest(env: MptEnv, job: Job) -> str | None:
+    """SHA-256 of the custom music file the job names, found where MPT looks for it (storage/bgm, then resource/songs).
+
+    None when the job reads no custom music (none, random, or a volume of zero) or the file is not there. The file lives in MPT's own
+    directories, outside the pack, so the job's fingerprint cannot cover it: the digest is kept beside the fingerprint instead."""
+    if job.bgm in ("none", "random") or job.bgm_volume <= 0:
+        return None
+    for folder in ("storage/bgm", "resource/songs"):
+        path = env.home / folder / job.bgm
+        if path.is_file():
+            with open(path, "rb") as handle:
+                return hashlib.file_digest(handle, "sha256").hexdigest()
+    return None
 
 
 def _secrets(value, key: str = "") -> list[str]:

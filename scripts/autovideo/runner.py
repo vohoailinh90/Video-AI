@@ -57,6 +57,9 @@ def write_json(path: Path, data) -> None:
 
 def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
     """Reasons a render cannot work, found before MPT starts. None when nothing is wrong."""
+    gone = [tool for tool in ("ffmpeg", "ffprobe") if shutil.which(tool) is None]
+    if gone:
+        return f"{' and '.join(gone)} not found on PATH (MPT needs ffmpeg, and QA needs ffmpeg and ffprobe)"
     info = engine_mpt.doctor_info(env)
     key = f"{job.material_source}_api_keys"
     if job.material_source != "local" and not info.get(key):
@@ -115,12 +118,13 @@ def qa_basis(job: Job) -> list[float]:
     return [job.min_seconds, job.max_seconds]
 
 
-def job_status(entry: dict | None, job: Job, dest: Path) -> str:
+def job_status(entry: dict | None, job: Job, dest: Path, bgm: str | None = None) -> str:
     """What a job amounts to now: pending, stale, missing, unchecked, or the status its last run recorded (done, qa_failed, failed, running).
 
     `done` (and `qa_failed`) is only said when the state, the files and the QA limits agree: the state alone is not enough, because a
     failed render of an edited job leaves the old video in the folder, a video can be deleted, and changing target_seconds changes what
-    passes, in both directions."""
+    passes, in both directions. `bgm` is the digest of the custom music file as it is now (engine_mpt.bgm_digest), or None when the
+    caller cannot read it (no MPT) or the job has none; the digest recorded at the render must then not be contradicted."""
     if not entry:
         return "pending"
     if entry.get("fingerprint") != job.fingerprint():
@@ -132,6 +136,8 @@ def job_status(entry: dict | None, job: Job, dest: Path) -> str:
         return "missing"
     if rendered_fingerprint(dest) != job.fingerprint():
         return "stale"
+    if bgm is not None and entry.get("bgm_digest") != bgm:
+        return "stale"  # the music file was replaced after the render
     if entry.get("qa_basis") != qa_basis(job):
         return "unchecked"  # judged under other QA limits
     return status
@@ -164,10 +170,11 @@ def run(
         dest = batch_dir / job.id
         entry = state["jobs"].get(job.id)
         label = f"[{number}/{len(selected)}] {job.id}"
-        status = "pending" if force else job_status(entry, job, dest)
+        bgm = engine_mpt.bgm_digest(env, job)
+        status = "pending" if force else job_status(entry, job, dest, bgm)
         if status == "unchecked":
             # Only the QA limits changed since the last check: look at the video that is there again, do not render it again.
-            checked = requalify_job(job, dest, state)
+            checked = requalify_job(job, dest, state, bgm)
             write_json(batch_dir / "state.json", state)
             status = checked["status"]
             log(f"{label}: QA limits changed, checked again: {status}")
@@ -230,7 +237,7 @@ def run(
         state["jobs"][job.id] = {
             "status": outcome["status"], "fingerprint": job.fingerprint(), "attempts": attempts, "seconds": seconds, "finished": report["finished"],
             "task_id": outcome.get("engine", {}).get("task_id"), "stage": outcome.get("stage"), "error": outcome.get("error"),
-            "qa_basis": qa_basis(job) if "checks" in outcome else None,
+            "qa_basis": qa_basis(job) if "checks" in outcome else None, "bgm_digest": bgm,
         }
         write_json(batch_dir / "state.json", state)
         failures = [c["name"] for c in outcome.get("checks", []) if c["level"] == "error" and not c["ok"]]
@@ -257,7 +264,7 @@ def summarise(pack: Pack, rows: list[dict], batch_dir: Path) -> dict:
     return summary
 
 
-def requalify(pack: Pack, out_root: Path, only: list[str] | None = None) -> list[dict]:
+def requalify(pack: Pack, out_root: Path, only: list[str] | None = None, env: engine_mpt.MptEnv | None = None) -> list[dict]:
     """Run QA again on the folders that hold this version of each job, without rendering. Use after changing target_seconds or the QA code."""
     batch_dir = out_root / pack.batch
     unknown = [i for i in (only or []) if i not in [job.id for job in pack.jobs]]
@@ -268,12 +275,12 @@ def requalify(pack: Pack, out_root: Path, only: list[str] | None = None) -> list
     for job in pack.jobs:
         if only and job.id not in only:
             continue
-        rows.append(requalify_job(job, batch_dir / job.id, state))
+        rows.append(requalify_job(job, batch_dir / job.id, state, engine_mpt.bgm_digest(env, job) if env else None))
     write_json(batch_dir / "state.json", state)
     return rows
 
 
-def requalify_job(job: Job, dest: Path, state: dict) -> dict:
+def requalify_job(job: Job, dest: Path, state: dict, bgm: str | None = None) -> dict:
     """QA on one folder, and the state updated to match. A folder that does not hold this version of the job is not checked."""
     if not (dest / "video.mp4").is_file():
         return {"id": job.id, "status": "missing", "checks": []}
@@ -281,6 +288,8 @@ def requalify_job(job: Job, dest: Path, state: dict) -> dict:
         # The folder holds a video of an earlier version of this job (its newer render failed or never finished).
         # Passing QA does not make it the video of this job, so it is neither checked nor marked done.
         return {"id": job.id, "status": "stale", "checks": []}
+    if bgm is not None and state["jobs"].get(job.id, {}).get("bgm_digest") != bgm:
+        return {"id": job.id, "status": "stale", "checks": []}  # rendered with other music than the file there now
     checks = evaluate(job, dest)
     entry = state["jobs"].setdefault(job.id, {})
     entry.update(fingerprint=job.fingerprint(), status="done" if qa.passed(checks) else "qa_failed", qa_basis=qa_basis(job))
