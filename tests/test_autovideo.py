@@ -32,6 +32,9 @@ FAKE_CLI = textwrap.dedent('''
     p = json.loads(open(manifest, encoding="utf-8").readline())
     subject, tid = p["video_subject"], str(uuid.uuid4())
     print("log line with key " + "%(secret)s", file=sys.stderr)
+    if "ROTATE" in subject:  # the key is rotated in config.toml while the render runs, and the old one is still printed
+        pathlib.Path("config.toml").write_text('[app]\\npexels_api_keys = ["rotated-new-key-777"]\\n', encoding="utf-8")
+        print("old key still printed: %(secret)s", file=sys.stderr)
     if "MIXERR" in subject:
         print("echoed by MPT: %(marker_secret)s", file=sys.stderr)  # what MPT logs at ERROR level when it cannot mix the music, and then renders without it
         print('2026-10-17 13:43:35 | ERROR    | "./app/services/video.py:1856": generate_video - failed to mix background music: type=custom, file=./storage/bgm/x.mp3', file=sys.stderr)
@@ -749,6 +752,16 @@ class RunnerTests(FakeMptCase):
         for file in files:
             self.assertNotIn(SECRET, file.read_text(), file.name)
         self.assertEqual(summary["videos"][0]["stage"], "audio ***")
+
+    def test_a_key_rotated_while_mpt_runs_is_still_hidden(self):
+        # the secrets are taken before MPT starts: reading the config only after it has ended would not know the key it printed
+        summary, _ = self.run_pack([video(title="ROTATE")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "done")
+        self.assertNotIn(SECRET, (self.env.home / "config.toml").read_text())  # the rotation did happen
+        folder = self.out / "test-batch" / "01-first"
+        for name in ("mpt.log", "report.json"):
+            self.assertNotIn(SECRET, (folder / name).read_text(), name)
+        self.assertIn("old key still printed: ***", (folder / "mpt.log").read_text())
 
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA

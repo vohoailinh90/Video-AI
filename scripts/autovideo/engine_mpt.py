@@ -215,21 +215,28 @@ def config_of(env: MptEnv) -> dict:
         return {}
 
 
-def redact(text: str, env: MptEnv) -> str:
-    """Replace every secret value of MPT's config.toml in `text`. Logs and error messages go through here before they are stored."""
-    for secret in sorted(_secrets(config_of(env)), key=len, reverse=True):
+def secret_values(env: MptEnv) -> tuple[str, ...]:
+    """The secret values in MPT's config.toml as it is now."""
+    return tuple(_secrets(config_of(env)))
+
+
+def redact(text: str, env: MptEnv, known: tuple[str, ...] = ()) -> str:
+    """Replace every secret value of MPT's config.toml in `text`. Logs and error messages go through here before they are stored.
+    `known` are secrets seen earlier: a render can take long enough for the config to be changed meanwhile, and what MPT printed
+    may hold a value that the file no longer has."""
+    for secret in sorted({*known, *secret_values(env)}, key=len, reverse=True):
         text = text.replace(secret, "***")
     return text
 
 
-def redact_deep(value, env: MptEnv):
+def redact_deep(value, env: MptEnv, known: tuple[str, ...] = ()):
     """`redact` for everything in a structure MPT returned (strings inside lists and dicts), keeping its shape."""
     if isinstance(value, str):
-        return redact(value, env)
+        return redact(value, env, known)
     if isinstance(value, list):
-        return [redact_deep(item, env) for item in value]
+        return [redact_deep(item, env, known) for item in value]
     if isinstance(value, dict):
-        return {key: redact_deep(item, env) for key, item in value.items()}
+        return {key: redact_deep(item, env, known) for key, item in value.items()}
     return value
 
 
@@ -268,6 +275,7 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     manifest = workdir.resolve() / "mpt-task.jsonl"  # MPT runs in its own directory, so a relative path would not be found there
     manifest.write_text(json.dumps(video_params(job), ensure_ascii=False) + "\n", encoding="utf-8")
     cmd = [*env.python, "cli.py", "--batch-file", str(manifest), "--stop-at", "video"]
+    known = secret_values(env)  # before MPT starts: a key changed or removed while it runs is still the one it may print
     try:
         proc = subprocess.Popen(cmd, cwd=env.home, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
     except OSError as exc:  # the interpreter went away after locate(), or cannot be executed
@@ -276,7 +284,7 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         _, stderr = _stop(proc)
-        return EngineResult(False, failed_stage="timeout", error=f"MPT did not finish within {timeout:g} s", log_tail=_log(env, workdir, stderr))
+        return EngineResult(False, failed_stage="timeout", error=f"MPT did not finish within {timeout:g} s", log_tail=_log(env, workdir, stderr, known))
     except BaseException:
         # Ctrl-C, or SIGTERM (the CLI turns it into SystemExit), or anything else that ends the wait. MPT runs in its own session so it
         # gets no signal from the terminal: left alone it would go on rendering after this process lets go of the batch, and the next run
@@ -284,7 +292,7 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
         _stop(proc)
         raise
 
-    tail = _log(env, workdir, stderr)
+    tail = _log(env, workdir, stderr, known)
     data = _summary(stdout)
     if not data or not data["tasks"]:
         reason = f"exit code {proc.returncode}, no task summary on stdout"
@@ -296,8 +304,8 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     result = entry.get("result") or {}
     if entry.get("status") != "succeeded":
         return EngineResult(
-            False, task_id=entry.get("task_id"), failed_stage=redact(str(entry.get("failed_stage") or "unknown"), env),
-            error=redact(str(entry.get("error") or "unknown error"), env), log_tail=tail,
+            False, task_id=entry.get("task_id"), failed_stage=redact(str(entry.get("failed_stage") or "unknown"), env, known),
+            error=redact(str(entry.get("error") or "unknown error"), env, known), log_tail=tail,
         )
     videos = result.get("videos") or []
     video = _path(env, videos[0]) if videos else None
@@ -306,16 +314,16 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     return EngineResult(
         True, task_id=entry.get("task_id"), video=video, audio=_path(env, result.get("audio_file")),
         subtitle=_path(env, result.get("subtitle_path")), task_dir=video.parent,
-        audio_seconds=result.get("audio_duration"), warnings=tuple(redact_deep(result.get("warnings") or [], env)), log_tail=tail,
+        audio_seconds=result.get("audio_duration"), warnings=tuple(redact_deep(result.get("warnings") or [], env, known)), log_tail=tail,
     )
 
 
-def _log(env: MptEnv, workdir: Path, stderr: str) -> str:
+def _log(env: MptEnv, workdir: Path, stderr: str, known: tuple[str, ...] = ()) -> str:
     raw = stderr or ""
     failure = find_music_failure(raw)  # on the raw text: hiding a secret must not be able to change the verdict
-    text = redact(raw, env)
+    text = redact(raw, env, known)
     if failure:  # our own line, added after the redaction, with the detail redacted like the rest
-        text += f"\n{MUSIC_FAILED_TAG} {redact(failure, env)}\n"
+        text += f"\n{MUSIC_FAILED_TAG} {redact(failure, env, known)}\n"
     (workdir / "mpt.log").write_text(text, encoding="utf-8")
     return "\n".join(text.strip().splitlines()[-12:])
 
