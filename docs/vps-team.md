@@ -235,7 +235,12 @@ Có test và mutation check canh giữ (`tests/test_team.py`, `tests/mutations/t
   `state.json`, `gates.log`), nhưng không sửa được seal, nên push từ chối commit, gói hay spec đã đổi.
   Thư mục gốc của mỗi team (`/srv/team`, `/srv/team-codex`, `/srv/team-video`) là `2750`: tài khoản của bạn
   (nhóm `team`) đọc và vào được nhưng không thêm, đổi tên hay xoá được gì ngay trong đó, nên không thay được cả thư mục
-  `seals/`; chỉ `work/` bên dưới là `2770`. Chạy lại `setup-vps-team.sh` để áp dụng cho bản đã cài.
+  `seals/`; chỉ `work/` bên dưới là `2770`. Chạy lại `setup-vps-team.sh` để áp dụng cho bản đã cài. Đổi quyền thư mục gốc
+  không động tới thứ đã nằm trong đó, nên với bản cài từ lúc thư mục còn ghi được cho nhóm, setup còn kiểm tra `seals/`:
+  chỉ giữ nếu đúng là thư mục thật của user `team`, mode 750, chỉ chứa file thường; còn lại (một symlink trỏ vào
+  thư mục lead ghi được, hay thư mục do lead tạo) thì xoá và để conductor tạo lại, rồi phải `pack` và audit lại các feature
+  đã đóng dấu trong đó. Chính conductor cũng từ chối ghi hoặc tin một seal nằm trong `seals/` không phải thư mục thường
+  của chính nó, kể cả khi chưa chạy lại setup.
 - **Dung lượng:** log của một container chỉ ghi tối đa `TEAM_LOG_MAX_BYTES` (cho cả một lần chạy gates);
   thư mục làm việc `/work` mà worker ghi vào không được lớn thêm quá `TEAM_WORKSPACE_GROWTH_BYTES`
   (container bị dừng, lần thử bị bỏ). Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS.

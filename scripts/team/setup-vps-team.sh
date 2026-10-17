@@ -111,7 +111,23 @@ usermod -aG docker team
 usermod -aG team "${ADMIN}"
 # A home is 2750: your login (group team) can read and enter it but cannot add, rename or remove anything directly in it,
 # which is where the seals `team push` believes are kept (<home>/seals, made by the conductor); only work/ is group-writable.
+# Changing a home's mode does not look at what is already inside it. A home from the time it was group-writable can hold a
+# `seals` link into a directory your login writes (or a directory it made), and a seal read through that proves nothing. So a
+# seals entry stays only when it is exactly what the conductor makes: a real directory of the team user, mode 750 (so only that
+# user could have put anything in it), holding only regular files. Anything else is removed (a link goes, never what it points to)
+# and the conductor makes it again; the audits sealed in it have to be run again.
+reset_seals() {
+  local seals="$1/seals" owner="$2" group="$3"
+  [ -e "${seals}" ] || [ -L "${seals}" ] || return 0
+  if [ ! -L "${seals}" ] && [ -d "${seals}" ] && [ "$(stat -c '%U:%G:%a' "${seals}")" = "${owner}:${group}:750" ] \
+     && [ -z "$(find "${seals}" -mindepth 1 ! -type f -print -quit)" ]; then
+    return 0
+  fi
+  echo "removing ${seals}: it is not the plain ${owner}-owned directory the conductor makes; audits sealed in it must be run again"
+  rm -rf --one-file-system -- "${seals}"
+}
 install -d -o team -g team -m 2750 "${TEAM_HOME}"
+reset_seals "${TEAM_HOME}" team team
 install -d -o team -g team -m 2770 "${TEAM_HOME}/work"
 # Created here so `team status` (run as you) never creates it with your umask.
 touch "${TEAM_HOME}/.run.lock"
@@ -121,10 +137,12 @@ if [ "${WITH_CODEX}" -eq 1 ]; then
   # No lock file here: team-codex takes the one above, so the two teams never
   # run a pipeline at the same time.
   install -d -o team -g team -m 2750 "${CODEX_HOME}"
+  reset_seals "${CODEX_HOME}" team team
   install -d -o team -g team -m 2770 "${CODEX_HOME}/work"
 fi
 if [ "${WITH_VIDEO}" -eq 1 ]; then
   install -d -o team -g team -m 2750 "${VIDEO_HOME}"
+  reset_seals "${VIDEO_HOME}" team team
   install -d -o team -g team -m 2770 "${VIDEO_HOME}/work"
 fi
 

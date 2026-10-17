@@ -439,8 +439,8 @@ mutations:
   replace: "        return {\"pack_head\": head(f.repo)}, None  # f\"no seal for the audit pack"
   test: tests.test_team.PipelineTests.test_push_refuses_a_pack_that_changed_after_it_was_sealed_or_has_no_seal
 - label: "the seal is written inside the lead's workspace"
-  find: "    seals = f.home / \"seals\"\n"
-  replace: "    seals = f.dir / \"seals\"\n"
+  find: "def seals_dir(f: Feature) -> Path:\n    return f.home / \"seals\"\n"
+  replace: "def seals_dir(f: Feature) -> Path:\n    return f.dir / \"seals\"\n"
   test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
 - label: "the seals directory is writable by the group"
   find: "    seals.chmod(0o750)\n"
@@ -554,3 +554,23 @@ mutations:
   find: 'prompt, mounts = render(shipped(PROMPTS, "fix.md"), id=f.id), handoff_mounts(f, {"feedback.md": note})'
   replace: 'prompt, mounts = render(shipped(PROMPTS, "fix.md"), id=f.id) + feedback, handoff_mounts(f, {"feedback.md": note})'
   test: tests.test_team.PipelineTests.test_a_huge_line_of_gate_output_reaches_the_next_attempt_through_a_file_not_a_command_line
+- label: "a seals entry that is a link is read and written through"
+  find: "    if not stat.S_ISDIR(info.st_mode):\n        return f\"{seals} is not a plain directory\"\n"
+  replace: "    if False:\n        return f\"{seals} is not a plain directory\"\n"
+  test: tests.test_team.PipelineTests.test_a_seals_symlink_left_by_an_older_install_is_neither_written_nor_believed
+- label: "a seals directory owned by someone else is believed"
+  find: "    if info.st_uid != os.geteuid():\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_seals_directory_the_conductor_does_not_own_or_the_group_can_write_is_not_believed
+- label: "a group-writable seals directory is believed"
+  find: "    if mode and info.st_mode & 0o022:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_seals_directory_the_conductor_does_not_own_or_the_group_can_write_is_not_believed
+- label: "writing a seal does not check where it goes"
+  find: "    why = seals_problem(f, mode=False)  # the mode is put right below\n"
+  replace: "    why = None\n"
+  test: tests.test_team.PipelineTests.test_a_seals_symlink_left_by_an_older_install_is_neither_written_nor_believed
+- label: "push reads a seal without checking the directory it is in"
+  find: "    why = seals_problem(f)\n    if why:\n        return None, f\"{why}: run setup"
+  replace: "    why = None\n    if why:\n        return None, f\"{why}: run setup"
+  test: tests.test_team.PipelineTests.test_a_seals_symlink_left_by_an_older_install_is_neither_written_nor_believed

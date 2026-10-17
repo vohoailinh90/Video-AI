@@ -1153,6 +1153,47 @@ class PipelineTests(Sandbox):
         self.assertEqual(data["pack_head"], team.head(f.repo))
         self.assertEqual(data["pack_sha256"], hashlib.sha256(f.file("audit-pack.md").read_bytes()).hexdigest())
 
+    def replace_seals_with_a_symlink(self, f):
+        """What a lead could do while the home was still group-writable: point `seals` into a directory it can write."""
+        shutil.rmtree(self.home / "seals")
+        forged = f.dir / "forged-seals"
+        forged.mkdir()
+        (self.home / "seals").symlink_to(forged)
+        return forged
+
+    def test_a_seals_symlink_left_by_an_older_install_is_neither_written_nor_believed(self):
+        # Codex's twenty-second review: setup makes the home 2750, but an installation from the time it was group-writable can
+        # still have `seals` as a link into a directory the lead writes. Following it would let the lead forge any seal.
+        f = self.approved_feature()
+        sealed = (self.home / "seals" / "F1.json").read_text()
+        forged = self.replace_seals_with_a_symlink(f)
+        (forged / "F1.json").write_text(sealed)
+        seal, why = team.seal_problem(f)
+        self.assertIsNone(seal)
+        self.assertIn("not a plain directory", why)
+        with self.assertRaises(SystemExit) as raised:
+            team.write_seal(f, f.file("audit-pack.md"))
+        self.assertIn("not a plain directory", str(raised.exception))
+        self.assertEqual(os.listdir(forged), ["F1.json"], "nothing was written through the link")
+        code, out = run_cli("push", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("not a plain directory", out)
+
+    def test_a_seals_directory_the_conductor_does_not_own_or_the_group_can_write_is_not_believed(self):
+        f = self.approved_feature()
+        self.assertEqual(team.seal_problem(f)[1], None)
+        someone_else = os.geteuid() + 1
+        with mock.patch.object(team.os, "geteuid", lambda: someone_else):
+            self.assertIn("not owned", team.seal_problem(f)[1])
+            with self.assertRaises(SystemExit) as raised:
+                team.write_seal(f, f.file("audit-pack.md"))
+            self.assertIn("not owned", str(raised.exception))
+        (self.home / "seals").chmod(0o770)
+        self.assertIn("writable", team.seal_problem(f)[1])
+        team.write_seal(f, f.file("audit-pack.md"))
+        self.assertEqual(stat.S_IMODE((self.home / "seals").stat().st_mode), 0o750, "writing a seal puts the mode right")
+        self.assertIsNone(team.seal_problem(f)[1])
+
     def test_push_trusts_the_seal_not_the_files_a_lead_can_rewrite(self):
         f = self.approved_feature()
         sealed = team.head(f.repo)
@@ -2258,6 +2299,76 @@ class CodexTeamInstallTests(unittest.TestCase):
         for home in ("TEAM_HOME", "CODEX_HOME", "VIDEO_HOME"):
             self.assertEqual(modes.get("${%s}" % home), "2750", f"{home}: the group may read and enter it, not change it")
             self.assertEqual(modes.get("${%s}/work" % home), "2770", f"{home}/work: where the admin and the leads work")
+
+    def seals_function(self) -> str:
+        script = (self.TEAM_DIR / "setup-vps-team.sh").read_text()
+        start = script.index("reset_seals() {")
+        return script[start:script.index("\n}\n", start) + 3]
+
+    def run_reset_seals(self, home: Path, owner: str | None = None) -> subprocess.CompletedProcess:
+        owner = owner or subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+        group = subprocess.run(["id", "-gn"], capture_output=True, text=True).stdout.strip()
+        return subprocess.run(["bash", "-c", f'{self.seals_function()}\nreset_seals "$1" "$2" "$3"', "x", str(home), owner, group],
+                              capture_output=True, text=True)
+
+    def test_setup_removes_a_seals_entry_that_is_not_the_directory_the_conductor_makes(self):
+        # Codex's twenty-second review: homes made group-writable by an earlier version can hold a `seals` symlink into a
+        # directory the lead writes. Changing the home to 2750 does not touch the entry that is already there.
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+
+        def fresh(name: str) -> Path:
+            home = tmp / name
+            (home / "seals").mkdir(parents=True)
+            (home / "seals").chmod(0o750)
+            (home / "seals" / "F1.json").write_text("{}")
+            return home
+
+        self.assertEqual(self.run_reset_seals(tmp / "no-seals-yet").returncode, 0)
+        healthy = fresh("healthy")
+        result = self.run_reset_seals(healthy)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+        self.assertTrue((healthy / "seals" / "F1.json").is_file(), "a real seals directory is kept, so a setup rerun costs no audit")
+
+        linked = fresh("linked")
+        shutil.rmtree(linked / "seals")
+        target = tmp / "writable-by-the-lead"
+        target.mkdir()
+        (target / "F1.json").write_text("forged")
+        (linked / "seals").symlink_to(target)
+        result = self.run_reset_seals(linked)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.lexists(linked / "seals"), "the link is gone")
+        self.assertEqual((target / "F1.json").read_text(), "forged", "and what it pointed to is left alone")
+        self.assertIn("seals", result.stdout)
+
+        loose = fresh("loose")
+        (loose / "seals").chmod(0o770)
+        self.run_reset_seals(loose)
+        self.assertFalse(os.path.lexists(loose / "seals"), "group-writable")
+
+        nested = fresh("nested")
+        (nested / "seals" / "dir").mkdir()
+        self.run_reset_seals(nested)
+        self.assertFalse(os.path.lexists(nested / "seals"), "only regular files belong in it")
+
+        inner = fresh("inner-link")
+        (inner / "seals" / "F2.json").symlink_to(target / "F1.json")
+        self.run_reset_seals(inner)
+        self.assertFalse(os.path.lexists(inner / "seals"), "a link inside it")
+
+        stranger = fresh("other-owner")
+        self.run_reset_seals(stranger, owner="nobody-by-this-name")
+        self.assertFalse(os.path.lexists(stranger / "seals"), "not owned by the team user")
+
+    def test_setup_checks_the_seals_of_every_home_it_creates_after_creating_it(self):
+        script = "\n".join(self.setup_lines())
+        for home in ("TEAM_HOME", "CODEX_HOME", "VIDEO_HOME"):
+            call = 'reset_seals "${%s}" team team' % home
+            self.assertEqual(script.count(call), 1, home)
+            self.assertLess(script.index('-m 2750 "${%s}"' % home), script.index(call), f"{home}: made first, then checked")
+        self.assertLess(script.index("reset_seals() {"), script.index('reset_seals "${TEAM_HOME}" team team'))
+        self.assertGreater(script.index('reset_seals "${TEAM_HOME}" team team'), script.index("useradd --system"))
 
     def test_setup_installs_the_video_team_only_when_asked(self):
         script = "\n".join(self.setup_lines())

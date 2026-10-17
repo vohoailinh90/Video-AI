@@ -831,15 +831,42 @@ def handoff_digest(f: Feature) -> str:
     return digest.hexdigest()[:16]
 
 
+def seals_dir(f: Feature) -> Path:
+    return f.home / "seals"
+
+
 def seal_path(f: Feature) -> Path:
-    return f.home / "seals" / f"{f.id}.json"
+    return seals_dir(f) / f"{f.id}.json"
+
+
+def seals_problem(f: Feature, mode: bool = True) -> str | None:
+    """Why `<home>/seals` cannot be trusted (None: it can, or it does not exist yet).
+
+    Setup makes a home 2750, but a home from the time it was group-writable can still hold a link there into a directory
+    the lead writes, or a directory the lead made. Reading a seal through either, or writing one, would let the lead forge
+    what `team push` believes. The conductor makes the directory itself, so it must be a plain directory it owns."""
+    seals = seals_dir(f)
+    try:
+        info = seals.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        return f"{seals} is not a plain directory"
+    if info.st_uid != os.geteuid():
+        return f"{seals} is not owned by the user running the conductor"
+    if mode and info.st_mode & 0o022:
+        return f"{seals} is writable by its group or by others"
+    return None
 
 
 def write_seal(f: Feature, pack: Path) -> None:
     """Record, outside the feature directory, what the audit was shown. A lead that obeys an instruction hidden in the pack
     can rewrite everything inside its own workspace (the repository, state.json, gates.log); the directory it cannot write
     to is the only thing `team push` believes. The conductor creates it 0750: the group (the lead's login) can read, not write."""
-    seals = f.home / "seals"
+    seals = seals_dir(f)
+    why = seals_problem(f, mode=False)  # the mode is put right below
+    if why:
+        raise SystemExit(f"cannot seal the audit: {why}. Run setup-vps-team.sh as root again, then rebuild the pack")
     seals.mkdir(exist_ok=True)
     seals.chmod(0o750)
     seal = {"pack_head": head(f.repo), "pack_sha256": hashlib.sha256(pack.read_bytes()).hexdigest(),
@@ -852,6 +879,9 @@ def write_seal(f: Feature, pack: Path) -> None:
 
 def seal_problem(f: Feature) -> tuple[dict | None, str | None]:
     """(the seal, None) when push may rely on it, else (None, why not)."""
+    why = seals_problem(f)
+    if why:
+        return None, f"{why}: run setup-vps-team.sh as root again, rebuild the pack with `{team_lead().command} pack {f.id}` and audit again"
     try:
         seal = json.loads(seal_path(f).read_text(encoding="utf-8"))
         pack = f.file("audit-pack.md").read_bytes()

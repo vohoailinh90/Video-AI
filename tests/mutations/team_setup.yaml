@@ -162,3 +162,27 @@ mutations:
   find: "  iptables -I FORWARD -j DOCKER-USER\n"
   replace: ''
   test: tests.test_team.EgressScriptTests.test_maintain_restores_flushed_or_outranked_rules_and_does_nothing_otherwise
+- label: "setup does not check the seals of the main team home"
+  find: "reset_seals \"${TEAM_HOME}\" team team\n"
+  replace: ''
+  test: tests.test_team.CodexTeamInstallTests.test_setup_checks_the_seals_of_every_home_it_creates_after_creating_it
+- label: "setup does not check the seals of the Codex team home"
+  find: "  reset_seals \"${CODEX_HOME}\" team team\n"
+  replace: ''
+  test: tests.test_team.CodexTeamInstallTests.test_setup_checks_the_seals_of_every_home_it_creates_after_creating_it
+- label: "setup does not check the seals of the video team home"
+  find: "  reset_seals \"${VIDEO_HOME}\" team team\n"
+  replace: ''
+  test: tests.test_team.CodexTeamInstallTests.test_setup_checks_the_seals_of_every_home_it_creates_after_creating_it
+- label: "setup keeps a seals directory whatever its owner and mode"
+  find: "[ \"$(stat -c '%U:%G:%a' \"${seals}\")\" = \"${owner}:${group}:750\" ]"
+  replace: "[ -n \"$(stat -c '%U:%G:%a' \"${seals}\")\" ]"
+  test: tests.test_team.CodexTeamInstallTests.test_setup_removes_a_seals_entry_that_is_not_the_directory_the_conductor_makes
+- label: "setup keeps a seals directory with anything but files in it"
+  find: "     && [ -z \"$(find \"${seals}\" -mindepth 1 ! -type f -print -quit)\" ]; then"
+  replace: "     && true; then"
+  test: tests.test_team.CodexTeamInstallTests.test_setup_removes_a_seals_entry_that_is_not_the_directory_the_conductor_makes
+- label: "setup removes a healthy seals directory on every run"
+  find: "    return 0\n  fi\n  echo \"removing ${seals}"
+  replace: "  fi\n  echo \"removing ${seals}"
+  test: tests.test_team.CodexTeamInstallTests.test_setup_removes_a_seals_entry_that_is_not_the_directory_the_conductor_makes
