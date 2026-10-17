@@ -69,11 +69,11 @@ def locate(home: str | os.PathLike | None = None, python: str | None = None) -> 
             raise MptError(f"cannot run {chosen!r} (from --mpt-python or $MPT_PYTHON): it is not an executable file, nor a command on PATH")
         return MptEnv(path, (command,))
     venv_python = path / ".venv" / "bin" / "python"
-    if venv_python.is_file():
+    if venv_python.is_file() and os.access(venv_python, os.X_OK):  # the same test as for a Python that was chosen
         return MptEnv(path, (str(venv_python),))
     if shutil.which("uv"):
         return MptEnv(path, ("uv", "run", "--frozen", "python"))
-    raise MptError(f"no Python for MPT: {path}/.venv is missing and uv is not installed (run `uv sync --frozen` in {path})")
+    raise MptError(f"no Python for MPT: {path}/.venv/bin/python is missing or cannot be run, and uv is not installed (run `uv sync --frozen` in {path})")
 
 
 def video_params(job: Job) -> dict:

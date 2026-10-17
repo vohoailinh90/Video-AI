@@ -243,6 +243,20 @@ class PackTests(unittest.TestCase):
         other.mkdir()
         self.assertIn("whisper", runner.preflight(fake_mpt(other, subtitle_provider=" Edge "), job))
 
+    def test_locate_takes_the_checkouts_own_python_only_when_it_can_run(self):
+        env = fake_mpt(self.root)  # a checkout without a .venv
+        venv = env.home / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        python = venv / "python"
+        python.write_text("")  # a file, but not executable
+        with mock.patch.dict(os.environ), mock.patch.object(engine_mpt.shutil, "which", lambda name: None):  # and no uv to fall back on
+            os.environ.pop("MPT_PYTHON", None)
+            with self.assertRaises(engine_mpt.MptError) as ctx:
+                engine_mpt.locate(str(env.home))
+            self.assertIn(".venv", str(ctx.exception))
+            python.chmod(0o755)
+            self.assertEqual(engine_mpt.locate(str(env.home)).python, (str(python),))
+
     def test_locate_refuses_a_python_that_cannot_run(self):
         env = fake_mpt(self.root)
         (self.root / "plain.txt").write_text("not executable")
