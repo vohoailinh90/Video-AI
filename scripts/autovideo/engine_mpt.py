@@ -17,7 +17,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .pack import NO_VOICE, Job
+from .pack import MUSIC_EXTENSIONS, NO_VOICE, Job
 
 DEFAULT_HOME = Path("~/MoneyPrinterTurbo")
 MUSIC_FOLDERS = ("storage/bgm", "resource/songs")  # where MPT looks for a custom music file, in this order
@@ -120,6 +120,21 @@ def managed_file(env: MptEnv, name: str, folders: tuple[str, ...]) -> Path | Non
         if os.path.isfile(real) and os.path.commonpath([base, real]) == base:
             return Path(real)
     return None
+
+
+def has_music(env: MptEnv) -> bool:
+    """Whether MPT has a song it can pick for `random` music: a file with a supported suffix in storage/bgm or resource/songs, not one of its own
+    upload staging files, whose real path stays in the folder (app/services/bgm.py _list_bgm_files). With none, MPT logs a warning and renders
+    without music, and the video still passes QA on its narration."""
+    for folder in MUSIC_FOLDERS:
+        directory = env.home / folder
+        names = sorted(os.listdir(directory)) if directory.is_dir() else []
+        for name in names:
+            if name.lower().startswith(".bgm-upload-") or Path(name).suffix.lower() not in MUSIC_EXTENSIONS:
+                continue
+            if managed_file(env, name, (folder,)) is not None:
+                return True
+    return False
 
 
 def _digest_in(env: MptEnv, name: str, folders: tuple[str, ...]) -> str:

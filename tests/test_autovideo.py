@@ -72,6 +72,8 @@ def fake_mpt(root: Path, pexels_key: bool = True, subtitle_provider: str = "edge
     (home / "app").mkdir(parents=True)
     (home / "resource" / "fonts").mkdir(parents=True)
     (home / "resource" / "fonts" / "BeVietnamPro-Bold.ttf").write_bytes(b"")
+    (home / "resource" / "songs").mkdir()
+    (home / "resource" / "songs" / "output000.mp3").write_bytes(b"")  # MPT ships its own songs, and a pack asks for random music by default
     (home / "cli.py").write_text(FAKE_CLI, encoding="utf-8")
     key = f'"{SECRET}"' if pexels_key else ""
     (home / "config.toml").write_text(f'[app]\npexels_api_keys = [{key}]\nsubtitle_provider = "{subtitle_provider}"\nllm_provider = "moonshot"\n', encoding="utf-8")
@@ -258,7 +260,7 @@ class PackTests(unittest.TestCase):
     def test_input_digests_follow_the_files_mpt_reads_by_name(self):
         env = fake_mpt(self.root)  # has resource/fonts/BeVietnamPro-Bold.ttf, empty
         songs = env.home / "resource" / "songs"
-        songs.mkdir()
+        songs.mkdir(exist_ok=True)
         job = lambda **d: packmod.load_pack(write_pack(self.root, [video()], d)).jobs[0]
         empty = hashlib.sha256(b"").hexdigest()
         self.assertEqual(engine_mpt.input_digests(env, job(bgm="none")), {"font": empty})  # no custom music: only the subtitle font
@@ -285,7 +287,7 @@ class PackTests(unittest.TestCase):
         (outside / "font.ttf").write_bytes(b"f")
         (outside / "song.mp3").write_bytes(b"s")
         fonts, songs, uploads = env.home / "resource" / "fonts", env.home / "resource" / "songs", env.home / "storage" / "bgm"
-        songs.mkdir()
+        songs.mkdir(exist_ok=True)
         uploads.mkdir(parents=True)
         (fonts / "Linked.ttf").symlink_to(outside / "font.ttf")
         (uploads / "song.mp3").symlink_to(outside / "song.mp3")
@@ -299,6 +301,27 @@ class PackTests(unittest.TestCase):
         self.assertEqual(engine_mpt.input_digests(env, job(bgm="song.mp3"))["bgm"], hashlib.sha256(b"real").hexdigest())
         (fonts / "Inner.ttf").symlink_to(fonts / "BeVietnamPro-Bold.ttf")  # a link that stays inside the folder is fine
         self.assertIsNone(runner.preflight(env, job(font="Inner.ttf")))
+
+    def test_random_music_needs_a_music_file_in_mpts_folders(self):
+        env = fake_mpt(self.root)  # ships one song, like MPT's resource/songs
+        job = lambda **d: packmod.load_pack(write_pack(self.root, [video()], d)).jobs[0]
+        self.assertIsNone(runner.preflight(env, job()))  # bgm defaults to random, at volume 0.2
+        songs = env.home / "resource" / "songs"
+        (songs / "output000.mp3").unlink()
+        # MPT then renders without music and says nothing (get_bgm_file returns ""), and a voiced video passes QA all the same
+        no_music = 'set bgm to "none"'
+        self.assertIn(no_music, runner.preflight(env, job()))
+        self.assertIsNone(runner.preflight(env, job(bgm="none")))
+        self.assertIsNone(runner.preflight(env, job(bgm_volume=0)))  # at volume 0 MPT skips the music anyway
+        (songs / "notes.txt").write_bytes(b"x")
+        (songs / ".bgm-upload-half.mp3").write_bytes(b"x")  # MPT's staging file, never picked
+        outside = self.root / "outside.mp3"
+        outside.write_bytes(b"x")
+        (songs / "link.mp3").symlink_to(outside)  # a link out of the folder is refused by MPT
+        self.assertIn(no_music, runner.preflight(env, job()))
+        (env.home / "storage" / "bgm").mkdir(parents=True)
+        (env.home / "storage" / "bgm" / "mine.OPUS").write_bytes(b"x")  # an uploaded song counts
+        self.assertIsNone(runner.preflight(env, job()))
 
     def test_a_file_that_cannot_be_read_is_a_problem_not_a_traceback(self):
         env = fake_mpt(self.root)
@@ -617,7 +640,7 @@ class RunnerTests(FakeMptCase):
 
     def test_replacing_the_custom_music_file_renders_the_job_again(self):
         songs = self.env.home / "resource" / "songs"
-        songs.mkdir(parents=True)
+        songs.mkdir(parents=True, exist_ok=True)
         (songs / "foo.mp3").write_bytes(b"aaaa")
         self.run_pack([video()], {"bgm": "foo.mp3"})
         summary, _ = self.run_pack([video()], {"bgm": "foo.mp3"})
@@ -656,7 +679,7 @@ class RunnerTests(FakeMptCase):
 
     def test_a_deleted_custom_music_file_is_not_skipped_over(self):
         songs = self.env.home / "resource" / "songs"
-        songs.mkdir(parents=True)
+        songs.mkdir(parents=True, exist_ok=True)
         (songs / "foo.mp3").write_bytes(b"aaaa")
         self.run_pack([video()], {"bgm": "foo.mp3"})
         (songs / "foo.mp3").unlink()
@@ -832,7 +855,7 @@ class CliTests(FakeMptCase):
 
     def test_status_and_qa_notice_a_replaced_music_file_when_they_can_find_mpt(self):
         songs = self.env.home / "resource" / "songs"
-        songs.mkdir(parents=True)
+        songs.mkdir(parents=True, exist_ok=True)
         (songs / "foo.mp3").write_bytes(b"aaaa")
         path = write_pack(self.root, [video()], {"bgm": "foo.mp3"})
         mpt = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
