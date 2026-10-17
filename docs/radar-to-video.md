@@ -21,7 +21,7 @@ Thiếu `--asr-python` thì lệnh vẫn chạy: dùng lượt đầu tiên củ
 
 | Bước | Lệnh | Làm gì |
 |---|---|---|
-| 1 | `scaffold DIGEST` | Chạy `hyperframes init`, chép bài vào `source/draft-vi.json` (kèm `provenance.json`: đường dẫn, sha256, commit cuối của file), viết `voiceover.json`, `index.html` (thời lượng ước tính) và nhạc nền; chạy cổng đối chiếu trên bản nháp. Không ghi đè dự án có sẵn |
+| 1 | `scaffold DIGEST` | Chạy `hyperframes init`, chép bài vào `source/draft-vi.json` (kèm `provenance.json`: đường dẫn, sha256, commit cuối của file, địa chỉ `origin` đã bỏ phần `user:mật-khẩu@` nếu có), viết `voiceover.json`, `index.html` (thời lượng ước tính) và nhạc nền; chạy cổng đối chiếu trên bản nháp. Không ghi đè dự án có sẵn |
 | 2 | `voice PROJECT --tts-python ...` | Tạo 3 lượt giọng Hải Đăng cho mỗi câu, cho PhoWhisper nghe lại từng lượt, chọn lượt ít sai nhất, đo độ dài thật, xếp lại thời gian toàn video, viết lại `index.html`, `voiceover.json` và nhạc nền theo độ dài thật, chạy cổng đối chiếu |
 | 3 | `render PROJECT` | `scripts/vo/revoice.py --apply` (đặt âm lượng, `npm run check`, render MP4), đo mức âm và đo lại lời đọc trên chính file MP4, ghi `README.md` và `preview.json`; `--preview` dựng thêm trang xem thử trong `build/` |
 | 4 | `all DIGEST` | Ba bước trên liền nhau |
@@ -31,7 +31,7 @@ Báo cáo từng bước nằm ở `build/<tên dự án>-<mã đường dẫn>/
 ## Bài thành cảnh thế nào
 
 Mỗi cảnh gồm các đơn vị (unit): một clip lời đọc cộng một phần tử trên màn hình, lấy nguyên văn từ trường của bài (chỉ bỏ dấu nháy mã, gộp khoảng trắng).
-Lời đọc đi vào bộ tổng hợp giọng có chữ số được đọc thành chữ (62.958 và 62,958 thành "sáu mươi hai nghìn chín trăm năm mươi tám", -19 thành "âm mười chín"); chữ trên màn hình giữ nguyên chữ số. Cổng đối chiếu số theo giá trị: dấu phân cách hàng nghìn bị bỏ (nhóm đầu 1 đến 3 chữ số không bắt đầu bằng 0, các nhóm sau đúng 3 chữ số), dấu thập phân được giữ, dấu âm là một phần của giá trị (-19 khác 19).
+Lời đọc đi vào bộ tổng hợp giọng có chữ số được đọc thành chữ (62.958 và 62,958 thành "sáu mươi hai nghìn chín trăm năm mươi tám", -19 thành "âm mười chín"); chữ trên màn hình giữ nguyên chữ số. Cổng đối chiếu số theo giá trị: dấu phân cách hàng nghìn bị bỏ (nhóm đầu 1 đến 3 chữ số không bắt đầu bằng 0, các nhóm sau đúng 3 chữ số), dấu thập phân được giữ, dấu âm và dấu phần trăm là một phần của giá trị (-19 khác 19, 19% khác 19; "19 phần trăm" bằng 19%).
 
 | Cảnh | Trường của bài | Lời đọc | Trên màn hình |
 |---|---|---|---|
@@ -49,7 +49,7 @@ lưu ý còn 1, mục học còn 2, bỏ ghi chú thử (các lệnh vẫn hiệ
 ## Cổng đối chiếu (không do model quyết định)
 
 `scripts/vo/check_facts.py` chạy ở mỗi bước. Mỗi dòng của `voiceover.json` ghi `source` (các trường của bài); mọi số, tên chữ Latin và lệnh trong dòng đó phải có trong các trường ấy, và chữ trên màn hình phải có trong toàn bộ bài.
-Mỗi lệnh của `try_it.commands` (hoặc `commands_shown` lệnh đầu, nếu terminal không chứa hết) phải hiện đúng nguyên văn. Lỗi thì `voice` dừng, in lý do, nhưng file đã ghi nên có thể sửa tiếp; `render` chạy cổng này **trước** mọi bước tốn thời gian và dừng nếu nó thất bại, nên sửa tay `voiceover.json` hoặc `index.html` thành nội dung không có trong bài sẽ không bao giờ ra thành MP4. Digest chỉ có lệnh thử (không có lưu ý, không có ghi chú) vẫn có cảnh cuối với terminal.
+Mỗi lệnh của `try_it.commands` (hoặc `commands_shown` lệnh đầu, nếu terminal không chứa hết) phải hiện đúng nguyên văn, trên một dòng riêng của trang (không nằm trong một lệnh dài hơn: `npm install` không được tính là có mặt khi chỉ còn `npm install foo`), và hiện đủ số lần bài liệt kê nó. Lỗi thì `voice` dừng, in lý do, nhưng file đã ghi nên có thể sửa tiếp; `render` chạy cổng này **trước** mọi bước tốn thời gian và dừng nếu nó thất bại, nên sửa tay `voiceover.json` hoặc `index.html` thành nội dung không có trong bài sẽ không bao giờ ra thành MP4. Digest chỉ có lệnh thử (không có lưu ý, không có ghi chú) vẫn có cảnh cuối với terminal.
 
 Sửa lời đọc: được. Mở `voiceover.json`, sửa `text` (và `source` nếu cần) của dòng đó, rồi chạy `voice PROJECT --only vo-4 --tts-python ...`. Script giữ lại câu bạn sửa (kể cả khi chạy lại `voice`), tính lại chữ đọc từ câu mới, tạo lại giọng cho dòng đó và để cổng quyết định câu mới còn đúng với bài không. Trường `speak` (chữ mà bộ tổng hợp giọng đọc, các số được viết thành chữ bằng `scripts/vo/numbers_vi.py`) **luôn được sinh từ `text`, không sửa tay**: `voice` ghi đè nó, và cổng từ chối mọi `speak` khác dạng đọc chữ của `text`, vì đó là điều người xem nghe được. Muốn đọc khác đi thì sửa `text`. Mỗi video có **một** giọng, ghi trong `voiceover.json` (`voice`): `voice` mà không có `--voice` giữ giọng đó, `voice --only vo-N` với `--voice` khác bị từ chối (video sẽ lẫn hai giọng); muốn đổi giọng thì tạo lại mọi dòng, không có `--only`.
 Từ tiếng Việt viết không dấu (như "giao", "cho", "ba") bị cổng báo nhầm là tên Latin; ghi vào mảng `allow` của `voiceover.json`.

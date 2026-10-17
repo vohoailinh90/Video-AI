@@ -83,12 +83,18 @@ def make_pad(path: Path, seconds: float):
         fail(f"ffmpeg could not make the music bed: {result.stderr[-400:]}")
 
 
+def without_credentials(url):
+    """A git remote as a public address: the user:password@ (or token@) part of a scheme://... URL is dropped, because provenance.json
+    and README.md are committed. git@host:path (no password can sit there) is left alone."""
+    return re.sub(r"^([A-Za-z][A-Za-z0-9+.\-]*://)[^/]*@", r"\1", url) if url else url
+
+
 def where_it_came_from(path: Path) -> dict:
     """The digest's place in its git repository (remote, path, last commit), or just its file name when it is not in one."""
     top = run(["git", "-C", path.parent, "rev-parse", "--show-toplevel"])
     if top.returncode:
         return {"file": path.name}
-    remote = run(["git", "-C", path.parent, "remote", "get-url", "origin"]).stdout.strip() or None
+    remote = without_credentials(run(["git", "-C", path.parent, "remote", "get-url", "origin"]).stdout.strip() or None)
     last = run(["git", "-C", path.parent, "log", "-1", "--format=%H %cs", "--", path.name]).stdout.strip() or None
     return {"git_remote": remote, "path_in_repo": str(path.relative_to(Path(top.stdout.strip()).resolve())), "last_commit_of_file": last}
 

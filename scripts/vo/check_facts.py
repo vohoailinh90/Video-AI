@@ -11,12 +11,13 @@ A script decides, not a model, the way github-radar's gates do:
     fixed labels, are skipped), against the whole source;
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
     traced;
-  * each command in try_it.commands must appear on screen exactly as the digest gives it (voiceover.json's `commands_shown`, when
-    present, limits this to the first N commands, for a terminal that cannot show them all; N must be what the video can show,
-    min(commands, MAX_COMMANDS_SHOWN), or the gate fails).
+  * each command in try_it.commands must appear on screen exactly as the digest gives it, as a row of its own (not inside a longer
+    command), as many times as the digest lists it; voiceover.json's `commands_shown`, when present, limits this to the first N
+    commands, for a terminal that cannot show them all; N must be what the video can show, min(commands, MAX_COMMANDS_SHOWN), or the
+    gate fails.
 
 Numbers are compared without thousands separators (62.958 or 62,958 on screen equals 62958 in the facts) and with their
-minus sign (-19 is not 19). A Vietnamese word typed without
+minus sign and percent sign (-19 is not 19, 19% is not 19). A Vietnamese word typed without
 any diacritic (giao, cho, ba) looks like a Latin token and is flagged when the source lacks it; list such a word in the
 "allow" array of voiceover.json (or pass --allow).
 Single letters are skipped.
@@ -29,6 +30,7 @@ import argparse
 import json
 import re
 import sys
+from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -49,8 +51,9 @@ FIXED_LABELS = {
     "forks": "fork",
 }
 MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; scripts/radar/plan.py takes its cap from here
-# a number, with its sign when the minus stands in front of it (-19, −3,5); a hyphen after a letter or a digit (AGPL-3.0, 10-20) is not one
-NUMBER = re.compile(r"(?:(?<![\w.,\-−])[-−])?\d[\d.,]*")
+# a number, with its sign when the minus stands in front of it (-19, −3,5; a hyphen after a letter or digit, as in AGPL-3.0 or 10-20, is
+# not one) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
+NUMBER = re.compile(r"(?:(?<![\w.,\-−])[-−])?\d[\d.,]*(?:\s?%|\s+phần trăm\b)?")
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
@@ -119,13 +122,14 @@ def blob(value) -> str:
 
 def canonical(number: str) -> str:
     """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
-    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus sign belongs to the value: -19 is
-    not 19."""
+    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus sign and a percent sign belong to
+    the value: -19 is not 19, and 19% (or 19 phần trăm) is not 19."""
     sign = "-" if number[:1] in "-−" else ""
-    number = number.lstrip("-−").rstrip(".,")
+    percent = "%" if re.search(r"%|phần trăm", number) else ""
+    number = re.sub(r"\s?%$|\s+phần trăm$", "", number.lstrip("-−")).rstrip(".,")
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
-        return sign + re.sub(r"[.,]", "", number)
-    return sign + number.replace(",", ".")
+        return sign + re.sub(r"[.,]", "", number) + percent
+    return sign + number.replace(",", ".") + percent
 
 
 def numbers(text: str) -> set:
@@ -209,9 +213,10 @@ def main() -> int:
                   f"{expected} of its {len(commands)} commands")
             failures += 1
         required = commands[:expected]
-    for command in required:
-        if command not in screen:
-            print(f"{args.html}: command from try_it is not shown exactly: {command!r}")
+    rows = Counter(normalize(part) for part in parser.parts)    # a command is one row of the page, not a piece of a longer one
+    for command, count in Counter(required).items():
+        if rows[command] < count:
+            print(f"{args.html}: command from try_it is not shown exactly{' ' + str(count) + ' times' if count > 1 else ''}: {command!r}")
             failures += 1
 
     spoken = sum(len(NUMBER.findall(l["text"])) for l in lines)

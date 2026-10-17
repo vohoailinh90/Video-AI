@@ -474,6 +474,60 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.numbers("0,125 và 0.125"), {"0.125"})
         self.assertEqual(check_facts.numbers("62,958"), {"62958"})
 
+    def test_a_command_is_found_as_a_whole_row_not_inside_another_one(self):
+        commands = ["npm install", "npm install foo", "npm run dev"]
+        digest = digest_with(lambda d: d["draft"]["try_it"].update(commands=commands))
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html = compose.render(plan, tl)
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        # the first command's row is gone, but its text is still a substring of the second command
+        status, output = run_gate(digest, doc, html.replace(">npm install<", "><"))
+        self.assertEqual(status, 1)
+        self.assertIn("'npm install'", output)
+        # a command listed twice has to be shown twice
+        twice = digest_with(lambda d: d["draft"]["try_it"].update(commands=["bun run dev", "bun run dev"]))
+        plan = planlib.build_plan(twice)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(twice, doc, html)[0], 0)
+        self.assertEqual(run_gate(twice, doc, html.replace(">bun run dev<", "><", 1))[0], 1)
+        # commands with characters that HTML escapes are still found
+        special = digest_with(lambda d: d["draft"]["try_it"].update(commands=["cd app && bun run dev > out.log", "echo '<ok>'"]))
+        plan = planlib.build_plan(special)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        self.assertEqual(run_gate(special, make_video.voiceover_doc(plan, tl), compose.render(plan, tl))[0], 0)
+
+    def test_a_percent_sign_is_part_of_the_value(self):
+        self.assertEqual(check_facts.numbers("giảm 19% và 19"), {"19%", "19"})
+        self.assertEqual(check_facts.numbers("giảm 19 % và 19 phần trăm"), {"19%"})
+        self.assertEqual(check_facts.numbers("tăng 2,5%, rồi -3%"), {"2.5%", "-3%"})
+        source = check_facts.blob({"field": "giảm 19% so với 20"})
+        self.assertEqual(check_facts.untraced("giảm 19% so với 20", source, set()), [])
+        self.assertEqual(check_facts.untraced("giảm 19 phần trăm so với 20", source, set()), [])
+        self.assertEqual(check_facts.untraced("giảm 19 so với 20", source, set()), ["number 19"])     # the unit cannot be dropped
+        self.assertEqual(check_facts.untraced("giảm 20% so với 20", source, set()), ["number 20%"])    # nor added
+        self.assertEqual(check_facts.untraced("giảm 19% so với 20.", source, set()), [])               # a full stop is not part of a number
+
+    def test_a_remote_url_is_stored_without_its_credentials(self):
+        self.assertEqual(make_video.without_credentials("https://user:ghp_SECRET@github.com/o/r.git"), "https://github.com/o/r.git")
+        self.assertEqual(make_video.without_credentials("https://x-access-token:abc@github.com/o/r"), "https://github.com/o/r")
+        self.assertEqual(make_video.without_credentials("https://TOKEN@github.com/o/r"), "https://github.com/o/r")
+        self.assertEqual(make_video.without_credentials("ssh://git@github.com/o/r.git"), "ssh://github.com/o/r.git")
+        self.assertEqual(make_video.without_credentials("https://github.com/o/r"), "https://github.com/o/r")
+        self.assertEqual(make_video.without_credentials("git@github.com:o/r.git"), "git@github.com:o/r.git")   # no password can sit here
+        self.assertIsNone(make_video.without_credentials(None))
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "digests" / "d"
+            repo.mkdir(parents=True)
+            (repo / "draft-vi.json").write_text("{}", encoding="utf-8")
+            subprocess.run(["git", "-C", tmp, "init", "-q"], check=True)
+            subprocess.run(["git", "-C", tmp, "remote", "add", "origin", "https://user:ghp_SECRET@example.com/o/r.git"], check=True)
+            came_from = make_video.where_it_came_from(repo / "draft-vi.json")
+        self.assertEqual(came_from["git_remote"], "https://example.com/o/r.git")
+        self.assertNotIn("SECRET", json.dumps(came_from))
+
     def test_the_report_that_a_standalone_render_created_accepts_a_later_voice_run(self):
         report = {"voice": {"voice": "Mai Anh"}}                       # what `render` writes when there is no report yet
         best = {"take": 2, "edits": 1, "ref_words": 10, "heard": "x"}
