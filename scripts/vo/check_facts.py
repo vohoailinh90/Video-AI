@@ -11,8 +11,8 @@ A script decides, not a model, the way github-radar's gates do:
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
   * the page's code is not read, but the plain ways it has of putting words on the screen or bringing in more code are refused
-    (CSS `content:`, @import, DOM-writing script, any script or stylesheet other than the template's own gsap.min.js, frames, on*
-    attributes).
+    (CSS `content:`, @import, DOM-writing script, canvas text, any script or stylesheet other than the template's own gsap.min.js,
+    frames, <base>, <canvas>, on* attributes).
     That is a pattern check, not a sandbox: code written to hide what it does gets past it, so the diff of the composition is still
     reviewed, and the gate does not look at images, video or audio;
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
@@ -63,13 +63,13 @@ MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; sc
 CSS_TEXT = re.compile(r"(?<![\w-])content\s*:(?!\s*(?:\"\"|''|none|normal)\s*(?:[;}!]|$))|@import\b|url\(\s*[\"']?\s*(?:[a-z]+:)?//", re.I)
 JS_WRITES = re.compile(r"\b(?:innerHTML|outerHTML|innerText|textContent|insertAdjacentHTML|insertAdjacentText|createTextNode|createElement|"
                        r"createElementNS|appendChild|insertBefore|replaceChildren|replaceWith|setAttribute|nodeValue|DOMParser|eval|Function|"
-                       r"import|importScripts|fetch|XMLHttpRequest|WebSocket|Worker|SharedWorker)\b|\bdocument\s*\.\s*write(?:ln)?\b|"
+                       r"import|importScripts|fetch|XMLHttpRequest|WebSocket|Worker|SharedWorker|fillText|strokeText|getContext)\b|\bdocument\s*\.\s*write(?:ln)?\b|"
                        r"\b(?:append|prepend)\s*\(|\.\s*(?:text|html)\s*\(")
 # The only file a page may load: the template's GSAP, named exactly so and identical to the copy vendored in scripts/radar/assets.
 # Any other file next to the page (a script, a stylesheet) is code this check does not read, so it is refused.
 TRUSTED_SCRIPT = "gsap.min.js"
 TRUSTED_COPY = Path(__file__).resolve().parents[1].joinpath("radar", "assets", TRUSTED_SCRIPT)
-FRAMES = {"iframe", "frame", "object", "embed"}
+FRAMES = {"iframe", "frame", "object", "embed", "base", "canvas"}   # another page, another place to load files from, or pixels drawn by script
 
 
 # a number, with its sign when the minus stands in front of it (-19, −3,5; a hyphen after a letter or digit, as in AGPL-3.0 or 10-20, is
@@ -121,7 +121,7 @@ class Visible(HTMLParser):
             if name.startswith("on"):
                 self.code.append(f"the event handler attribute {name} on <{tag}>")
         if tag in FRAMES:
-            self.code.append(f"<{tag}> (it can show a page that is not this one)")
+            self.code.append(f"<{tag}> (it shows another page, changes where files load from, or draws what no text node says)")
         for name, wanted in (("script", "src"), ("link", "href")):
             if tag == name and attrs.get(wanted) is not None:
                 if tag == "script" and attrs[wanted] == TRUSTED_SCRIPT:

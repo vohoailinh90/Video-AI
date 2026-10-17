@@ -618,6 +618,9 @@ class ReviewFindings(unittest.TestCase):
             "event handler": html.replace("</body>", '<img src="x.png" onerror="document.title=1"></body>', 1),
             "frame": html.replace("</body>", '<iframe src="https://example.com"></iframe></body>', 1),
             "stylesheet": html.replace("</head>", '<link rel="stylesheet" href="https://example.com/x.css"></head>', 1),
+            "base": html.replace("<head>", '<head><base href="https://attacker.example/assets/">', 1),
+            "canvas": html.replace("</body>", '<canvas id="c"></canvas><script>document.getElementById("c").getContext("2d").fillText("99999 lần", 10, 10)</script></body>', 1),
+            "canvas text": html.replace("</body>", '<script>ctx.strokeText("99999", 0, 0)</script></body>', 1),
         }
         for name, changed in sneaky.items():
             status, output = run_gate(digest, doc, changed)
