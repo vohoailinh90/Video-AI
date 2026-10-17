@@ -189,30 +189,30 @@ def require_gate(project: Path) -> str:
     return output
 
 
-BUILD = REPO / "build"   # gitignored; one folder per project name
+BUILD = REPO / "build"   # gitignored
+
+
+def build_dir(project: Path) -> Path:
+    """Where a project's takes, report and preview live: its name plus a short hash of its full path, so that two projects with the
+    same name in different folders (or a project moved elsewhere) never write into each other's files."""
+    return BUILD / f"{project.name}-{hashlib.sha1(str(project.resolve()).encode()).hexdigest()[:8]}"
 
 
 def reset_build(project: Path):
-    """A new project starts with nothing from an earlier project that had the same name."""
-    shutil.rmtree(BUILD / project.name, ignore_errors=True)
-    shutil.rmtree(BUILD / f"{project.name}-preview", ignore_errors=True)
+    """A new project starts with nothing from an earlier project in the same place."""
+    shutil.rmtree(build_dir(project), ignore_errors=True)
 
 
 def report_path(project: Path) -> Path:
-    return BUILD / project.name / "report.json"
+    return build_dir(project) / "report.json"
 
 
 def load_report(project: Path) -> dict:
-    """The project's report, or {} when there is none or it belongs to another project with the same name (another folder)."""
     path = report_path(project)
-    if not path.exists():
-        return {}
-    report = json.loads(path.read_text(encoding="utf-8"))
-    return report if report.get("project") == str(project.resolve()) else {}
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def save_report(project: Path, report: dict):
-    report["project"] = str(project.resolve())
     path = report_path(project)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, report)
@@ -302,7 +302,7 @@ def cmd_voice(args, project=None) -> dict:
         fail(f"not a line of voiceover.json: {unknown}")
     voice_name = resolve_voice(args.voice, doc, load_report(project), set(only) != set(ids))
     doc["voice"] = voice_name
-    takes_dir = BUILD / project.name / "takes"
+    takes_dir = build_dir(project) / "takes"
     shutil.rmtree(takes_dir, ignore_errors=True)
     tts_env, asr_env = tool_env(os.environ, args.tts_hf_home), tool_env(os.environ, args.asr_hf_home)
 
@@ -368,7 +368,7 @@ def cmd_voice(args, project=None) -> dict:
 def final_mix_wer(args, project: Path, mp4: Path):
     if not args.asr_python:
         return None
-    out = BUILD / project.name / "final-mix.json"
+    out = build_dir(project) / "final-mix.json"
     result = run([args.asr_python, "-I", VO / "roundtrip.py", "--out", out, "--video", mp4, "--lines", project / "voiceover.json",
                   "--label", "final mix"], env=tool_env(os.environ, args.asr_hf_home))
     if result.returncode:
@@ -405,7 +405,7 @@ def cmd_render(args, project=None) -> dict:
     write_preview_json(project, plan, report)
     write_readme(project, plan, doc, report)
     if args.preview:
-        page = BUILD / f"{project.name}-preview" / "index.html"
+        page = build_dir(project) / "preview" / "index.html"
         built = run([sys.executable, "-I", REPO / "scripts" / "preview" / "build_preview.py", "--config", project / "preview.json", "--out", page])
         if built.returncode:
             fail("build_preview.py failed:\n" + (built.stdout + built.stderr)[-1500:])
@@ -459,6 +459,7 @@ def write_readme(project: Path, plan, doc, report):
         c = voice.get("chosen", {}).get(line["id"], {})
         measured = f"{c['edits']}/{c['ref_words']}" if c.get("edits") is not None else "chưa đo"
         shown = line["text"] if len(line["text"]) <= 150 else line["text"][:147] + "..."
+        shown = " ".join(shown.split()).replace("|", "\\|")      # a pipe or a line break would split the Markdown table
         rows.append(f"| `{line['id']}` | {line['start']:g} s | {shown} | {c.get('take', '?')} | {measured}{' (cờ)' if c.get('flagged') else ''} |")
     if prov.get("path_in_repo"):
         origin_text = (f"file `{prov['path_in_repo']}` trong repo `{prov.get('git_remote')}` (bản ghi cuối cùng của file: `{prov.get('last_commit_of_file')}`)")

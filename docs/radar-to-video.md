@@ -26,7 +26,7 @@ Thiếu `--asr-python` thì lệnh vẫn chạy: dùng lượt đầu tiên củ
 | 3 | `render PROJECT` | `scripts/vo/revoice.py --apply` (đặt âm lượng, `npm run check`, render MP4), đo mức âm và đo lại lời đọc trên chính file MP4, ghi `README.md` và `preview.json`; `--preview` dựng thêm trang xem thử trong `build/` |
 | 4 | `all DIGEST` | Ba bước trên liền nhau |
 
-Báo cáo từng bước nằm ở `build/<tên dự án>/report.json` (không commit).
+Báo cáo từng bước nằm ở `build/<tên dự án>-<mã đường dẫn>/report.json` (không commit; mã đường dẫn là 8 ký tự băm từ đường dẫn đầy đủ của dự án, nên hai dự án trùng tên ở hai thư mục khác nhau không ghi đè lên nhau).
 
 ## Bài thành cảnh thế nào
 

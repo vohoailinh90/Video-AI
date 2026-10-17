@@ -377,7 +377,7 @@ class ReviewFindings(unittest.TestCase):
         doc["commands_shown"] = 9
         self.assertEqual(run_gate(digest, doc, html)[0], 1)
 
-    def test_a_report_of_another_project_with_the_same_name_is_ignored(self):
+    def test_projects_with_the_same_name_in_different_folders_keep_separate_build_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             saved = make_video.BUILD
@@ -385,15 +385,33 @@ class ReviewFindings(unittest.TestCase):
             try:
                 a, b = tmp / "one" / "video", tmp / "two" / "video"
                 a.mkdir(parents=True), b.mkdir(parents=True)
+                self.assertNotEqual(make_video.build_dir(a), make_video.build_dir(b))
                 make_video.save_report(a, {"voice": {"voice": "Mai Anh", "chosen": {"vo-1": {"take": 2}}}})
-                self.assertEqual(make_video.load_report(a)["voice"]["voice"], "Mai Anh")
-                self.assertEqual(make_video.load_report(b), {})          # same name, another folder
-                self.assertEqual(make_video.resolve_voice(None, {}, make_video.load_report(b), True), make_video.DEFAULT_VOICE)
-                make_video.reset_build(a)                                  # a scaffold of the same name starts clean
+                make_video.save_report(b, {"voice": {"voice": "Thái Sơn", "chosen": {}}})
+                self.assertEqual(make_video.load_report(a)["voice"]["voice"], "Mai Anh")     # not overwritten by the other project
+                self.assertEqual(make_video.load_report(b)["voice"]["voice"], "Thái Sơn")
+                make_video.reset_build(a)                                                     # a scaffold starts its own folder clean
                 self.assertEqual(make_video.load_report(a), {})
-                self.assertFalse((make_video.BUILD / "video").exists())
+                self.assertEqual(make_video.load_report(b)["voice"]["voice"], "Thái Sơn")
+                self.assertEqual(make_video.build_dir(a), make_video.build_dir(a))            # stable for the same folder
             finally:
                 make_video.BUILD = saved
+
+    def test_the_readme_table_survives_pipes_and_line_breaks_in_a_line(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "p"
+            (project / "source").mkdir(parents=True)
+            doc = make_video.write_composition(project, plan, tl)
+            doc["lines"][1]["text"] = "Dẫn kết quả qua cat a | grep b,\nrồi đếm."
+            make_video.write_readme(project, plan, doc, {"voice": {"voice": "Hải Đăng"}, "render": {"duration": 60.0, "check": "ok"}})
+            rows = [l for l in (project / "README.md").read_text(encoding="utf-8").splitlines() if l.startswith("| `vo-")]
+        self.assertEqual(len(rows), len(doc["lines"]), "one table row per line")
+        bad = next(r for r in rows if r.startswith("| `vo-2`"))
+        self.assertIn("a \\| grep b, rồi đếm.", bad)
+        self.assertEqual(bad.replace("\\|", "").count("|"), 6, "five cells, whatever the text says")
 
 
 class Narration(unittest.TestCase):
