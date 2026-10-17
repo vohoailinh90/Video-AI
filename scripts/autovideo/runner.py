@@ -123,8 +123,8 @@ def job_status(entry: dict | None, job: Job, dest: Path, bgm: str | None = None)
 
     `done` (and `qa_failed`) is only said when the state, the files and the QA limits agree: the state alone is not enough, because a
     failed render of an edited job leaves the old video in the folder, a video can be deleted, and changing target_seconds changes what
-    passes, in both directions. `bgm` is the digest of the custom music file as it is now (engine_mpt.bgm_digest), or None when the
-    caller cannot read it (no MPT) or the job has none; the digest recorded at the render must then not be contradicted."""
+    passes, in both directions. `bgm` is what engine_mpt.bgm_digest says about the custom music file now (a digest, or BGM_MISSING), or
+    None when there is nothing to compare: the job reads no custom music, or the caller cannot look (no MPT)."""
     if not entry:
         return "pending"
     if entry.get("fingerprint") != job.fingerprint():

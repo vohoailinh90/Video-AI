@@ -214,8 +214,9 @@ class PackTests(unittest.TestCase):
         (env.home / "storage" / "bgm").mkdir(parents=True)
         (env.home / "storage" / "bgm" / "foo.mp3").write_bytes(b"cccc")  # MPT looks in storage/bgm before resource/songs
         self.assertEqual(engine_mpt.bgm_digest(env, job(bgm="foo.mp3")), hashlib.sha256(b"cccc").hexdigest())
-        for kind in ({"bgm": "none"}, {"bgm": "random"}, {"bgm": "foo.mp3", "bgm_volume": 0}, {"bgm": "missing.mp3"}):
+        for kind in ({"bgm": "none"}, {"bgm": "random"}, {"bgm": "foo.mp3", "bgm_volume": 0}):
             self.assertIsNone(engine_mpt.bgm_digest(env, job(**kind)), kind)  # no custom music that is read
+        self.assertEqual(engine_mpt.bgm_digest(env, job(bgm="missing.mp3")), engine_mpt.BGM_MISSING)  # music that is asked for and gone
 
     def test_preflight_names_a_missing_ffmpeg_or_ffprobe(self):
         env = fake_mpt(self.root)
@@ -431,6 +432,17 @@ class RunnerTests(FakeMptCase):
         self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
         self.assertEqual(self.renders(), 2)
 
+    def test_a_deleted_custom_music_file_is_not_skipped_over(self):
+        songs = self.env.home / "resource" / "songs"
+        songs.mkdir(parents=True)
+        (songs / "foo.mp3").write_bytes(b"aaaa")
+        self.run_pack([video()], {"bgm": "foo.mp3"})
+        (songs / "foo.mp3").unlink()
+        summary, _ = self.run_pack([video()], {"bgm": "foo.mp3"}, retries=0)
+        self.assertEqual((summary["skipped"], summary["failed"]), (0, 1))  # not "done already": the music the job needs is gone
+        self.assertEqual(summary["videos"][0]["stage"], "preflight")
+        self.assertEqual(self.renders(), 1)
+
     def test_a_python_that_cannot_start_is_a_startup_failure_not_a_traceback(self):
         broken = engine_mpt.MptEnv(self.env.home, (str(self.root / "gone" / "python"),))
         summary, _ = self.run_pack([video("01-a"), video("02-b")], env=broken, retries=2)
@@ -584,6 +596,10 @@ class CliTests(FakeMptCase):
         (songs / "foo.mp3").write_bytes(b"bbbb")
         self.assertEqual(status(mpt), "stale")  # the music changed after the render
         self.assertEqual(self.call("qa", str(path), *mpt)[0], 1)  # and QA does not pass the old video for the new music
+        (songs / "foo.mp3").write_bytes(b"aaaa")
+        self.assertEqual(status(mpt), "done")  # the music it was rendered with is back
+        (songs / "foo.mp3").unlink()
+        self.assertEqual(status(mpt), "stale")  # the music it needs is gone
         self.assertEqual(status(no_mpt), "done")  # without MPT the file cannot be read, so nothing is claimed about it
 
     def test_doctor_never_prints_a_key(self):

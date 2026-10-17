@@ -20,6 +20,7 @@ from pathlib import Path
 from .pack import NO_VOICE, Job
 
 DEFAULT_HOME = Path("~/MoneyPrinterTurbo")
+BGM_MISSING = "missing"  # what bgm_digest says when the job needs a custom music file and it is not there (never a hex digest)
 SECRET_KEY = re.compile(r"key|token|secret|password", re.I)
 
 
@@ -110,8 +111,9 @@ def video_params(job: Job) -> dict:
 def bgm_digest(env: MptEnv, job: Job) -> str | None:
     """SHA-256 of the custom music file the job names, found where MPT looks for it (storage/bgm, then resource/songs).
 
-    None when the job reads no custom music (none, random, or a volume of zero) or the file is not there. The file lives in MPT's own
-    directories, outside the pack, so the job's fingerprint cannot cover it: the digest is kept beside the fingerprint instead."""
+    None when the job reads no custom music (none, random, or a volume of zero), BGM_MISSING when it needs a file that is not there,
+    else the digest. The file lives in MPT's own directories, outside the pack, so the job's fingerprint cannot cover it: the digest is
+    kept beside the fingerprint instead."""
     if job.bgm in ("none", "random") or job.bgm_volume <= 0:
         return None
     for folder in ("storage/bgm", "resource/songs"):
@@ -119,7 +121,7 @@ def bgm_digest(env: MptEnv, job: Job) -> str | None:
         if path.is_file():
             with open(path, "rb") as handle:
                 return hashlib.file_digest(handle, "sha256").hexdigest()
-    return None
+    return BGM_MISSING
 
 
 def _secrets(value, key: str = "") -> list[str]:
