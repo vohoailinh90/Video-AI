@@ -178,9 +178,11 @@ docker network inspect team-net >/dev/null 2>&1 || docker network create --subne
 cat > /usr/local/sbin/team-egress <<EGRESS
 #!/usr/bin/env bash
 # team-egress                    put the rules in force (the team-egress unit runs this at boot)
-# team-egress --check [PROOF]    prove they are in force: the worker network has the subnet the rules match, and the
-#                                DROP rules are the FIRST rules of DOCKER-USER and INPUT. A rule that exists but sits
-#                                behind an ACCEPT (a firewall manager, an administrator) decides nothing. The answer is
+# team-egress --check [PROOF]    prove they are in force: the worker network has the subnet the rules match, the
+#                                DROP rules are the FIRST rules of DOCKER-USER and INPUT, and FORWARD starts with the
+#                                jump into DOCKER-USER (Docker's only way to it: without the jump the DROP rules there are
+#                                never reached). A rule that exists but sits behind an ACCEPT (a firewall manager, an
+#                                administrator) decides nothing. The answer is
 #                                the verified network's name on stdout and in PROOF (default /run/team-egress.ok). Any
 #                                miss removes PROOF, stops every container still running on the worker network and
 #                                exits 1. The conductor runs this through sudo before each container it starts.
@@ -193,9 +195,11 @@ ndests="\$(set -- \${dests}; echo \$#)"
 want_user() { for dest in \${dests}; do echo "-A DOCKER-USER -s \${subnet} -d \${dest} -j DROP"; done | sort; }
 have_user() { iptables -S DOCKER-USER | awk -v n="\${ndests}" '/^-A DOCKER-USER /{ if (++c <= n) print }' | sort; }
 first_input() { iptables -S INPUT | awk '/^-A INPUT /{ print; exit }'; }
+first_forward() { iptables -S FORWARD | awk '/^-A FORWARD /{ print; exit }'; }
 # Empty when the rules are in force, else why not.
 problem() {
   [ "\$(have_user)" = "\$(want_user)" ] || { echo "the DROP rules for \${subnet} are missing from, or not the first rules of, DOCKER-USER"; return; }
+  [ "\$(first_forward)" = "-A FORWARD -j DOCKER-USER" ] || { echo "the jump to DOCKER-USER is missing from, or not the first rule of, FORWARD: the DROP rules there are never reached"; return; }
   [ "\$(first_input)" = "-A INPUT -s \${subnet} -j DROP" ] || echo "the DROP rule for \${subnet} is missing from, or not the first rule of, INPUT"
 }
 if [ "\${1:-}" = "--maintain" ]; then
@@ -231,6 +235,8 @@ if [ -n "\$(problem)" ]; then
   done
   while iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null; do iptables -D INPUT -s "\${subnet}" -j DROP; done
   iptables -I INPUT -s "\${subnet}" -j DROP
+  while iptables -C FORWARD -j DOCKER-USER 2>/dev/null; do iptables -D FORWARD -j DOCKER-USER; done
+  iptables -I FORWARD -j DOCKER-USER
 fi
 EGRESS
 chmod 755 /usr/local/sbin/team-egress

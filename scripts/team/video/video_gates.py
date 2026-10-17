@@ -83,28 +83,53 @@ def parse_loudness(stderr: str) -> tuple[float | None, float | None]:
     return (number(lufs[1]) if lufs else None, number(peak[1]) if peak else None)
 
 
-def parse_silences(stderr: str, audio_length: float) -> tuple[list[float], float]:
+def seconds(value: object) -> float:
+    """A ffprobe time field, or 0 when it says "N/A" or is missing."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def audio_window(info: dict, audio: dict) -> tuple[float, float]:
+    """(start, length) of the audio stream on the container's clock, which is the clock silencedetect reports in.
+
+    ffmpeg takes the file's first timestamp as zero, so a stream's own start_time is shifted by the container's."""
+    container = info.get("format", {})
+    length = seconds(audio.get("duration")) or seconds(container.get("duration"))
+    return max(0.0, seconds(audio.get("start_time")) - seconds(container.get("start_time"))), length
+
+
+def parse_silences(stderr: str, audio_length: float, audio_start: float = 0.0) -> tuple[list[float], float]:
     """(lengths of the silent stretches inside the audio, length of the one that reaches the end of the stream).
 
     The one at the end is kept apart because the stretch of the video after the audio stream ends is silent too, and
     the two are a single silence. Depending on the ffmpeg version, silencedetect either never closes it or closes it at
-    the stream's last frame; both read as reaching `audio_length`."""
+    the stream's last frame; both read as reaching the end of the stream.
+
+    The times are on the container's clock and the stream runs from `audio_start` to `audio_start + audio_length`. A
+    silence that begins where the stream does continues the stretch before it, so that stretch is added to its length."""
+    audio_end = audio_start + audio_length
     gaps: list[float] = []
     trailing = 0.0
     start: float | None = None
+
+    def lead(begin: float) -> float:
+        return audio_start if begin <= audio_start + EOF_EDGE_S else 0.0
+
     for row in stderr.splitlines():
         found_start, found_end = SIL_START_RE.search(row), SIL_END_RE.search(row)
         if found_start:
             start = max(0.0, float(found_start[1]))
         elif found_end and start is not None:
             end = float(found_end[1])
-            if end >= audio_length - EOF_EDGE_S:
-                trailing = audio_length - start
+            if end >= audio_end - EOF_EDGE_S:
+                trailing = audio_end - start + lead(start)
             else:
-                gaps.append(end - start)
+                gaps.append(end - start + lead(start))
             start = None
     if start is not None:
-        trailing = audio_length - start
+        trailing = audio_end - start + lead(start)
     return gaps, trailing
 
 
@@ -167,7 +192,7 @@ def evaluate(info: dict, loudness: tuple[float | None, float | None] | None, gap
     check(audio, "audio stream", "present" if audio else "missing: the render is silent")
     if not audio:
         return checks
-    audio_length = float(audio.get("duration") or length)
+    audio_start, audio_length = audio_window(info, audio)
     coverage = audio_length / length if length else 0.0
     check(coverage >= opts.get("min_coverage", 0.9), "audio coverage",
           f"audio is {coverage:.0%} of the video, wanted at least {opts.get('min_coverage', 0.9):.0%}")
@@ -178,10 +203,11 @@ def evaluate(info: dict, loudness: tuple[float | None, float | None] | None, gap
     ceiling = opts.get("max_peak_db", -0.1)
     check(peak is not None and peak <= ceiling, "true peak",
           f"{'unmeasured' if peak is None else f'{peak:.1f} dBFS'}, ceiling {ceiling} dBFS")
-    # silencedetect only sees the audio stream: whatever follows its end, up to the end of the video, is silence too, and
-    # it continues a silence that was already running when the stream ended.
-    tail = max(0.0, length - audio_length)
-    longest = max(max(gaps, default=0.0), trailing + tail)
+    # silencedetect only sees the audio stream. Whatever follows its end, up to the end of the video, is silence too, and
+    # it continues a silence that was already running when the stream ended. Whatever precedes its start is silence as
+    # well, but a different one: a late start and an early end are two gaps, not their sum.
+    tail = max(0.0, length - (audio_start + audio_length))
+    longest = max(max(gaps, default=0.0), trailing + tail, audio_start)
     limit = opts.get("max_silence_gap_s", 4.0)
     check(longest <= limit, "silence gap", f"longest silence {longest:.1f}s, limit {limit}s")
     return checks
@@ -205,11 +231,11 @@ def main(argv: list[str] | None = None) -> int:
     has_audio = any(s.get("codec_type") == "audio" for s in info.get("streams", []))
     loudness, gaps, trailing = None, [], 0.0
     if has_audio and opts.get("required", True):
-        container = float(info.get("format", {}).get("duration") or 0)
         stream = next(s for s in info["streams"] if s.get("codec_type") == "audio")
         meter, silence = audio_levels(args.video, SILENCE_MIN_S)
         loudness = parse_loudness(meter)
-        gaps, trailing = parse_silences(silence, float(stream.get("duration") or container))
+        start, length = audio_window(info, stream)
+        gaps, trailing = parse_silences(silence, length, start)
     checks = evaluate(info, loudness, gaps, expected, trailing)
     for ok, name, detail in checks:
         print(f"{'PASS' if ok else 'FAIL'} {name}: {detail}")

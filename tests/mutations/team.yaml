@@ -550,3 +550,7 @@ mutations:
   find: "        if answer.readline().strip() != f.id:\n"
   replace: "        if False:\n"
   test: tests.test_team.PipelineTests.test_forcing_a_push_needs_a_person_at_a_terminal
+- label: "the retry feedback travels on the docker command line again"
+  find: 'prompt, mounts = render(shipped(PROMPTS, "fix.md"), id=f.id), handoff_mounts(f, {"feedback.md": note})'
+  replace: 'prompt, mounts = render(shipped(PROMPTS, "fix.md"), id=f.id) + feedback, handoff_mounts(f, {"feedback.md": note})'
+  test: tests.test_team.PipelineTests.test_a_huge_line_of_gate_output_reaches_the_next_attempt_through_a_file_not_a_command_line

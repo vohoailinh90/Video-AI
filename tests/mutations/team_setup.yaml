@@ -150,3 +150,15 @@ mutations:
   find: "install -d -o team -g team -m 2770 \"${TEAM_HOME}/work\"\n"
   replace: "install -d -o team -g team -m 2750 \"${TEAM_HOME}/work\"\n"
   test: tests.test_team.CodexTeamInstallTests.test_team_homes_are_not_writable_by_the_admins_group
+- label: "the egress check no longer looks at FORWARD"
+  find: '  [ "\$(first_forward)" = "-A FORWARD -j DOCKER-USER" ] || {'
+  replace: '  [ "x" = "x" ] || {'
+  test: tests.test_team.EgressScriptTests.test_check_refuses_a_forward_chain_that_never_reaches_the_docker_user_chain
+- label: "a jump into DOCKER-USER anywhere in FORWARD satisfies the egress check"
+  find: "first_forward() { iptables -S FORWARD | awk '/^-A FORWARD /{ print; exit }'; }"
+  replace: "first_forward() { iptables -S FORWARD | awk '/^-A FORWARD -j DOCKER-USER$/{ print; exit }'; }"
+  test: tests.test_team.EgressScriptTests.test_check_refuses_a_forward_chain_that_never_reaches_the_docker_user_chain
+- label: "applying the egress rules does not put the FORWARD jump back"
+  find: "  iptables -I FORWARD -j DOCKER-USER\n"
+  replace: ''
+  test: tests.test_team.EgressScriptTests.test_maintain_restores_flushed_or_outranked_rules_and_does_nothing_otherwise

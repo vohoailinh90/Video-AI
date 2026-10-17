@@ -95,7 +95,7 @@ FAKE_DOCKER = textwrap.dedent('''
     with open(@LOG@, "a") as fh:
         fh.write(json.dumps({"name": name, "env": envs, "present": present,
                              "values": [os.environ[k] for k in present], "cmd": cmd[:2],
-                             "mounts": sorted(mounts)}) + "\\n")
+                             "mounts": sorted(mounts), "longest_arg": max(len(a) for a in args)}) + "\\n")
     if cmd[0] == "bash":
         sys.exit(subprocess.run(cmd[2], shell=True, cwd=mounts["/work"]).returncode)
     role = name.rsplit("-", 1)[1]
@@ -708,6 +708,29 @@ class PipelineTests(Sandbox):
         self.assertIn("attempt 1 [openrouter/vendor/coder-a:free]", log)
         self.assertIn("attempt 2 [openrouter/other/coder-b:free]", log)
         self.assertIn("still fail", (f.out / "feedback.md").read_text())
+
+    def test_a_huge_line_of_gate_output_reaches_the_next_attempt_through_a_file_not_a_command_line(self):
+        # Codex's twenty-first review: one line of gate output can be as long as the retained tail (200 KB), and Linux
+        # refuses a single argument past 128 KB with E2BIG, which would abort an unattended run. The feedback is mounted at
+        # /handoff/feedback.md; the prompt on the command line is the short fix.md text and nothing the worker wrote.
+        f = self.new_feature()
+        noisy_test = textwrap.dedent("""
+            os.makedirs(work + "/tests", exist_ok=True)
+            with open(work + "/tests/check_feature.py", "w") as fh:
+                fh.write("import sys\\nsys.path.insert(0, '.')\\nfrom feature import add\\nprint('x' * 300000)\\nassert add(2, 3) == 5\\n")
+        """)
+        coder = textwrap.dedent("""
+            body = "a + b" if "/handoff/feedback.md" in handoff else "a - b"
+            with open(work + "/feature.py", "w") as fh:
+                fh.write("def add(a, b):\\n    return " + body + "\\n")
+        """)
+        self.scenario(tester=noisy_test, coder=coder, reviewer=NO_BLOCKERS)
+        code, out = self.run_pipeline()
+        self.assertEqual(code, 0, out)
+        # The conductor keeps the last 200 KB of a gate's output, so the line arrives cut, but still past the 128 KB limit.
+        self.assertTrue("x" * 150000 in (f.out / "feedback.md").read_text(), "the long line travelled in the mounted file")
+        self.assertLess(max(run["longest_arg"] for run in self.docker_runs()), 4000,
+                        "no docker argument carries worker or gate output")
 
     def test_a_quota_error_is_named_when_no_coder_run_works(self):
         f = self.new_feature()
@@ -1951,7 +1974,7 @@ class EgressScriptTests(unittest.TestCase):
     SETUP = ROOT / "scripts" / "team" / "setup-vps-team.sh"
     RULES = ["DOCKER-USER -s 172.30.99.0/24 -d " + dest + " -j DROP"
              for dest in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10")] + \
-            ["INPUT -s 172.30.99.0/24 -j DROP"]
+            ["INPUT -s 172.30.99.0/24 -j DROP", "FORWARD -j DOCKER-USER"]
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -2034,7 +2057,7 @@ class EgressScriptTests(unittest.TestCase):
     def test_check_refuses_rules_that_a_competing_rule_precedes(self):
         # Codex's eleventh review: `iptables -C` only proves a rule exists. An ACCEPT above it (a firewall manager, an
         # administrator) decides the packet first, so the DROP rules count only as the first rules of their chains.
-        for competing in ("DOCKER-USER -j ACCEPT", "INPUT -i lo -j ACCEPT"):
+        for competing in ("DOCKER-USER -j ACCEPT", "INPUT -i lo -j ACCEPT", "FORWARD -i br-other -j ACCEPT"):
             self.set_state([competing, *self.RULES], "172.30.99.0/24")
             self.ok.write_text("team-net\n")
             result = self.run_script("--check")
@@ -2042,8 +2065,27 @@ class EgressScriptTests(unittest.TestCase):
             self.assertFalse(self.ok.exists(), competing)
             self.assertIn(f"{competing.split()[0]}", result.stderr)
             self.assertIn("first", result.stderr)
-        self.set_state([*self.RULES, "DOCKER-USER -j RETURN", "INPUT -j ACCEPT"], "172.30.99.0/24")
+        self.set_state([*self.RULES, "DOCKER-USER -j RETURN", "INPUT -j ACCEPT", "FORWARD -j ACCEPT"], "172.30.99.0/24")
         self.assertEqual(self.run_script("--check").returncode, 0, "rules that come after ours do not matter")
+
+    def test_check_refuses_a_forward_chain_that_never_reaches_the_docker_user_chain(self):
+        # Codex's twenty-first review (security): Docker reaches DOCKER-USER through a jump in FORWARD. With the jump gone, or
+        # behind an ACCEPT, every DROP rule can be in place and first in its own chain while a worker's traffic bypasses them.
+        drops = [rule for rule in self.RULES if not rule.startswith("FORWARD")]
+        for label, state in (("no jump at all", drops),
+                             ("the jump behind an ACCEPT", ["FORWARD -i br-team -j ACCEPT", *drops, "FORWARD -j DOCKER-USER"]),
+                             ("a jump to another chain", [*drops, "FORWARD -j DOCKER-ISOLATION-STAGE-1"])):
+            with self.subTest(label):
+                self.set_state(state, "172.30.99.0/24")
+                self.ok.write_text("team-net\n")
+                self.running.write_text("c1\n")
+                self.killed.unlink(missing_ok=True)
+                result = self.run_script("--check")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.ok.exists())
+                self.assertIn("FORWARD", result.stderr)
+                self.assertIn("first", result.stderr)
+                self.assertEqual(self.killed.read_text().split(), ["c1"])
 
     def test_applying_the_rules_puts_them_first_and_leaves_a_correct_set_alone(self):
         self.set_state(["DOCKER-USER -j ACCEPT", "INPUT -i lo -j ACCEPT", *self.RULES], "172.30.99.0/24")
@@ -2063,7 +2105,8 @@ class EgressScriptTests(unittest.TestCase):
         self.running.write_text("c1\n")
         self.assertEqual(self.run_script("--maintain").returncode, 0)
         self.assertFalse(self.killed.exists())
-        for state in ([], ["DOCKER-USER -j ACCEPT", *self.RULES]):
+        drops = [rule for rule in self.RULES if not rule.startswith("FORWARD")]
+        for state in ([], ["DOCKER-USER -j ACCEPT", *self.RULES], drops, ["FORWARD -j ACCEPT", *self.RULES]):
             self.killed.unlink(missing_ok=True)
             self.ok.unlink(missing_ok=True)
             self.set_state(state, "172.30.99.0/24")

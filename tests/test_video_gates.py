@@ -50,12 +50,18 @@ SILENCE = """size=       0kB time=00:00:00.00 bitrate=N/A speed=   0x    [silenc
 EXPECT = {"duration_s": 6, "width": 640, "height": 360, "fps": 25}
 
 
-def info(duration=6.0, audio=True, width=640, height=360, rate="25/1", audio_duration=None, video_duration=None):
+def info(duration=6.0, audio=True, width=640, height=360, rate="25/1", audio_duration=None, video_duration=None,
+         audio_start=None, format_start=None):
     streams = [{"codec_type": "video", "width": width, "height": height, "avg_frame_rate": rate,
                 "duration": str(video_duration or duration)}]
     if audio:
         streams.append({"codec_type": "audio", "duration": str(audio_duration or duration)})
-    return {"streams": streams, "format": {"duration": str(duration)}}
+        if audio_start is not None:
+            streams[-1]["start_time"] = str(audio_start)
+    container = {"duration": str(duration)}
+    if format_start is not None:
+        container["start_time"] = str(format_start)
+    return {"streams": streams, "format": container}
 
 
 def failed(checks):
@@ -89,6 +95,36 @@ class ParserTests(unittest.TestCase):
         self.assertEqual([round(g, 2) for g in gaps], [1.5])
         self.assertAlmostEqual(trailing, 4.0, places=2)
         self.assertEqual(gates.parse_silences("", audio_length=9.0), ([], 0.0))
+
+    def test_silencedetect_times_are_on_the_container_timeline_when_the_audio_starts_late(self):
+        # Codex's twenty-first review. Real ffmpeg output for 15 s of audio that starts 2.476 s into a 20 s video: the tone
+        # is silent for its first second and for its last 3 s. The times already include the 2.476 s, so a stream that
+        # ends at 17.5 on the container's clock was compared with a bare length of 15.02.
+        real = ("[silencedetect @ 0x55] silence_start: 2.47601\n"
+                "[silencedetect @ 0x55] silence_end: 3.49925 | silence_duration: 1.02324\n"
+                "[silencedetect @ 0x55] silence_start: 14.4992\n"
+                "[silencedetect @ 0x55] silence_end: 17.4993 | silence_duration: 3.00009\n")
+        gaps, trailing = gates.parse_silences(real, audio_length=15.02, audio_start=2.476)
+        self.assertAlmostEqual(trailing, 3.0, places=2)
+        # The first silence begins where the audio begins, so the 2.476 s before it belong to the same stretch of nothing.
+        self.assertEqual([round(g, 2) for g in gaps], [3.5])
+
+    def test_audio_that_is_silent_throughout_and_starts_late_is_one_silence_with_the_lead(self):
+        gaps, trailing = gates.parse_silences("[silencedetect @ 0x1] silence_start: 3.0\n", audio_length=10.0, audio_start=3.0)
+        self.assertEqual(gaps, [])
+        self.assertAlmostEqual(trailing, 13.0, places=3)
+        closed = "[silencedetect @ 0x1] silence_start: 3.0\n[silencedetect @ 0x1] silence_end: 13.0 | silence_duration: 10.0\n"
+        gaps, trailing = gates.parse_silences(closed, audio_length=10.0, audio_start=3.0)
+        self.assertEqual(gaps, [])
+        self.assertAlmostEqual(trailing, 13.0, places=3)
+
+    def test_the_audio_window_is_read_on_the_containers_clock(self):
+        stream = {"codec_type": "audio", "start_time": "3.5", "duration": "15"}
+        self.assertEqual(gates.audio_window({"streams": [stream], "format": {"duration": "20", "start_time": "1.0"}}, stream),
+                         (2.5, 15.0))
+        self.assertEqual(gates.audio_window({"streams": [], "format": {"duration": "20"}}, {"start_time": "N/A"}), (0.0, 20.0))
+        early = {"start_time": "0.2"}
+        self.assertEqual(gates.audio_window({"format": {"duration": "9", "start_time": "0.5"}}, early), (0.0, 9.0))
 
 
 class FrameRateTests(unittest.TestCase):
@@ -153,6 +189,22 @@ class EvaluateTests(unittest.TestCase):
     def test_the_tail_does_not_add_to_a_silence_inside_the_audio(self):
         media, expected = info(duration=10.0, audio_duration=9.0), {**EXPECT, "duration_s": 10}
         self.assertEqual(failed(self.run_checks(media, expected=expected, gaps=[3.5])), [], "an inner pause and a 1 s tail")
+
+    def test_a_late_start_and_an_early_end_are_two_silences_not_one(self):
+        # Codex's twenty-first review: audio that runs from 2.5 s to 47.5 s of a 50 s video is 90% of it, with a 2.5 s gap at
+        # each end. They are not adjacent, so the longest silence is 2.5 s, not their sum.
+        media = info(duration=50.0, audio_duration=45.0, audio_start=2.5)
+        self.assertEqual(failed(self.run_checks(media, expected={**EXPECT, "duration_s": 50})), [])
+
+    def test_a_late_start_alone_counts_as_silence_before_the_sound(self):
+        media = info(duration=50.0, audio_duration=45.0, audio_start=5.0)
+        checks = self.run_checks(media, expected={**EXPECT, "duration_s": 50})
+        self.assertEqual(failed(checks), ["silence gap"])
+        self.assertIn("5.0s", next(text for ok, name, text in checks if name == "silence gap"))
+
+    def test_the_late_start_is_measured_from_the_containers_first_timestamp(self):
+        media = info(duration=50.0, audio_duration=45.0, audio_start=6.0, format_start=3.0)
+        self.assertEqual(failed(self.run_checks(media, expected={**EXPECT, "duration_s": 50})), [])
 
     def test_a_short_tail_within_the_limit_is_fine(self):
         checks = self.run_checks(info(duration=50.0, audio_duration=47.0), expected={**EXPECT, "duration_s": 50})
@@ -254,6 +306,17 @@ class RenderedClipTests(unittest.TestCase):
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=6",
                         "-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,1.5)\\,0.2*sin(2*PI*440*t)\\,0):d=4:s=44100", *encode,
                         "-c:a", "aac", str(cls.dir / "dead-ending.mp4")], check=True)
+        # 7 s of sound that starts 2.5 s into 12 s of picture: a 2.5 s gap at each end.
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=12",
+                        "-itsoffset", "2.5", "-f", "lavfi", "-i", "sine=frequency=440:duration=7,volume=3", *encode,
+                        "-c:a", "aac", str(cls.dir / "both-ends.mp4")], check=True)
+        # The same, but the sound is silent for its first 2 s: 2.5 s of nothing before it plus 2 s inside it.
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=12",
+                        "-itsoffset", "2.5", "-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,2)\\,0\\,0.2*sin(2*PI*440*t)):d=9:s=44100",
+                        *encode, "-c:a", "aac", str(cls.dir / "late-and-quiet.mp4")], check=True)
+        cls.expect_late = cls.dir / "expected-late.json"
+        cls.expect_late.write_text(json.dumps({"duration_s": 12, "width": 640, "height": 360, "fps": 25,
+                                               "audio": {"min_coverage": 0.5}}))
         cls.expect_dead = cls.dir / "expected-dead.json"
         cls.expect_dead.write_text(json.dumps({"duration_s": 6, "width": 640, "height": 360, "fps": 25,
                                                "audio": {"min_coverage": 0.5}}))
@@ -286,6 +349,15 @@ class RenderedClipTests(unittest.TestCase):
     def test_silence_at_the_end_of_a_short_audio_stream_adds_to_the_missing_tail(self):
         # 2.5 s of silence inside the audio stream plus 2 s with no audio at all: neither passes the 4 s limit alone.
         code, summary = self.verdict("dead-ending.mp4", self.expect_dead)
+        self.assertEqual((code, summary["failed"]), (1, ["silence gap"]))
+
+    def test_a_gap_at_each_end_of_the_audio_is_not_one_gap(self):
+        # Codex's twenty-first review: 2.5 s before the sound and 2.5 s after it are separate silences.
+        code, summary = self.verdict("both-ends.mp4", self.expect_late)
+        self.assertEqual((code, summary["failed"]), (0, []))
+
+    def test_silence_before_a_late_stream_adds_to_a_silence_that_starts_with_it(self):
+        code, summary = self.verdict("late-and-quiet.mp4", self.expect_late)
         self.assertEqual((code, summary["failed"]), (1, ["silence gap"]))
 
     def test_a_missing_render_is_rejected(self):
