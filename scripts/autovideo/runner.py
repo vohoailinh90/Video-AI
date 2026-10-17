@@ -122,6 +122,22 @@ def collect(job: Job, result: engine_mpt.EngineResult, dest: Path) -> dict:
     return files
 
 
+def stored_outputs(dest: Path, files: dict) -> dict[str, int]:
+    """Name and size of every file collect() stored (the video, the narration and subtitles when there are any, and the transcripts).
+    The state keeps them so that a render which is later cut short, or loses a file, is not still called finished. job.json is not in
+    the list: its content is read and compared with the job's fingerprint, which says more than a size."""
+    names = [files["video"], files["narration"], files["subtitles"], "transcript.txt", "transcript.json"]
+    return {name: (dest / name).stat().st_size for name in names if name}
+
+
+def outputs_intact(entry: dict, dest: Path) -> bool:
+    """Every file the render stored is still there, at the size it had. A state without the list (an older one) cannot say, so no."""
+    outputs = entry.get("outputs")
+    if not outputs:
+        return False
+    return all((dest / name).is_file() and (dest / name).stat().st_size == size for name, size in outputs.items())
+
+
 def evaluate(job: Job, dest: Path) -> list[qa.Check]:
     """QA on the files in a job's folder."""
     srt = dest / "subtitles.srt"
@@ -155,7 +171,7 @@ def qa_basis(job: Job) -> list[float]:
 def job_status(entry: dict | None, job: Job, dest: Path, inputs: dict | None = None) -> str:
     """What a job amounts to now: pending, stale, missing, unchecked, or the status its last run recorded (done, qa_failed, failed, running).
 
-    `done` (and `qa_failed`) is only said when the state, the files and the QA limits agree: the state alone is not enough, because a
+    `done` (and `qa_failed`) is only said when the state, the files (all of them, at the sizes they were stored) and the QA limits agree: the state alone is not enough, because a
     failed render of an edited job leaves the old video in the folder, a video can be deleted, and changing target_seconds changes what
     passes, in both directions. `inputs` is what engine_mpt.input_digests says about the music and font files now, or None when the
     caller cannot look (no MPT): those files are then not compared."""
@@ -170,6 +186,8 @@ def job_status(entry: dict | None, job: Job, dest: Path, inputs: dict | None = N
         return "missing"
     if rendered_fingerprint(dest) != job.fingerprint():
         return "stale"
+    if not outputs_intact(entry, dest):
+        return "missing"  # a file the render stored is gone or no longer the size it was: cut short, or deleted
     if inputs is not None and entry.get("inputs", {}) != inputs:
         return "stale"  # the music or font file was replaced, or went missing, after the render
     if entry.get("qa_basis") != qa_basis(job):
@@ -260,6 +278,7 @@ def _run(
                 bad = [c for c in checks if c.level == "error" and not c.ok]
                 outcome = {
                     "status": "done" if not bad else "qa_failed", "files": files, "checks": [c.to_dict() for c in checks],
+                    "outputs": stored_outputs(dest, files),
                     "engine": {
                         "name": "moneyprinterturbo", "task_id": result.task_id, "task_dir": str(result.task_dir),
                         "audio_seconds": result.audio_seconds, "warnings": list(result.warnings),
@@ -275,7 +294,7 @@ def _run(
         state["jobs"][job.id] = {
             "status": outcome["status"], "fingerprint": job.fingerprint(), "attempts": attempts, "seconds": seconds, "finished": report["finished"],
             "task_id": outcome.get("engine", {}).get("task_id"), "stage": outcome.get("stage"), "error": outcome.get("error"),
-            "qa_basis": qa_basis(job) if "checks" in outcome else None, "inputs": inputs,
+            "qa_basis": qa_basis(job) if "checks" in outcome else None, "inputs": inputs, "outputs": outcome.get("outputs"),
         }
         write_json(batch_dir / "state.json", state)
         failures = [c["name"] for c in outcome.get("checks", []) if c["level"] == "error" and not c["ok"]]
@@ -339,6 +358,8 @@ def requalify_job(job: Job, dest: Path, state: dict, inputs: dict | None = None)
         # The folder holds a video of an earlier version of this job (its newer render failed or never finished).
         # Passing QA does not make it the video of this job, so it is neither checked nor marked done.
         return {"id": job.id, "status": "stale", "checks": []}
+    if not outputs_intact(state["jobs"].get(job.id, {}), dest):
+        return {"id": job.id, "status": "missing", "checks": []}  # a stored file is gone or changed size: nothing whole to check
     if inputs is not None and state["jobs"].get(job.id, {}).get("inputs", {}) != inputs:
         return {"id": job.id, "status": "stale", "checks": []}  # rendered with other music or font than the files there now
     checks = evaluate(job, dest)

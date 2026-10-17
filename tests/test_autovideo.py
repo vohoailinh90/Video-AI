@@ -476,6 +476,15 @@ class RunnerTests(FakeMptCase):
         self.assertEqual(self.renders(), 1)  # nothing that goes into the render changed, so it was not rendered again
         self.assertEqual(self.state()["01-first"]["status"], "qa_failed")
 
+    def test_a_video_cut_short_after_the_render_is_rendered_again(self):
+        self.run_pack([video()])
+        (self.out / "test-batch" / "01-first" / "video.mp4").write_bytes(b"")
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
+        self.assertEqual(self.renders(), 2)
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["skipped"]), (0, 1))  # and the new render is whole
+
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
         self.assertEqual((summary["qa_failed"], self.renders()), (1, 2))
@@ -695,6 +704,28 @@ class CliTests(FakeMptCase):
         for command in ("plan", "status"):
             code, out, _ = self.call(command, str(path), "--json", *base)
             json.loads(out)  # these do print JSON
+
+    def test_status_notices_a_damaged_or_incomplete_output_folder(self):
+        path = write_pack(self.root, [video()])
+        mpt = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        self.call("run", str(path), *mpt)
+        folder = self.out / "test-batch" / "01-first"
+        status = lambda: (lambda r: (r[0], json.loads(r[1])[0]["status"]))(self.call("status", str(path), "--json", *mpt))
+        self.assertEqual(status(), (0, "done"))
+        damage = {
+            "video.mp4": lambda f: f.write_bytes(b""),  # cut to nothing
+            "subtitles.srt": lambda f: f.unlink(),  # a sidecar that QA asked for, deleted
+            "narration.mp3": lambda f: f.unlink(),
+            "transcript.json": lambda f: f.unlink(),
+        }
+        for name, harm in damage.items():
+            file = folder / name
+            original = file.read_bytes()
+            harm(file)
+            self.assertEqual(status(), (1, "missing"), name)
+            self.assertEqual(self.call("qa", str(path), *mpt)[0], 1, name)  # and QA does not pass what is not whole
+            file.write_bytes(original)
+            self.assertEqual(status(), (0, "done"), name)
 
     def test_status_and_qa_notice_a_replaced_music_file_when_they_can_find_mpt(self):
         songs = self.env.home / "resource" / "songs"
