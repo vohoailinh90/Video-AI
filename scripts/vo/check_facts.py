@@ -497,6 +497,9 @@ def main() -> int:
     document_allow = {w.lower() for w in doc.get("allow", [])}
     allow = {w.lower() for w in args.allow} | document_allow         # --allow is the operator's; the document's own list is vetted
     failures = 0
+    if not lines:                                      # nothing to trace is not a video that traced: the narration was lost
+        print(f"{args.lines}: no lines at all; a video without narration says nothing the gate can check")
+        failures += 1
     unvetted = sorted(document_allow - VIETNAMESE_WORDS)
     if unvetted:
         print(f"{args.lines}: `allow` lists {', '.join(unvetted)}, which are not Vietnamese words typed without diacritics that this check "

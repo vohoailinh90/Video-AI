@@ -306,12 +306,28 @@ def require_source_unchanged(project: Path):
              f"project again from the digest")
 
 
+def require_chosen_lines(project: Path, selection):
+    """The lines of voiceover.json are the ones `scaffold` chose within the speech budget (source/provenance.json records their keys).
+    The plan is made from voiceover.json's own list, so a list emptied or cut down by hand would still be self-consistent: a video with
+    no narration at all would pass every check and render as music over a terminal. Lines are not added or dropped by hand; scaffold
+    again (--speech-seconds for a shorter or longer video)."""
+    try:
+        chosen = json.loads((project / "source" / "provenance.json").read_text(encoding="utf-8")).get("units")
+    except (OSError, ValueError, AttributeError):
+        chosen = None
+    if not isinstance(chosen, list) or not chosen or chosen != list(selection):
+        fail(f"voiceover.json lists {len(selection)} line(s), not the {len(chosen) if isinstance(chosen, list) else 'recorded'} that scaffold chose "
+             f"(source/provenance.json `units`, in this order): a line cannot be added, dropped or moved by hand. Scaffold the project again "
+             f"from the digest, with --speech-seconds for a shorter or longer video")
+
+
 def load_project(project: Path):
     """(digest, plan, voiceover doc) rebuilt from source/ and voiceover.json."""
     require_source_unchanged(project)
     digest = planlib.load_digest(project / "source" / "draft-vi.json")
     doc = json.loads((project / "voiceover.json").read_text(encoding="utf-8"))
-    selection = [l["unit"] for l in doc["lines"]]
+    selection = [line.get("unit") for line in doc.get("lines") or []]
+    require_chosen_lines(project, selection)
     return digest, planlib.build_plan(digest, selection=selection), doc
 
 
@@ -396,6 +412,7 @@ def cmd_scaffold(args) -> Path:
     provenance = {
         **where_it_came_from(digest_path),
         "sha256": hashlib.sha256(digest_path.read_bytes()).hexdigest(),
+        "units": [unit["key"] for unit in plan["units"]],            # the lines the budget chose: voiceover.json may not add or drop one
         "repo": digest["facts"]["full_name"],
         "scanned": digest["facts"].get("scanned"),
         "generated_by": "scripts/radar/make_video.py scaffold",
