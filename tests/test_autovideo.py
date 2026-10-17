@@ -330,6 +330,22 @@ class RunnerTests(FakeMptCase):
         summary, _ = self.run_pack([video()])
         self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
 
+    def test_narrowed_target_seconds_is_checked_again_without_rendering_when_it_still_holds(self):
+        self.run_pack([video()])
+        summary, _ = self.run_pack([video()], {"target_seconds": [2, 10]})  # the video is 3 s: still inside
+        self.assertEqual((summary["done"], summary["skipped"], summary["qa_failed"]), (0, 1, 0))
+        self.assertEqual(self.state()["01-first"]["qa_basis"], [2.0, 10.0])
+
+    def test_narrowed_target_seconds_that_no_longer_holds_is_not_reported_done(self):
+        self.run_pack([video()])
+        summary, _ = self.run_pack([video()], {"target_seconds": [1, 2]}, retries=0)  # the video is 3 s: too long now
+        self.assertEqual((summary["skipped"], summary["qa_failed"]), (0, 1))
+        self.assertIn("duration", summary["videos"][0]["qa_failures"])
+
+    def test_run_refuses_a_negative_retry_count(self):
+        with self.assertRaises(ValueError):
+            self.run_pack([video()], retries=-1)
+
     def test_timeout_kills_the_engine(self):
         (self.env.home / "cli.py").write_text("import time\ntime.sleep(60)\n")
         summary, _ = self.run_pack([video()], timeout=1, retries=3)
@@ -401,6 +417,39 @@ class CliTests(FakeMptCase):
         path = write_pack(self.root, [video("01-a", title="Changed after rendering")])
         self.assertEqual(self.call("status", str(path), *base)[0], 1)  # stale
 
+
+    def test_status_looks_at_the_files_and_at_the_qa_limits_not_only_at_the_state(self):
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        path = write_pack(self.root, [video()])
+        self.call("run", str(path), *base)
+        status = lambda p: (lambda r: (r[0], json.loads(r[1])[0]["status"]))(self.call("status", str(p), "--json", *base))
+        self.assertEqual(status(path), (0, "done"))
+        folder = self.out / "test-batch" / "01-first"
+        job_file = folder / "job.json"
+        data = json.loads(job_file.read_text())
+        job_file.write_text(json.dumps({**data, "fingerprint": "from-another-render"}))
+        self.assertEqual(status(path), (1, "stale"))
+        job_file.write_text(json.dumps(data))
+        self.assertEqual(status(path), (0, "done"))
+        self.assertEqual(status(write_pack(self.root, [video()], {"target_seconds": [1, 2]})), (1, "unchecked"))  # the limits changed, no QA since
+        (folder / "video.mp4").unlink()
+        self.assertEqual(status(path), (1, "missing"))
+
+    def test_qa_after_new_limits_makes_status_truthful_again(self):
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        self.call("run", str(write_pack(self.root, [video()])), *base)
+        narrow = write_pack(self.root, [video()], {"target_seconds": [1, 2]})
+        self.assertEqual(self.call("qa", str(narrow), *base)[0], 1)
+        self.assertEqual(json.loads(self.call("status", str(narrow), "--json", *base)[1])[0]["status"], "qa_failed")
+
+    def test_run_rejects_negative_retries_and_unusable_timeouts(self):
+        path = write_pack(self.root, [video()])
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]  # a working setup, so only the option can fail
+        for bad in (["--retries", "-1"], ["--timeout", "0"], ["--timeout", "-5"], ["--timeout", "nan"], ["--timeout", "inf"]):
+            code, _, err = self.call("run", str(path), *base, *bad)
+            self.assertEqual(code, 2, bad)
+            self.assertIn(bad[0], err)
+        self.assertEqual(self.call("run", str(path), *base, "--retries", "0", "--timeout", "60")[0], 0)  # the same setup works with sane values
 
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)

@@ -16,6 +16,7 @@ MPT is run one job at a time (its own guidance: never two renders at once).
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -108,12 +109,30 @@ def rendered_fingerprint(dest: Path) -> str | None:
         return None
 
 
-def _skip(entry: dict | None, job: Job, dest: Path) -> bool:
-    """Done and unchanged. The state alone is not enough: a failed render of an edited job leaves the old video in the folder."""
-    return (
-        bool(entry) and entry.get("status") == "done" and entry.get("fingerprint") == job.fingerprint()
-        and (dest / "video.mp4").is_file() and rendered_fingerprint(dest) == job.fingerprint()
-    )
+def qa_basis(job: Job) -> list[float]:
+    """What QA measured the video against and the fingerprint leaves out (a QA limit does not change the render)."""
+    return [job.min_seconds, job.max_seconds]
+
+
+def job_status(entry: dict | None, job: Job, dest: Path) -> str:
+    """What a job amounts to now: pending, stale, missing, unchecked, or the status its last run recorded (done, qa_failed, failed, running).
+
+    `done` is only said when the state, the files and the QA limits agree: the state alone is not enough, because a failed render of an
+    edited job leaves the old video in the folder, a video can be deleted, and narrowing target_seconds changes what passes."""
+    if not entry:
+        return "pending"
+    if entry.get("fingerprint") != job.fingerprint():
+        return "stale"  # the pack changed after it was rendered
+    status = entry.get("status", "pending")
+    if status != "done":
+        return status
+    if not (dest / "video.mp4").is_file():
+        return "missing"
+    if rendered_fingerprint(dest) != job.fingerprint():
+        return "stale"
+    if entry.get("qa_basis") != qa_basis(job):
+        return "unchecked"  # done under other QA limits
+    return "done"
 
 
 def run(
@@ -127,6 +146,8 @@ def run(
     timeout: float = 1800,
     log: Callable[[str], None] = print,
 ) -> dict:
+    if retries < 0 or not (math.isfinite(timeout) and timeout > 0):
+        raise ValueError("retries must be 0 or more, and timeout a positive number of seconds")
     batch_dir = out_root / pack.batch
     ids = [job.id for job in pack.jobs]
     unknown = [i for i in (only or []) if i not in ids]
@@ -141,7 +162,13 @@ def run(
         dest = batch_dir / job.id
         entry = state["jobs"].get(job.id)
         label = f"[{number}/{len(selected)}] {job.id}"
-        if not force and _skip(entry, job, dest):
+        status = "pending" if force else job_status(entry, job, dest)
+        if status == "unchecked":
+            # Only the QA limits changed since the last check: look at the video that is there again, do not render it again.
+            status = requalify_job(job, dest, state)["status"]
+            write_json(batch_dir / "state.json", state)
+            log(f"{label}: QA limits changed, checked again: {status}")
+        if status == "done":
             log(f"{label}: done already, skipped")
             rows.append({"id": job.id, "status": "skipped", "seconds": entry.get("seconds"), "qa_failures": []})
             continue
@@ -189,6 +216,7 @@ def run(
         state["jobs"][job.id] = {
             "status": outcome["status"], "fingerprint": job.fingerprint(), "attempts": attempts, "seconds": seconds, "finished": report["finished"],
             "task_id": outcome.get("engine", {}).get("task_id"), "stage": outcome.get("stage"), "error": outcome.get("error"),
+            "qa_basis": qa_basis(job) if "checks" in outcome else None,
         }
         write_json(batch_dir / "state.json", state)
         failures = [c["name"] for c in outcome.get("checks", []) if c["level"] == "error" and not c["ok"]]
@@ -226,25 +254,26 @@ def requalify(pack: Pack, out_root: Path, only: list[str] | None = None) -> list
     for job in pack.jobs:
         if only and job.id not in only:
             continue
-        dest = batch_dir / job.id
-        if not (dest / "video.mp4").is_file():
-            rows.append({"id": job.id, "status": "missing", "checks": []})
-            continue
-        if rendered_fingerprint(dest) != job.fingerprint():
-            # The folder holds a video of an earlier version of this job (its newer render failed or never finished).
-            # Passing QA does not make it the video of this job, so it is neither checked nor marked done.
-            rows.append({"id": job.id, "status": "stale", "checks": []})
-            continue
-        checks = evaluate(job, dest)
-        ok = qa.passed(checks)
-        entry = state["jobs"].setdefault(job.id, {"fingerprint": job.fingerprint()})
-        entry["status"] = "done" if ok else "qa_failed"
-        try:
-            report = json.loads((dest / "report.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            report = {"id": job.id}
-        report.update({"status": entry["status"], "checks": [c.to_dict() for c in checks], "requalified": now()})
-        write_json(dest / "report.json", report)
-        rows.append({"id": job.id, "status": entry["status"], "checks": [c.to_dict() for c in checks]})
+        rows.append(requalify_job(job, batch_dir / job.id, state))
     write_json(batch_dir / "state.json", state)
     return rows
+
+
+def requalify_job(job: Job, dest: Path, state: dict) -> dict:
+    """QA on one folder, and the state updated to match. A folder that does not hold this version of the job is not checked."""
+    if not (dest / "video.mp4").is_file():
+        return {"id": job.id, "status": "missing", "checks": []}
+    if rendered_fingerprint(dest) != job.fingerprint():
+        # The folder holds a video of an earlier version of this job (its newer render failed or never finished).
+        # Passing QA does not make it the video of this job, so it is neither checked nor marked done.
+        return {"id": job.id, "status": "stale", "checks": []}
+    checks = evaluate(job, dest)
+    entry = state["jobs"].setdefault(job.id, {})
+    entry.update(fingerprint=job.fingerprint(), status="done" if qa.passed(checks) else "qa_failed", qa_basis=qa_basis(job))
+    try:
+        report = json.loads((dest / "report.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        report = {"id": job.id}
+    report.update({"status": entry["status"], "checks": [c.to_dict() for c in checks], "requalified": now()})
+    write_json(dest / "report.json", report)
+    return {"id": job.id, "status": entry["status"], "checks": [c.to_dict() for c in checks]}

@@ -3,7 +3,7 @@
   python3 scripts/autovideo/main.py validate <pack>   check a pack: schema, files, TTS-unfriendly text. No network, no MPT.
   python3 scripts/autovideo/main.py plan <pack>       what would run: every job, its reading time, its MPT parameters, setup problems
   python3 scripts/autovideo/main.py run <pack>        render the jobs one after another (resumable)
-  python3 scripts/autovideo/main.py status <pack>     what each job reached (exit 1 unless every video is done)
+  python3 scripts/autovideo/main.py status <pack>     what each job reached, checked against the files and the QA limits (exit 1 unless every video is done)
   python3 scripts/autovideo/main.py qa <pack>         run the QA again on rendered folders, without rendering
   python3 scripts/autovideo/main.py doctor            ffmpeg, ffprobe, the MPT checkout and which of its keys are set (never their values)
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +24,20 @@ from .pack import PackError, load_pack
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "build" / "autovideo"
+
+
+def _retries(value: str) -> int:
+    n = int(value)
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {n}")
+    return n
+
+
+def _seconds(value: str) -> float:
+    x = float(value)
+    if not (math.isfinite(x) and x > 0):
+        raise argparse.ArgumentTypeError(f"must be a positive number of seconds, got {value!r}")
+    return x
 
 
 def _load(args):
@@ -102,19 +117,14 @@ def cmd_status(args) -> int:
     rows = []
     for job in pack.jobs:
         entry = state.get(job.id)
-        if not entry:
-            status = "pending"
-        elif entry["fingerprint"] != job.fingerprint():
-            status = "stale"  # the pack changed after it was rendered
-        else:
-            status = entry["status"]
+        status = runner.job_status(entry, job, Path(args.out) / pack.batch / job.id)
         rows.append({"id": job.id, "status": status, "attempts": (entry or {}).get("attempts", 0), "error": (entry or {}).get("error")})
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
     else:
         for r in rows:
             print(f"{r['id']}: {r['status']}" + (f" ({r['error']})" if r["error"] else ""))
-    return 0 if all(r["status"] == "done" for r in rows) else 1  # pending, stale, failed and qa_failed are all "not ready"
+    return 0 if all(r["status"] == "done" for r in rows) else 1  # anything but done is "not ready": pending, stale, missing, unchecked, failed
 
 
 def cmd_qa(args) -> int:
@@ -172,8 +182,8 @@ def main(argv=None) -> int:
             p.add_argument("--only", help="comma-separated video ids")
         if name == "run":
             p.add_argument("--force", action="store_true", help="render again even when a job is done and unchanged")
-            p.add_argument("--retries", type=int, default=1, help="extra attempts for a job that fails or fails QA (default: %(default)s)")
-            p.add_argument("--timeout", type=float, default=1800, help="seconds MPT may take for one job (default: %(default)s)")
+            p.add_argument("--retries", type=_retries, default=1, help="extra attempts for a job that fails or fails QA (default: %(default)s)")
+            p.add_argument("--timeout", type=_seconds, default=1800, help="seconds MPT may take for one job (default: %(default)s)")
     p = sub.add_parser("doctor", help="check the setup")
     common(p, pack=False)
     p.set_defaults(fn=cmd_doctor)
