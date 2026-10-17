@@ -100,6 +100,23 @@ def require_generated_page(project: Path):
              f"`make_video.py rebuild {rel(project)}` writes the page again from the digest and the clips")
 
 
+TIMING_FIELDS = ("id", "unit", "start", "scene_end", "scene")
+
+
+def require_generated_timing(project: Path):
+    """The lines of voiceover.json say when each clip starts, and revoice.py writes those times into the page it renders. The page was
+    just checked against compose.py, which uses the timeline made from the clips; the times in voiceover.json have to be that timeline
+    too, or two sentences could play in the wrong order under a page that passed. The words may be reworded by hand; the timing may not."""
+    digest, plan, doc = load_project(project)
+    expected = voiceover_doc(plan, planlib.timeline(plan, clip_durations(project, doc)), doc)["lines"]
+    if [line["id"] for line in expected] != [line.get("id") for line in doc["lines"]]:
+        fail(f"the lines of voiceover.json are not the lines of the plan; `make_video.py rebuild {rel(project)}` writes them again")
+    wrong = [have["id"] for want, have in zip(expected, doc["lines"]) if any(have.get(field) != want[field] for field in TIMING_FIELDS)]
+    if wrong:
+        fail(f"the timing of {', '.join(wrong)} in voiceover.json (start, scene_end, scene) is not what the clips give, and revoice.py would "
+             f"write it into the page: `make_video.py rebuild {rel(project)}` writes it again")
+
+
 AUDIBLE_DB = -45.0     # a mean volume below this is a render with no narration in it (the voice sits near -20 dB)
 
 
@@ -526,6 +543,7 @@ def cmd_render(args, project=None) -> dict:
     digest, plan, doc = load_project(project)
     gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
     require_generated_page(project)
+    require_generated_timing(project)
     stale = stale_voices(doc, project / "assets")
     if stale:
         fail(f"the clip of {', '.join(stale)} is not the one `voice` made from the line's current words (reworded since, never voiced, "

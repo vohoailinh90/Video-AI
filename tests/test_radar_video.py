@@ -5,7 +5,9 @@
 Fixtures are real digests (draft-vi.json) copied from the github-radar repository: a typical one (voicestudio), one without try_it
 (moneyprinterturbo), one whose problem is a single sentence (orca) and the longest one (impeccable).
 """
+import contextlib
 import copy
+import io
 import json
 import math
 import re
@@ -1127,6 +1129,52 @@ class ReviewFindings(unittest.TestCase):
             args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None})()
             with self.assertRaises(SystemExit):
                 make_video.cmd_render(args, project)
+
+    def test_the_timing_of_voiceover_json_is_what_the_clips_give(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "source").mkdir()
+            (project / "assets").mkdir()
+            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
+            for unit in plan["units"]:
+                subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", str(unit["est"]),
+                                str(project / "assets" / f"{unit['id']}.wav")], check=True)
+            tl = planlib.timeline(plan, {u["id"]: make_video.clip_seconds(project / "assets" / f"{u['id']}.wav") for u in plan["units"]})
+            make_video.write_composition(project, plan, tl)
+            make_video.make_pad(project / "assets" / "pad.wav", tl["duration"])
+            path = project / "voiceover.json"
+            original = json.loads(path.read_text(encoding="utf-8"))
+            make_video.require_generated_timing(project)                                    # what voice wrote is what the clips give
+            reworded = json.loads(json.dumps(original))
+            reworded["lines"][3]["text"] += " nữa"                                          # words may be changed by hand
+            path.write_text(json.dumps(reworded, ensure_ascii=False), encoding="utf-8")
+            make_video.require_generated_timing(project)
+
+            def changed(edit):
+                doc = json.loads(json.dumps(original))
+                edit(doc["lines"])
+                path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+
+            def swap_starts(lines):
+                lines[3]["start"], lines[4]["start"] = lines[4]["start"], lines[3]["start"]
+            for what, edit in (("two starts swapped", swap_starts),
+                               ("a start moved", lambda lines: lines[2].update(start=lines[2]["start"] + 0.5)),
+                               ("a scene end moved", lambda lines: lines[2].update(scene_end=lines[2]["scene_end"] - 3)),
+                               ("a scene renamed", lambda lines: lines[2].update(scene="Khác")),
+                               ("two lines in the other order", lambda lines: lines.insert(0, lines.pop(1)))):
+                changed(edit)
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
+                    make_video.require_generated_timing(project)
+                self.assertIn("rebuild", errors.getvalue(), what)
+            changed(swap_starts)
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp})()
+            make_video.cmd_rebuild(args, project)                                           # rebuild writes the timing again
+            make_video.require_generated_timing(project)
+            self.assertEqual([l["start"] for l in json.loads(path.read_text(encoding="utf-8"))["lines"]], [l["start"] for l in original["lines"]])
 
     def test_a_clip_swapped_for_another_lines_is_not_rendered(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
