@@ -181,10 +181,20 @@ class PackTests(unittest.TestCase):
             packmod.load_pack(write_pack(self.root, [video()], {"bgm": name}))
         for name in ("song.mp4", "song.txt", "song", "../song.mp3", "dir/song.mp3"):
             self.assertIn("bgm: must be none, random or a music file name", self.problems([video()], {"bgm": name}), name)
-        (self.root / "voice.opus").write_bytes(b"x")
-        (self.root / "voice.WMA").write_bytes(b"x")
-        for name in ("voice.opus", "voice.WMA"):
+        # A narration audio_file is narrower: MPT's CLI refuses any suffix but mp3 wav m4a aac flac ogg (_CUSTOM_AUDIO_EXTENSIONS in cli.py, lower-cased)
+        for name in ("voice.mp3", "voice.WAV", "voice.Flac"):
+            (self.root / name).write_bytes(b"x")
             packmod.load_pack(write_pack(self.root, [video()], {"audio_file": name, "subtitles": False}))
+        for name in ("voice.opus", "voice.WMA"):
+            (self.root / name).write_bytes(b"x")  # it exists, and MPT would still refuse the whole manifest
+            self.assertIn(f"audio_file: {name} is not one of", self.problems([video()], {"audio_file": name, "subtitles": False}), name)
+
+    def test_subtitle_font_extension_is_compared_without_regard_to_case(self):
+        # MPT's CLI: font_path.lower().endswith((".ttf", ".ttc"))
+        for name in ("Vietnamese.TTF", "Font.TTC", "BeVietnamPro-Bold.ttf", "My Font.Ttf"):
+            packmod.load_pack(write_pack(self.root, [video()], {"font": name}))
+        for name in ("font.otf", "font", "font.ttf.txt", "dir/font.ttf"):
+            self.assertIn("font: must be a .ttf or .ttc font file name", self.problems([video()], {"font": name}), name)
 
     def test_tts_unfriendly_text_is_a_warning_not_an_error(self):
         scenes = [{"narration": "Xem tại https://example.com **ngay**", "terms": ["a"]}]

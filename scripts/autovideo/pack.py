@@ -18,17 +18,18 @@ from pathlib import Path
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")
 VOICE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z0-9-]+$")
-FONT = re.compile(r"^[\w .-]+\.(ttf|ttc)$")  # MPT's batch check refuses any other subtitle font extension
+FONT = re.compile(r"^[\w .-]+\.(ttf|ttc)$", re.IGNORECASE)  # MPT's CLI refuses any other subtitle font extension, comparing it in lower case
 
 ASPECTS = ("9:16", "16:9", "1:1")
 # Only sources that cost nothing per request. MPT also has paid generators (WaveSpeed, Seedance, OFox, ...); each needs its own
 # confirmation flag there, and this tool never sets one.
 SOURCES = ("pexels", "pixabay", "coverr", "local")
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".flv", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".bmp")
-# The audio formats MPT takes (SUPPORTED_BGM_EXTENSIONS in its app/services/bgm.py; it compares the suffix in lower case). Used for the music
-# file and for a narration audio_file: MPT decodes both with ffmpeg and puts no list of its own on the narration.
-AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus", ".wma")
-MUSIC_NAME = re.compile(r"[\w .()-]+(" + "|".join(re.escape(e) for e in AUDIO_EXTENSIONS) + ")", re.IGNORECASE)
+# Two lists, because MPT keeps two. Narration (audio_file): _CUSTOM_AUDIO_EXTENSIONS in its cli.py, which refuses the whole manifest for any other
+# suffix. Music (bgm): SUPPORTED_BGM_EXTENSIONS in its app/services/bgm.py. Both compare the suffix in lower case.
+AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
+MUSIC_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus", ".wma")
+MUSIC_NAME = re.compile(r"[\w .()-]+(" + "|".join(re.escape(e) for e in MUSIC_EXTENSIONS) + ")", re.IGNORECASE)
 NO_VOICE = "no-voice"
 
 SETTINGS = (
