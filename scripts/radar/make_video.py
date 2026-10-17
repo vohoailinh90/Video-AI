@@ -68,6 +68,16 @@ def whole_file_levels(path):
     return (float(mean.group(1)), float(peak.group(1))) if mean and peak else (None, None)
 
 
+AUDIBLE_DB = -45.0     # a mean volume below this is a render with no narration in it (the voice sits near -20 dB)
+
+
+def require_audible(mean, peak):
+    """A radar video is narrated: an MP4 with no audio stream (None), silence (-inf, -91 dB ...) or only a whisper is a failed render."""
+    if mean is None or peak is None or mean < AUDIBLE_DB:
+        fail(f"the rendered MP4 has no audible sound (mean {mean} dB, peak {peak} dB; the narration is missing or silent). "
+             f"Check assets/*.wav and the audio of index.html, then render again")
+
+
 def make_pad(path: Path, seconds: float):
     """A quiet chord of four sines, lowpassed: the music bed. Mono 16 kHz is enough below 900 Hz and keeps the file small."""
     d = f"{seconds:.2f}"
@@ -437,6 +447,7 @@ def cmd_render(args, project=None) -> dict:
     check_line = next((l for l in text.splitlines() if l.startswith("check:")), "check: (no summary)")
     warnings = [l.strip() for l in text.splitlines() if "WARNING" in l]
     mean, peak = whole_file_levels(mp4)
+    require_audible(mean, peak)                  # before the report, README and preview call this render a success
     seconds = clip_seconds(mp4)
     final = final_mix_wer(args, project, mp4)
 
