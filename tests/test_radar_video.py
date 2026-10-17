@@ -7,6 +7,7 @@ Fixtures are real digests (draft-vi.json) copied from the github-radar repositor
 """
 import copy
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -739,6 +740,43 @@ class ReviewFindings(unittest.TestCase):
                 make_video.require_audible(*levels[name])
         with self.assertRaises(SystemExit):
             make_video.require_audible(float("-inf"), float("-inf"))
+
+    def test_a_compound_name_must_be_written_as_one_in_the_source(self):
+        source = check_facts.blob({"url": "https://github.com/debpalash/VoiceStudio", "note": "OmniVoice là một mô hình", "cmd": "bun run setup:api"})
+        untraced = lambda text: check_facts.untraced(text, source, set())
+        self.assertEqual(untraced("https://github.com/debpalash/VoiceStudio, github.com/debpalash/VoiceStudio, debpalash/VoiceStudio"), [])
+        self.assertEqual(untraced("setup:api và bun run setup:api"), [])
+        # every part is in the source, but not written together: a made-up address
+        self.assertEqual(untraced("https://github.com/debpalash/omnivoice"), ["token 'https://github.com/debpalash/omnivoice'"])
+        self.assertEqual(untraced("github.com/OmniVoice/VoiceStudio"), ["token 'github.com/OmniVoice/VoiceStudio'"])
+        self.assertEqual(untraced("api:setup"), ["token 'api:setup'"])
+        self.assertEqual(untraced("debpalash/OmniVoice"), ["token 'debpalash/OmniVoice'"])
+        self.assertEqual(untraced("VoiceStudio và OmniVoice"), [])                 # separate names are still fine
+
+    def test_the_narration_has_to_be_in_the_render_not_just_the_music(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "assets").mkdir()
+            def ffmpeg(*args):
+                subprocess.run(["ffmpeg", "-y", "-v", "error", *args], check=True)
+            ffmpeg("-f", "lavfi", "-i", "sine=frequency=220:duration=6,volume=-8.7dB", str(project / "assets" / "pad.wav"))        # about -30 dB, like the real bed
+            ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=2,volume=1dB", str(project / "assets" / "vo-1.wav"))             # about -20 dB, like the voice
+            (project / "index.html").write_text('<audio id="music-bed" src="assets/pad.wav" data-start="0" data-duration="6" data-volume="0.6"></audio>',
+                                                encoding="utf-8")
+            doc = {"lines": [{"id": "vo-1", "start": 2.0}]}
+            (project / "voiceover.json").write_text(json.dumps(doc), encoding="utf-8")
+            music_only = project / "music-only.mp4"
+            with_voice = project / "with-voice.mp4"
+            ffmpeg("-f", "lavfi", "-i", "color=c=black:s=64x64:d=6", "-i", str(project / "assets" / "pad.wav"),
+                   "-filter_complex", "[1:a]volume=0.6[a]", "-map", "0:v", "-map", "[a]", "-c:a", "aac", "-t", "6", str(music_only))
+            ffmpeg("-f", "lavfi", "-i", "color=c=black:s=64x64:d=6", "-i", str(project / "assets" / "pad.wav"), "-i", str(project / "assets" / "vo-1.wav"),
+                   "-filter_complex", "[1:a]volume=0.6[m];[2:a]adelay=2000|2000[v];[m][v]amix=inputs=2:duration=first:normalize=0[a]",
+                   "-map", "0:v", "-map", "[a]", "-c:a", "aac", "-t", "6", str(with_voice))
+            pad_alone = make_video.whole_file_levels(project / "assets" / "pad.wav")[0]
+            self.assertAlmostEqual(make_video.music_bed_db(project), pad_alone + 20 * math.log10(0.6), delta=0.5)   # its own level, times 0.6
+            self.assertEqual(make_video.silent_narration(project, doc, music_only), ["vo-1"])           # the music alone clears -45 dB, and is not a voice
+            self.assertEqual(make_video.silent_narration(project, doc, with_voice), [])
+            self.assertTrue(make_video.whole_file_levels(music_only)[0] > make_video.AUDIBLE_DB)
 
     def rendered_plan(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
