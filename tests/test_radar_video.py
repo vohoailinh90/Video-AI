@@ -575,6 +575,42 @@ class ReviewFindings(unittest.TestCase):
             self.assertNotIn("SECRET", result.stdout + result.stderr)
             self.assertFalse((Path(tmp) / "videos").exists(), "no project, and no copy of the digest, is created")
 
+    def test_code_in_the_page_cannot_put_words_on_the_screen_unseen(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html = compose.render(plan, tl)
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)            # its own style (content: "") and script (GSAP calls) are fine
+        sneaky = {
+            "css text": html.replace("</style>", '#root::after { content: "99999 lần" }</style>', 1),
+            "css attr": html.replace("</style>", '#root::after { content: attr(data-start) }</style>', 1),
+            "css import": html.replace("<style>", '<style>@import url("https://example.com/x.css");', 1),
+            "script text": html.replace("</body>", '<script>document.body.appendChild(Object.assign(document.createElement("p"), '
+                                        '{ textContent: "ElevenLabs nhanh gấp 99999 lần" }))</script></body>', 1),
+            "script html": html.replace("</body>", '<script>document.getElementById("root").innerHTML = "x"</script></body>', 1),
+            "script load": html.replace("</body>", '<script>fetch("https://example.com/x").then(r => r.text())</script></body>', 1),
+            "script src": html.replace("</head>", '<script src="https://example.com/x.js"></script></head>', 1),
+            "script src (protocol-relative)": html.replace("</head>", '<script src="//example.com/x.js"></script></head>', 1),
+            "event handler": html.replace("</body>", '<img src="x.png" onerror="document.title=1"></body>', 1),
+            "frame": html.replace("</body>", '<iframe src="https://example.com"></iframe></body>', 1),
+            "stylesheet": html.replace("</head>", '<link rel="stylesheet" href="https://example.com/x.css"></head>', 1),
+        }
+        for name, changed in sneaky.items():
+            status, output = run_gate(digest, doc, changed)
+            self.assertEqual(status, 1, name)
+            self.assertIn("put words on the screen or load code", output, name)
+        # harmless code stays harmless: a local script, an empty `content`, justify-content
+        calm = html.replace("</head>", '<script src="other.js"></script><style>.x::before { content: ""; content: none } .y { justify-content: center }</style></head>', 1)
+        self.assertEqual(run_gate(digest, doc, calm)[0], 0)
+
+    def test_a_digest_url_with_a_query_or_fragment_is_refused(self):
+        for url in ("https://github.com/o/r?access_token=SECRET", "https://github.com/o/r#SECRET", "https://github.com/o/r?"):
+            with self.assertRaises(ValueError) as caught:
+                digest_with(lambda d: d["facts"].update(url=url))
+            self.assertIn("facts.url", str(caught.exception))
+            self.assertNotIn("SECRET", str(caught.exception))
+
     def test_a_percent_sign_after_a_space_is_read_like_one_without(self):
         self.assertEqual(numbers_vi.speak_text("giảm 19% và 19 % và -3 %"), "giảm mười chín phần trăm và mười chín phần trăm và âm ba phần trăm")
         self.assertEqual(numbers_vi.speak_text("tăng 2,5\u00a0%"), "tăng hai phẩy năm phần trăm")

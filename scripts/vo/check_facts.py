@@ -10,6 +10,10 @@ A script decides, not a model, the way github-radar's gates do:
     not a value); Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
+  * the page's code is not read, but the plain ways it has of putting words on the screen or bringing in more code are refused
+    (CSS `content:`, @import, DOM-writing script, a script or stylesheet that is not a file next to the page, frames, on* attributes).
+    That is a pattern check, not a sandbox: code written to hide what it does gets past it, so the diff of the composition is still
+    reviewed, and the gate does not look at images, video or audio;
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
     traced;
   * each command in try_it.commands must appear on screen exactly as the digest gives it, as a row of its own (not inside a longer
@@ -52,6 +56,18 @@ FIXED_LABELS = {
     "forks": "fork",
 }
 MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; scripts/radar/plan.py takes its cap from here
+# What a style or a script can do to put words on the screen, or to bring in code that can. The composition does none of it: GSAP
+# moves and fades elements that are already in the page. check_facts.py cannot prove arbitrary code harmless (nor read pixels of an
+# image), so it refuses the ways code has of writing text and leaves the rest to the review of the composition's diff.
+CSS_TEXT = re.compile(r"(?<![\w-])content\s*:(?!\s*(?:\"\"|''|none|normal)\s*(?:[;}!]|$))|@import\b|url\(\s*[\"']?\s*(?:[a-z]+:)?//", re.I)
+JS_WRITES = re.compile(r"\b(?:innerHTML|outerHTML|innerText|textContent|insertAdjacentHTML|insertAdjacentText|createTextNode|createElement|"
+                       r"createElementNS|appendChild|insertBefore|replaceChildren|replaceWith|setAttribute|nodeValue|DOMParser|eval|Function|"
+                       r"import|importScripts|fetch|XMLHttpRequest|WebSocket|Worker|SharedWorker)\b|\bdocument\s*\.\s*write(?:ln)?\b|"
+                       r"\b(?:append|prepend)\s*\(|\.\s*(?:text|html)\s*\(")
+LOCAL_FILE = re.compile(r"(?!\.\.?/)[\w.\-]+(?:/[\w.\-]+)*")      # a file next to the page: no scheme, no leading /, no ..
+FRAMES = {"iframe", "frame", "object", "embed"}
+
+
 # a number, with its sign when the minus stands in front of it (-19, −3,5; a hyphen after a letter or digit, as in AGPL-3.0 or 10-20, is
 # not one) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
 NUMBER = re.compile(r"(?:(?<![\w.,\-−])[-−])?\d[\d.,]*(?:\s?%|\s+phần trăm\b)?")
@@ -69,8 +85,10 @@ class Visible(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.stack = []      # [tag, skipped, label buffer or None] for every open element
         self.parts = []
+        self.code = []       # problems with the page's code: what it could write, load or run
 
     def handle_starttag(self, tag, attrs):
+        self.look_at_code(tag, dict(attrs))
         if tag in self.VOID:
             return
         is_label = any(name == "data-label" for name, _ in attrs)
@@ -87,6 +105,16 @@ class Visible(HTMLParser):
                 del self.stack[index:]
                 return
 
+    def look_at_code(self, tag, attrs):
+        for name in attrs:
+            if name.startswith("on"):
+                self.code.append(f"the event handler attribute {name} on <{tag}>")
+        if tag in FRAMES:
+            self.code.append(f"<{tag}> (it can show a page that is not this one)")
+        for name, wanted in (("script", "src"), ("link", "href")):
+            if tag == name and attrs.get(wanted) is not None and not LOCAL_FILE.fullmatch(attrs[wanted].strip()):
+                self.code.append(f"<{tag} {wanted}=...> that is not a file next to the page")
+
     def close(self):
         super().close()
         for _, _, buffer in self.stack[::-1]:      # an element that was never closed still shows what it holds
@@ -100,6 +128,11 @@ class Visible(HTMLParser):
         text = data.strip()
         if not text:
             return
+        inside = [entry[0] for entry in self.stack if entry[0] in ("script", "style")]
+        if inside:
+            found = (JS_WRITES if inside[-1] == "script" else CSS_TEXT).search(data)
+            if found:
+                self.code.append(f"{'script' if inside[-1] == 'script' else 'style'} text `{found.group(0).strip()}`")
         for entry in reversed(self.stack):
             if entry[2] is not None:          # inside a data-label element: held back until we know it is a fixed label
                 entry[2].append(text)
@@ -230,6 +263,10 @@ def main() -> int:
     parser = Visible()
     parser.feed(Path(args.html).read_text(encoding="utf-8"))
     parser.close()
+    if parser.code:
+        print(f"{args.html}: code that could put words on the screen or load code, which this check cannot trace: "
+              f"{'; '.join(sorted(set(parser.code)))}")
+        failures += 1
     screen = "\n".join(parser.parts)
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)

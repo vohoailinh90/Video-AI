@@ -79,9 +79,11 @@ def load_digest(path) -> dict:
     if not re.match(r"https?://\S+$", url):
         raise ValueError("facts.url (the repository address, set by github-radar) is missing; the video shows it and does not make one up")
     parts = urlsplit(url)
-    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        # the digest is copied into the project and its address is put on screen: a secret in it would be committed. Not repeated here.
-        raise ValueError("facts.url has a user name or password in it; github-radar's html_url never does, so this digest is not used")
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc or "?" in url or "#" in url:
+        # the digest is copied into the project and its address is put on screen: a secret in it (user:token@host, ?access_token=...,
+        # #token) would be committed. The value is not repeated in the message.
+        raise ValueError("facts.url has a user name, password, query or fragment in it; github-radar's html_url never does, "
+                         "so this digest is not used")
     return digest
 
 
