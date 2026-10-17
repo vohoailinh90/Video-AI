@@ -870,6 +870,14 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.untraced("cộng 19%", positive, set()), ["number +19%"])
         self.assertEqual(check_facts.untraced("âm 19%", check_facts.blob({"fact": "giảm -19%"}), set()), [])
         self.assertEqual(check_facts.untraced("-19%", check_facts.blob({"fact": "giảm âm 19%"}), set()), [])      # nor can the source's be missed
+        # a colon, a dash, an equals sign, a bracket or a quote between the word and the number does not take the sign off
+        for text, value in (("âm: 19%", "-19%"), ("âm-19%", "-19%"), ("âm - 19%", "-19%"), ("âm = 19", "-19"), ("âm (19%)", "-19%"),
+                            ("Trừ: 5", "-5"), ("cộng:3", "+3"), ("dương \u201c2\u201d", "+2")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+            self.assertEqual(check_facts.untraced(text, positive, set()), [f"number {value}"], text)
+        # a full stop, a comma or a semicolon ends a clause: the number after it is another one
+        for text in ("âm. 5 điểm", "âm, 19", "nghe âm; 5", "âm19"):
+            self.assertNotIn("-", "".join(check_facts.numbers(text)), text)
         # the same words not before a number are only words
         self.assertEqual(check_facts.numbers("âm thanh 19 và cộng đồng 5 người, âm, cộng"), {"19", "5"})
         # the word the voice says for a sign is the sign the gate reads: "-19%" is said "âm mười chín phần trăm"
