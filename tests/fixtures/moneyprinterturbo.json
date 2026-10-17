@@ -1,0 +1,497 @@
+{
+  "draft": {
+    "analogy": "Giống một xưởng dựng phim nhỏ có sẵn biên kịch, người đọc lời và thợ dựng: bạn chỉ giao đề bài, xưởng làm các khâu còn lại.",
+    "caveats": [
+      "Cần khóa API của dịch vụ mô hình ngôn ngữ và nguồn clip; README không nêu giá, hãy xem điều khoản của từng nhà cung cấp",
+      "Nhạc nền mặc định lấy từ YouTube; README ghi nếu vi phạm bản quyền thì xóa. Hãy tự kiểm tra bản quyền clip, nhạc và font trước khi đăng",
+      "GPU không bắt buộc, nhưng nên có nếu bạn bật faster-whisper hoặc tạo nhiều video"
+    ],
+    "facebook": {
+      "caption": "Gõ một chủ đề, nhận về một video ngắn có kịch bản, giọng đọc và phụ đề\n\nMoneyPrinterTurbo nối các khâu làm video thành một quy trình tự động.\nBài hướng dẫn từng bước trong repo giúp bạn tự chạy thử trên máy mình.",
+      "hashtags": [
+        "AI",
+        "OpenSource",
+        "VideoAI"
+      ]
+    },
+    "glossary": [
+      {
+        "meaning": "Mô hình ngôn ngữ lớn; ở đây dùng để viết kịch bản video.",
+        "term": "LLM"
+      },
+      {
+        "meaning": "Chuyển văn bản thành giọng đọc.",
+        "term": "TTS"
+      },
+      {
+        "meaning": "Mã bí mật để dịch vụ nhận ra tài khoản của bạn; hãy giữ kín.",
+        "term": "Khóa API"
+      }
+    ],
+    "guide": {
+      "next": [
+        "Muốn môi trường tách biệt, thử chạy bằng Docker: README dùng `docker compose -f docker-compose.release.yml up`.",
+        "Muốn tạo nhiều video một lượt, README nói dòng lệnh có tùy chọn `--batch-file`."
+      ],
+      "outcome": "Một giao diện web chạy trên máy bạn: nhập chủ đề hoặc từ khóa là hệ thống tự tạo kịch bản, chọn clip, đọc lời, tạo phụ đề, thêm nhạc nền và ghép thành video ngắn.",
+      "requirements": [
+        {
+          "detail": "Để chạy lệnh git clone tải mã nguồn về máy.",
+          "evidence": "README",
+          "item": "Git",
+          "link_ref": null
+        },
+        {
+          "detail": "Công cụ README khuyên dùng để quản lý Python và thư viện; nó cũng cài giúp Python 3.11.",
+          "evidence": "README",
+          "item": "uv",
+          "link_ref": 9
+        },
+        {
+          "detail": "Windows 10, macOS 11.0 trở lên hoặc Linux. Tối thiểu CPU 4 nhân, RAM 4 GB; card đồ họa không bắt buộc.",
+          "evidence": "README",
+          "item": "Máy tính đủ sức chạy",
+          "link_ref": null
+        },
+        {
+          "detail": "Để viết kịch bản. README liệt kê OpenAI, Google Gemini, DeepSeek… và cả Ollama chạy ngay trên máy.",
+          "evidence": "README",
+          "item": "Khóa API của một dịch vụ mô hình ngôn ngữ (LLM)",
+          "link_ref": 15
+        },
+        {
+          "detail": "Để tự lấy clip nền. README cũng liệt kê Pixabay (miễn phí) và Coverr.",
+          "evidence": "README",
+          "item": "Khóa API của nguồn clip, ví dụ Pexels (miễn phí)",
+          "link_ref": 38
+        },
+        {
+          "detail": "Nếu trang web mở ra trống, README khuyên đổi sang một trong hai trình duyệt này.",
+          "evidence": "README",
+          "item": "Trình duyệt Chrome hoặc Edge",
+          "link_ref": null
+        }
+      ],
+      "steps": [
+        {
+          "commands": [],
+          "do": [
+            "Cài Git nếu máy chưa có.",
+            "Cài uv theo hướng dẫn ở trang uv.",
+            "Mở một cửa sổ terminal (trên Windows dùng CMD hoặc PowerShell)."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": 9,
+          "title": "Chuẩn bị Git, uv và một cửa sổ terminal",
+          "why": "Có đủ công cụ để tải mã nguồn và dựng môi trường Python."
+        },
+        {
+          "commands": [
+            "git clone https://github.com/harry0703/MoneyPrinterTurbo.git"
+          ],
+          "do": [
+            "Đứng ở thư mục bạn muốn chứa dự án. Trên Windows, tránh đường dẫn có chữ Hán, ký tự đặc biệt hoặc dấu cách.",
+            "Chạy lệnh tải mã nguồn."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "title": "Tải mã nguồn về máy",
+          "why": "Lấy toàn bộ dự án về một thư mục trên máy bạn."
+        },
+        {
+          "commands": [
+            "cd MoneyPrinterTurbo",
+            "uv python install 3.11",
+            "uv sync --frozen"
+          ],
+          "do": [
+            "Vào thư mục dự án vừa tải.",
+            "Cài Python 3.11 bằng uv.",
+            "Cài thư viện theo file khóa; README khuyên mặc định dùng lệnh này.",
+            "Không dùng uv thì README có cách thay thế bằng `venv + pip` ở mục tạo môi trường ảo."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "title": "Tạo môi trường Python và cài thư viện",
+          "why": "Cài đúng phiên bản Python và các thư viện mà dự án cần."
+        },
+        {
+          "commands": [
+            "sh webui.sh"
+          ],
+          "do": [
+            "Chạy lệnh dưới đây trong thư mục gốc của dự án (README nhấn mạnh phải ở thư mục gốc).",
+            "Chờ trình duyệt tự mở."
+          ],
+          "evidence": "webui.sh",
+          "expect": "Trình duyệt tự mở giao diện web của dự án.",
+          "if_fails": "Nếu trang mở ra trống, hãy mở lại bằng Chrome hoặc Edge.",
+          "link_ref": null,
+          "title": "Khởi động giao diện web trên macOS hoặc Linux",
+          "why": "Mở giao diện để nhập chủ đề và tạo video. Bỏ qua bước này nếu bạn dùng Windows."
+        },
+        {
+          "commands": [
+            ".\\webui.bat"
+          ],
+          "do": [
+            "Chạy lệnh dưới đây trong thư mục gốc của dự án (PowerShell). Trong CMD bạn có thể chạy `webui.bat`.",
+            "Chờ trình duyệt tự mở."
+          ],
+          "evidence": "webui.bat",
+          "expect": "Trình duyệt tự mở giao diện web của dự án.",
+          "if_fails": "Nếu trang mở ra trống, hãy mở lại bằng Chrome hoặc Edge.",
+          "link_ref": null,
+          "title": "Khởi động giao diện web trên Windows",
+          "why": "Mở giao diện để nhập chủ đề và tạo video. Bỏ qua bước này nếu bạn dùng macOS hoặc Linux."
+        },
+        {
+          "commands": [],
+          "do": [
+            "Mở phần cài đặt cơ bản của giao diện web.",
+            "Chọn nhà cung cấp mô hình ngôn ngữ rồi dán khóa API của bạn vào.",
+            "Dán khóa API của nguồn clip, ví dụ Pexels.",
+            "Giọng đọc Azure TTS V1 dựa trên Edge TTS, miễn phí và không cần khóa, nên dùng được ngay."
+          ],
+          "evidence": "README",
+          "expect": "Ở lần chạy đầu, dự án tự tạo file config.toml từ file mẫu config.example.toml, bạn không cần tạo tay.",
+          "if_fails": "",
+          "link_ref": 38,
+          "title": "Điền khóa API trong phần cài đặt cơ bản",
+          "why": "Để hệ thống gọi được dịch vụ viết kịch bản và nguồn clip."
+        },
+        {
+          "commands": [],
+          "do": [
+            "Nhập chủ đề hoặc từ khóa cho video vào giao diện.",
+            "Chọn khổ video: dọc 9:16, ngang 16:9 hoặc vuông 1:1.",
+            "Bắt đầu tạo và chờ hệ thống làm lần lượt: kịch bản, giọng đọc, clip, phụ đề, nhạc nền, ghép video."
+          ],
+          "evidence": "README",
+          "expect": "Một video ngắn hoàn chỉnh có kịch bản, giọng đọc, phụ đề và nhạc nền.",
+          "if_fails": "",
+          "link_ref": null,
+          "title": "Tạo video đầu tiên",
+          "why": "Chạy trọn quy trình từ chủ đề đến video."
+        },
+        {
+          "commands": [
+            "uv run python cli.py --video-subject \"人工智能如何改变日常生活\"",
+            "uv run python cli.py --help"
+          ],
+          "do": [
+            "Chạy lệnh đầu trong thư mục dự án. Thay chủ đề trong dấu ngoặc kép bằng chủ đề của bạn.",
+            "Muốn xem mọi tham số, chạy lệnh thứ hai."
+          ],
+          "evidence": "cli.py",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "title": "Cách khác: tạo video bằng dòng lệnh, không cần trình duyệt",
+          "why": "Dùng khi bạn không mở được trình duyệt hoặc muốn chạy tự động."
+        }
+      ],
+      "troubleshooting": [
+        {
+          "evidence": "README",
+          "fix": "README nói ffmpeg thường tự tải về. Nếu không được, tải FFmpeg thủ công rồi đặt `ffmpeg_path` trong config.toml trỏ tới file thật, hoặc đặt biến môi trường `IMAGEIO_FFMPEG_EXE`.",
+          "problem": "Báo lỗi No ffmpeg exe could be found"
+        },
+        {
+          "evidence": "README",
+          "fix": "Hệ điều hành giới hạn số tệp được mở. Xem giới hạn bằng `ulimit -n`, rồi nâng lên, ví dụ `ulimit -n 10240`.",
+          "problem": "Báo lỗi Too many open files"
+        },
+        {
+          "evidence": "README",
+          "fix": "README có hướng dẫn tải mô hình thủ công từ Hugging Face, ở mục tạo phụ đề của README gốc.",
+          "problem": "Tải mô hình Whisper thất bại"
+        }
+      ],
+      "verify": "Bạn thấy giao diện web mở được và tạo ra một video ngắn từ chủ đề bạn nhập, đúng như README mô tả: có kịch bản, giọng đọc, phụ đề và nhạc nền."
+    },
+    "hook": "Gõ một chủ đề, máy tự viết kịch bản, đọc lời, thêm phụ đề rồi ghép thành video",
+    "how_it_works": {
+      "components": [
+        {
+          "evidence": "README",
+          "name": "Mô hình ngôn ngữ",
+          "role": "Viết hoặc viết lại kịch bản video."
+        },
+        {
+          "evidence": "README",
+          "name": "Nguồn clip",
+          "role": "Cung cấp clip nền: kho miễn phí hoặc tệp của bạn."
+        },
+        {
+          "evidence": "README",
+          "name": "Giọng đọc và phụ đề",
+          "role": "Biến kịch bản thành tiếng và dòng chữ chạy theo tiếng."
+        },
+        {
+          "evidence": "README",
+          "name": "Bộ dựng video",
+          "role": "Ghép clip, giọng, chữ và nhạc thành video; ffmpeg thường tự tải về."
+        }
+      ],
+      "flow": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          3
+        ]
+      ],
+      "steps": [
+        {
+          "evidence": "README",
+          "text": "Bạn đưa chủ đề hoặc từ khóa; mô hình ngôn ngữ viết hoặc viết lại kịch bản, hoặc bạn tự dùng kịch bản của mình.",
+          "title": "Nhận chủ đề"
+        },
+        {
+          "evidence": "README",
+          "text": "Hệ thống lấy clip từ kho miễn phí như Pexels hoặc Pixabay, hoặc dùng ảnh và video bạn tải lên.",
+          "title": "Lấy tư liệu hình"
+        },
+        {
+          "evidence": "README",
+          "text": "Tạo giọng đọc, phụ đề tự động và nhạc nền với âm lượng chỉnh riêng được.",
+          "title": "Thêm tiếng, chữ, nhạc"
+        },
+        {
+          "evidence": "README",
+          "text": "Dựng thành video ngắn ở khổ dọc 9:16, ngang 16:9 hoặc vuông 1:1.",
+          "title": "Ghép thành video"
+        }
+      ]
+    },
+    "learn": [
+      "Chia việc lớn thành các khâu độc lập: kịch bản, tư liệu, giọng đọc, phụ đề, nhạc, dựng",
+      "Một lõi xử lý, nhiều cửa vào: giao diện web, API và dòng lệnh",
+      "Cho phép thay từng khâu bằng nhà cung cấp khác hoặc nội dung của chính bạn"
+    ],
+    "one_liner": "Công cụ mã nguồn mở nhận một chủ đề hoặc từ khóa, rồi tự tạo kịch bản, chọn clip, đọc lời, tạo phụ đề, thêm nhạc nền và ghép thành video ngắn.",
+    "problem": "Làm một video ngắn bằng tay đòi hỏi nhiều khâu: viết kịch bản, tìm clip, thu giọng đọc, gõ phụ đề, chọn nhạc rồi dựng. MoneyPrinterTurbo gom các khâu đó thành một quy trình tự động, bạn chỉ cần đưa chủ đề hoặc từ khóa.",
+    "title": "Tạo video ngắn từ một chủ đề với MoneyPrinterTurbo",
+    "who_for": [
+      "Người làm nội dung muốn tạo nhiều video ngắn từ chủ đề",
+      "Lập trình viên muốn nối việc tạo video vào quy trình tự động qua API hoặc dòng lệnh"
+    ]
+  },
+  "facts": {
+    "blocks": [
+      [
+        "text",
+        "使用这个 Skill：https://raw.githubusercontent.com/harry0703/MoneyPrinterTurbo/main/docs/skill/SKILL.md\n帮我生成一个主题为“人工智能如何改变普通人的日常生活”的视频。"
+      ],
+      [
+        "",
+        "RuntimeError: No ffmpeg exe could be found.\nInstall ffmpeg on your system, or set the IMAGEIO_FFMPEG_EXE environment variable."
+      ],
+      [
+        "toml",
+        "[app]\n# 请根据你的实际路径设置，注意 Windows 路径分隔符为 \\\\\nffmpeg_path = \"C:\\\\Users\\\\harry\\\\Downloads\\\\ffmpeg.exe\""
+      ],
+      [
+        "",
+        "LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder for the specified revision on the local disk and\noutgoing traffic has been disabled.\nTo enable repo look-ups and downloads online, pass 'local_files_only=False' as input."
+      ],
+      [
+        "",
+        "An error occurred while synchronizing the model Systran/faster-whisper-large-v3 from the Hugging Face Hub:\nAn error happened while trying to locate the files on the Hub and we cannot find the appropriate snapshot folder for the\nspecified revision on the local disk. Please check your internet connection and try again.\nTrying to load the model directly from the local cache, if it exists."
+      ]
+    ],
+    "bucket": "ai",
+    "forks": 20700,
+    "full_name": "harry0703/MoneyPrinterTurbo",
+    "language": "Python",
+    "license": "MIT",
+    "links": [
+      [
+        "raw.githubusercontent.com",
+        "https://raw.githubusercontent.com/harry0703/MoneyPrinterTurbo/main/docs/skill/SKILL.md"
+      ],
+      [
+        "colab.research.google.com",
+        "https://colab.research.google.com/github/harry0703/MoneyPrinterTurbo/blob/main/docs/MoneyPrinterTurbo.ipynb"
+      ],
+      [
+        "github.com",
+        "https://github.com/harry0703/MoneyPrinterTurbo.git"
+      ],
+      [
+        "下载并安装 Docker Desktop",
+        "https://www.docker.com/products/docker-desktop/"
+      ],
+      [
+        "安装 WSL",
+        "https://learn.microsoft.com/zh-cn/windows/wsl/install"
+      ],
+      [
+        "在 WSL 中使用 Docker 容器",
+        "https://learn.microsoft.com/zh-cn/windows/wsl/tutorials/wsl-containers"
+      ],
+      [
+        "127.0.0.1:8501",
+        "http://127.0.0.1:8501"
+      ],
+      [
+        "完整的使用演示",
+        "https://v.douyin.com/iFhnwsKY/"
+      ],
+      [
+        "如何在 Windows 上部署",
+        "https://v.douyin.com/iFyjoW3M"
+      ],
+      [
+        "uv",
+        "https://docs.astral.sh/uv/"
+      ],
+      [
+        "127.0.0.1:8080",
+        "http://127.0.0.1:8080/docs"
+      ],
+      [
+        "127.0.0.1:8080",
+        "http://127.0.0.1:8080/redoc"
+      ],
+      [
+        "localhost:3000",
+        "http://localhost:3000"
+      ],
+      [
+        "frontend.example.com",
+        "https://frontend.example.com"
+      ],
+      [
+        "gyan.dev",
+        "https://www.gyan.dev/ffmpeg/builds/"
+      ],
+      [
+        "OpenAI",
+        "https://platform.openai.com/api-keys"
+      ],
+      [
+        "Anthropic Claude",
+        "https://platform.claude.com/settings/keys"
+      ],
+      [
+        "Google Gemini",
+        "https://aistudio.google.com/app/apikey"
+      ],
+      [
+        "DeepSeek",
+        "https://platform.deepseek.com/api_keys"
+      ],
+      [
+        "阿里云通义千问",
+        "https://dashscope.console.aliyun.com/apiKey"
+      ],
+      [
+        "Microsoft Azure OpenAI",
+        "https://portal.azure.com/#view/Microsoft_Azure_ProjectOxford/CognitiveServicesHub/~/OpenAI"
+      ],
+      [
+        "xAI Grok",
+        "https://console.x.ai/"
+      ],
+      [
+        "MiniMax",
+        "https://platform.minimaxi.com/"
+      ],
+      [
+        "小米 MiMo",
+        "https://platform.xiaomimimo.com/docs/zh-CN/quick-start/first-api-call"
+      ],
+      [
+        "APIMart",
+        "https://go.apimart.ai/gh-moneyprinterturbo"
+      ],
+      [
+        "Cloudflare AI Gateway",
+        "https://dash.cloudflare.com/"
+      ],
+      [
+        "魔搭 ModelScope",
+        "https://modelscope.cn/docs/model-service/API-Inference/intro"
+      ],
+      [
+        "AIHubMix",
+        "https://aihubmix.com/"
+      ],
+      [
+        "AIML API",
+        "https://aimlapi.com/app/keys"
+      ],
+      [
+        "EvoLink",
+        "https://evolink.ai/dashboard/keys"
+      ],
+      [
+        "OpenRouter",
+        "https://openrouter.ai/settings/keys"
+      ],
+      [
+        "API Route",
+        "https://www.api-route.com/"
+      ],
+      [
+        "Ollama",
+        "https://ollama.com/"
+      ],
+      [
+        "Claude Code 订阅",
+        "https://code.claude.com/docs"
+      ],
+      [
+        "OneAPI",
+        "https://github.com/songquanpeng/one-api"
+      ],
+      [
+        "LiteLLM",
+        "https://docs.litellm.ai/docs/providers"
+      ],
+      [
+        "Groq",
+        "https://console.groq.com/keys"
+      ],
+      [
+        "Pollinations AI",
+        "https://enter.pollinations.ai/"
+      ],
+      [
+        "Pexels（免费）",
+        "https://www.pexels.com/api/"
+      ],
+      [
+        "Pixabay（免费）",
+        "https://pixabay.com/api/docs/"
+      ]
+    ],
+    "scanned": "2026-10-16",
+    "shells": {
+      ".\\webui.bat": "powershell"
+    },
+    "stars": 131800,
+    "url": "https://github.com/harry0703/MoneyPrinterTurbo"
+  },
+  "lang": "vi",
+  "note": "WRITTEN IN AN INTERACTIVE SESSION by Claude, not by the pipeline's free models, and not checked by a model of another family. Facts: README.md (or readme.md) at commit 4b7b965 of a shallow checkout, cut to 11187 characters by radar/readme.py; stars and forks read from the repository page on 2026-10-16 and rounded to its precision; 'pushed' is the commit date. The draft passed radar/gates.py with require_guide=True.",
+  "position": 1
+}
