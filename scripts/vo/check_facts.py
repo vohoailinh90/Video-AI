@@ -11,7 +11,8 @@ A script decides, not a model, the way github-radar's gates do:
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
   * the page's code is not read, but the plain ways it has of putting words on the screen or bringing in more code are refused
-    (CSS `content:`, @import, DOM-writing script, a script or stylesheet that is not a file next to the page, frames, on* attributes).
+    (CSS `content:`, @import, DOM-writing script, any script or stylesheet other than the template's own gsap.min.js, frames, on*
+    attributes).
     That is a pattern check, not a sandbox: code written to hide what it does gets past it, so the diff of the composition is still
     reviewed, and the gate does not look at images, video or audio;
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
@@ -64,7 +65,10 @@ JS_WRITES = re.compile(r"\b(?:innerHTML|outerHTML|innerText|textContent|insertAd
                        r"createElementNS|appendChild|insertBefore|replaceChildren|replaceWith|setAttribute|nodeValue|DOMParser|eval|Function|"
                        r"import|importScripts|fetch|XMLHttpRequest|WebSocket|Worker|SharedWorker)\b|\bdocument\s*\.\s*write(?:ln)?\b|"
                        r"\b(?:append|prepend)\s*\(|\.\s*(?:text|html)\s*\(")
-LOCAL_FILE = re.compile(r"(?!\.\.?/)[\w.\-]+(?:/[\w.\-]+)*")      # a file next to the page: no scheme, no leading /, no ..
+# The only file a page may load: the template's GSAP, named exactly so and identical to the copy vendored in scripts/radar/assets.
+# Any other file next to the page (a script, a stylesheet) is code this check does not read, so it is refused.
+TRUSTED_SCRIPT = "gsap.min.js"
+TRUSTED_COPY = Path(__file__).resolve().parents[1].joinpath("radar", "assets", TRUSTED_SCRIPT)
 FRAMES = {"iframe", "frame", "object", "embed"}
 
 
@@ -86,6 +90,7 @@ class Visible(HTMLParser):
         self.stack = []      # [tag, skipped, label buffer or None] for every open element
         self.parts = []
         self.code = []       # problems with the page's code: what it could write, load or run
+        self.scripts = []    # the trusted script files the page loads
 
     def handle_starttag(self, tag, attrs):
         self.look_at_code(tag, dict(attrs))
@@ -112,8 +117,11 @@ class Visible(HTMLParser):
         if tag in FRAMES:
             self.code.append(f"<{tag}> (it can show a page that is not this one)")
         for name, wanted in (("script", "src"), ("link", "href")):
-            if tag == name and attrs.get(wanted) is not None and not LOCAL_FILE.fullmatch(attrs[wanted].strip()):
-                self.code.append(f"<{tag} {wanted}=...> that is not a file next to the page")
+            if tag == name and attrs.get(wanted) is not None:
+                if tag == "script" and attrs[wanted] == TRUSTED_SCRIPT:
+                    self.scripts.append(attrs[wanted])
+                else:
+                    self.code.append(f"<{tag} {wanted}=...> that is not the template's {TRUSTED_SCRIPT}")
 
     def close(self):
         super().close()
@@ -263,6 +271,10 @@ def main() -> int:
     parser = Visible()
     parser.feed(Path(args.html).read_text(encoding="utf-8"))
     parser.close()
+    for name in sorted(set(parser.scripts)):         # the one trusted file must really be the template's, not a file with its name
+        loaded = Path(args.html).resolve().parent / name
+        if not loaded.is_file() or not TRUSTED_COPY.is_file() or loaded.read_bytes() != TRUSTED_COPY.read_bytes():
+            parser.code.append(f"<script src={name}> that is not the template's {TRUSTED_SCRIPT} byte for byte")
     if parser.code:
         print(f"{args.html}: code that could put words on the screen or load code, which this check cannot trace: "
               f"{'; '.join(sorted(set(parser.code)))}")

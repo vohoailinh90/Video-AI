@@ -8,6 +8,7 @@ Fixtures are real digests (draft-vi.json) copied from the github-radar repositor
 import copy
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -51,10 +52,14 @@ class Ids(HTMLParser):
             self.audio[attrs["id"]] = attrs
 
 
-def run_gate(digest, doc, html):
-    """check_facts.py as a subprocess, the way make_video.py runs it. Returns (exit status, output)."""
+def run_gate(digest, doc, html, files=None):
+    """check_facts.py as a subprocess, the way make_video.py runs it. Returns (exit status, output). The page gets the template's
+    gsap.min.js next to it, as a project has, unless `files` ({name: text}) puts something else there."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
+        (tmp / "gsap.min.js").write_bytes((REPO / "scripts" / "radar" / "assets" / "gsap.min.js").read_bytes())
+        for name, text in (files or {}).items():
+            (tmp / name).write_text(text, encoding="utf-8")
         (tmp / "draft.json").write_text(json.dumps(digest, ensure_ascii=False), encoding="utf-8")
         (tmp / "lines.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
         (tmp / "index.html").write_text(html, encoding="utf-8")
@@ -286,6 +291,7 @@ class ReviewFindings(unittest.TestCase):
             project = Path(tmp)
             (project / "source").mkdir()
             (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")     # what scaffold puts there
             make_video.write_composition(project, plan, tl)
             self.assertIn("all traced", make_video.require_gate(project))
             html = (project / "index.html").read_text(encoding="utf-8").replace(">Python<", ">Python 99.999<", 1)
@@ -601,8 +607,19 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(status, 1, name)
             self.assertIn("put words on the screen or load code", output, name)
         # harmless code stays harmless: a local script, an empty `content`, justify-content
-        calm = html.replace("</head>", '<script src="other.js"></script><style>.x::before { content: ""; content: none } .y { justify-content: center }</style></head>', 1)
+        calm = html.replace("</head>", '<style>.x::before { content: ""; content: none } .y { justify-content: center }</style></head>', 1)
         self.assertEqual(run_gate(digest, doc, calm)[0], 0)
+        # a file next to the page is not trusted for being local: only the template's own gsap.min.js, byte for byte
+        for name, changed, files in (
+                ("other script", html.replace("</head>", '<script src="evil.js"></script></head>', 1), {"evil.js": "document.title = 1"}),
+                ("other stylesheet", html.replace("</head>", '<link rel="stylesheet" href="evil.css"></head>', 1), {"evil.css": "a{}"}),
+                ("edited gsap", html, {"gsap.min.js": "/* the template's gsap, with something added */"}),
+                ("path to gsap", html.replace('src="gsap.min.js"', 'src="./gsap.min.js"', 1), {})):
+            status, output = run_gate(digest, doc, changed, files)
+            self.assertEqual(status, 1, name)
+            self.assertIn("put words on the screen or load code", output, name)
+        same_file = html.replace('src="gsap.min.js"', 'src="gsap.min.js" data-x', 1)                       # an attribute is not a file
+        self.assertEqual(run_gate(digest, doc, same_file)[0], 0)
 
     def test_a_digest_url_with_a_query_or_fragment_is_refused(self):
         for url in ("https://github.com/o/r?access_token=SECRET", "https://github.com/o/r#SECRET", "https://github.com/o/r?"):
@@ -649,7 +666,13 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(make_video.without_credentials("https://TOKEN@github.com/o/r"), "https://github.com/o/r")
         self.assertEqual(make_video.without_credentials("ssh://git@github.com/o/r.git"), "ssh://github.com/o/r.git")
         self.assertEqual(make_video.without_credentials("https://github.com/o/r"), "https://github.com/o/r")
-        self.assertEqual(make_video.without_credentials("git@github.com:o/r.git"), "git@github.com:o/r.git")   # no password can sit here
+        self.assertEqual(make_video.without_credentials("https://github.com:8443/o/r.git?access_token=SECRET"), "https://github.com:8443/o/r.git")
+        self.assertEqual(make_video.without_credentials("https://github.com/o/r.git#SECRET"), "https://github.com/o/r.git")
+        self.assertEqual(make_video.without_credentials("https://u:p@s@github.com/o/r.git"), "https://github.com/o/r.git")
+        self.assertEqual(make_video.without_credentials("git@github.com:o/r.git"), "github.com:o/r.git")          # scp-style: no user at all
+        self.assertEqual(make_video.without_credentials("ghp_SECRET@github.com:o/r.git"), "github.com:o/r.git")
+        self.assertEqual(make_video.without_credentials("github.com:o/r.git?x=SECRET"), "github.com:o/r.git")
+        self.assertEqual(make_video.without_credentials("/srv/git/r.git"), "/srv/git/r.git")
         self.assertIsNone(make_video.without_credentials(None))
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "digests" / "d"

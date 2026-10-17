@@ -27,6 +27,7 @@ import subprocess
 import sys
 import unicodedata
 from pathlib import Path
+from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -84,9 +85,18 @@ def make_pad(path: Path, seconds: float):
 
 
 def without_credentials(url):
-    """A git remote as a public address: the user:password@ (or token@) part of a scheme://... URL is dropped, because provenance.json
-    and README.md are committed. git@host:path (no password can sit there) is left alone."""
-    return re.sub(r"^([A-Za-z][A-Za-z0-9+.\-]*://)[^/]*@", r"\1", url) if url else url
+    """A git remote as a public address, for provenance.json and README.md (both committed): scheme://host/path, or host:path for the
+    scp style. The user name or password (user:pw@, token@), the query and the fragment are dropped, because a token can sit in any of
+    them."""
+    if not url:
+        return url
+    if re.match(r"[A-Za-z][A-Za-z0-9+.\-]*://", url):
+        parts = urlsplit(url)
+        return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
+    scp = re.match(r"(?:[^@/:\s]+@)?([^@/:\s]+):(.*)", url)          # [user@]host:path
+    if scp:
+        return f"{scp.group(1)}:{re.split(r'[?#]', scp.group(2))[0]}"
+    return re.split(r"[?#]", url)[0]
 
 
 def where_it_came_from(path: Path) -> dict:
