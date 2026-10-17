@@ -9,6 +9,8 @@ Look and motion follow videos/demo-video and videos/voicestudio (dark grid, oran
 import html as htmllib
 import json
 
+import plan as planlib
+
 E = htmllib.escape
 
 LABELS = {
@@ -275,7 +277,9 @@ def end_scene(plan, scene, clips, n, js):
         if try_it["commands"]:
             rows = "".join(f'<div class="row"><span class="prompt">$</span> <span class="cmd" id="{sid}-cmd{i}">{E(c)}</span></div>'
                            for i, c in enumerate(try_it["commands"]))
-            term = f'<div class="term" id="{sid}-term"><div class="top"><i></i><i></i><i></i></div><div class="body">{rows}</div></div>'
+            px = 38 if len(try_it["commands"]) <= 4 else 32
+            term = (f'<div class="term" id="{sid}-term"><div class="top"><i></i><i></i><i></i></div>'
+                    f'<div class="body" style="font-size:{px}px">{rows}</div></div>')
         note = f'<div class="note" id="{sid}-note">{E(try_it["note"])}</div>' if try_it["note"] else ""
         right = f'<div class="col"><h2 class="head" id="{sid}-head-r" data-label>{E(LABELS["try"])}</h2>{term}{note}</div>'
     markup = f"""
@@ -293,17 +297,12 @@ def end_scene(plan, scene, clips, n, js):
         for i, c in enumerate(caveats):
             js.rise(f"#{sid}-cv{i}", clips[c["uid"]]["start"] - 0.2, 0.6)
     if try_it:
-        if try_it["uid"]:
-            head_at = clips[try_it["uid"]]["start"] - 0.9
-        elif caveats:
-            head_at = clips[caveats[-1]["uid"]]["end"] + 0.3
-        else:
-            head_at = start + 0.4
+        head_at = planlib.terminal_head_at(plan, clips, start)
         js.rise(f"#{sid}-head-r", head_at, 0.6)
         if try_it["commands"]:
             js.raw(f'tl.fromTo("#{sid}-term", {{ opacity: 0, y: 36 }}, {{ opacity: 1, y: 0, duration: 0.55, ease: E }}, {num(head_at + 0.3)});')
             for i in range(len(try_it["commands"])):
-                js.raw(f'tl.fromTo("#{sid}-cmd{i}", {{ clipPath: "inset(0 100% 0 0)" }}, {{ clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }}, {num(head_at + 0.9 + 0.5 * i)});')
+                js.raw(f'tl.fromTo("#{sid}-cmd{i}", {{ clipPath: "inset(0 100% 0 0)" }}, {{ clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }}, {num(planlib.terminal_command_at(head_at, i))});')
         if try_it["note"]:
             js.rise(f"#{sid}-note", (clips[try_it["uid"]]["start"] - 0.1) if try_it["uid"] else head_at + 0.5, 0.6)
     js.rise(f"#{sid}-foot", start + 0.8, 0.6)
@@ -369,6 +368,7 @@ def render(plan, tl) -> str:
 
 {chr(10).join('      ' + line for line in js.lines)}
 
+      window.__timelines = window.__timelines || {{}};
       window.__timelines["main"] = tl;
       tl.seek(0);
     </script>

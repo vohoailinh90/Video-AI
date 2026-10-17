@@ -11,7 +11,8 @@ A digest becomes up to five scenes, each made of units (one narration clip plus 
   problem  the sentences of `problem`             the opening one as a pain card, the one that names the tool as the solution
   how      each step of `how_it_works`            nodes joined by arrows, then the components row
   learn    each `learn` item                      cards
-  end      each caveat, then the try_it note      caveat cards and a terminal with the try_it commands
+  end      each caveat, then the try_it note      caveat cards and a terminal with the try_it commands (at most 6; a digest
+                                                          with commands but nothing to narrate still gets this scene)
 
 When the narration would run past the speech budget, groups are cut in a fixed order (see select_units).
 """
@@ -27,10 +28,11 @@ LEAD, GAP, TAIL = 0.6, 0.5, 1.1   # seconds before the first clip of a scene, be
 COVER_MIN = 5.2
 HOW_COMPONENTS_TAIL = 1.9
 END_TAIL = 2.0
-TERMINAL_ONLY_TAIL = 3.8
+TERMINAL_HOLD = 1.0          # seconds the finished terminal stays after its last command is typed
+TERM_FIRST, TERM_STEP, TERM_TYPE = 0.9, 0.5, 0.5   # after the heading, between commands, and the time one command takes to type
 
 SCENE_ORDER = ["cover", "problem", "how", "learn", "end"]
-MAX_STEPS, MAX_LEARN, MAX_CAVEATS, MAX_COMPONENTS, MAX_COMMANDS = 4, 3, 2, 6, 4
+MAX_STEPS, MAX_LEARN, MAX_CAVEATS, MAX_COMPONENTS, MAX_COMMANDS = 4, 3, 2, 6, 6
 
 
 def clean(text) -> str:
@@ -153,10 +155,18 @@ def build_plan(digest, selection=None, speech_seconds=60.0) -> dict:
         raise ValueError(f"units not in the digest: {unknown}")
     chosen = [u for u in candidates if u["key"] in set(selection)]
 
+    try_it = digest["draft"].get("try_it") or {}
+    all_commands = [clean(c) for c in (try_it.get("commands") or []) if clean(c)]
+    commands = all_commands[:MAX_COMMANDS]
+    if len(all_commands) > MAX_COMMANDS:
+        note = (note + "; " if note else "") + f"try_it has {len(all_commands)} commands, the terminal shows the first {MAX_COMMANDS}"
+
     units, scenes = [], []
     for scene_id in SCENE_ORDER:
         members = [u for u in chosen if u["scene"] == scene_id]
         if not members:
+            if scene_id == "end" and commands:       # a terminal with no caveat and no note to narrate still needs its scene
+                scenes.append({"id": "end", "units": []})
             continue
         ids = []
         for unit in members:
@@ -183,8 +193,6 @@ def build_plan(digest, selection=None, speech_seconds=60.0) -> dict:
         value = clean(facts.get(field))
         if value and value.upper() != "NOASSERTION":
             chips.append({"value": value, "label": None})
-    try_it = draft.get("try_it") or {}
-    commands = [clean(c) for c in (try_it.get("commands") or []) if clean(c)][:MAX_COMMANDS]
 
     def items(prefix, field="text"):
         return [{"uid": u["id"], "text": u[field]} for u in units if u["key"].split(":")[0] == prefix]
@@ -223,11 +231,31 @@ def unit_label(plan, unit) -> str:
     return SCENE_LABELS.get(kind, SCENE_LABELS.get(unit["scene"], unit["scene"]))
 
 
+def terminal_head_at(plan, clips, start) -> float:
+    """When the "Tự thử" heading appears: before the note is read, else after the last caveat, else at the start of the scene."""
+    if plan["try"]["uid"]:
+        return clips[plan["try"]["uid"]]["start"] - 0.9
+    if plan["caveats"]:
+        return clips[plan["caveats"][-1]["uid"]]["end"] + 0.3
+    return start + 0.4
+
+
+def terminal_command_at(head_at, index) -> float:
+    return head_at + TERM_FIRST + TERM_STEP * index
+
+
+def terminal_done_at(plan, clips, start) -> float:
+    last = len(plan["try"]["commands"]) - 1
+    return terminal_command_at(terminal_head_at(plan, clips, start), last) + TERM_TYPE
+
+
 def timeline(plan, durations) -> dict:
     """Place every clip and scene. durations: unit id -> seconds. Returns {scenes: [{id, start, end}], clips: {id: {start, end}}, duration}."""
     scenes, clips, now = [], {}, 0.0
     for scene in plan["scenes"]:
         start, cursor = now, now
+        if not scene["units"]:
+            cursor += LEAD
         for index, uid in enumerate(scene["units"]):
             cursor += LEAD if index == 0 else GAP
             clips[uid] = {"start": round(cursor, 2), "end": round(cursor + durations[uid], 2)}
@@ -235,11 +263,12 @@ def timeline(plan, durations) -> dict:
         if scene["id"] == "how":
             tail = TAIL + (HOW_COMPONENTS_TAIL if plan["components"] else 0)
         elif scene["id"] == "end":
-            terminal_only = plan["try"] and plan["try"]["commands"] and not plan["try"]["uid"]
-            tail = TERMINAL_ONLY_TAIL if terminal_only else END_TAIL
+            tail = END_TAIL
         else:
             tail = TAIL
         end = cursor + tail
+        if scene["id"] == "end" and plan["try"] and plan["try"]["commands"]:
+            end = max(end, terminal_done_at(plan, clips, start) + TERMINAL_HOLD)   # every command typed, then a moment to read
         if scene["id"] == "cover":
             end = max(end, start + COVER_MIN)
         scenes.append({"id": scene["id"], "start": round(start, 2), "end": round(end, 2)})

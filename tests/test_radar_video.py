@@ -184,8 +184,8 @@ class Timeline(unittest.TestCase):
         self.assertTrue(plan["try"]["commands"] and not plan["try"]["uid"])
         tl = planlib.timeline(plan, estimated_durations(plan))
         end_scene = tl["scenes"][-1]
-        last_clip = max(c["end"] for c in tl["clips"].values())
-        self.assertGreaterEqual(end_scene["end"] - last_clip, planlib.TERMINAL_ONLY_TAIL - 0.01)
+        done = planlib.terminal_done_at(plan, tl["clips"], end_scene["start"])
+        self.assertGreaterEqual(end_scene["end"], done + planlib.TERMINAL_HOLD - 0.01)
 
 
 class Compose(unittest.TestCase):
@@ -257,6 +257,84 @@ class Compose(unittest.TestCase):
         html = compose.render(plan, tl)
         self.assertNotIn("Học được gì", html)
         self.assertNotIn("Các mảnh ghép", html)
+
+
+def digest_with(change):
+    """A copy of the voicestudio fixture changed by `change(digest)`, loaded the way a file would be."""
+    digest = fixture("voicestudio")
+    change(digest)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "d.json"
+        path.write_text(json.dumps(digest), encoding="utf-8")
+        return planlib.load_digest(path)
+
+
+class ReviewFindings(unittest.TestCase):
+    """Regression tests for the findings of the first review of the scripts."""
+
+    def test_the_timelines_registry_is_created_before_it_is_used(self):
+        plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
+        html = compose.render(plan, planlib.timeline(plan, estimated_durations(plan)))
+        init = html.index("window.__timelines = window.__timelines || {};")
+        self.assertLess(init, html.index('window.__timelines["main"] = tl;'))
+
+    def test_render_does_not_start_when_the_facts_gate_fails(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "source").mkdir()
+            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            make_video.write_composition(project, plan, tl)
+            self.assertIn("all traced", make_video.require_gate(project))
+            html = (project / "index.html").read_text(encoding="utf-8").replace(">Python<", ">Python 99.999<", 1)
+            (project / "index.html").write_text(html, encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                make_video.require_gate(project)
+
+    def test_commands_with_nothing_to_narrate_still_get_their_scene(self):
+        def change(d):
+            d["draft"]["caveats"] = []
+            d["draft"]["try_it"].pop("note")
+        digest = digest_with(change)
+        plan = planlib.build_plan(digest)
+        self.assertEqual(plan["scenes"][-1], {"id": "end", "units": []})
+        self.assertEqual(len(plan["try"]["commands"]), 3)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        scene = tl["scenes"][-1]
+        self.assertEqual(scene["id"], "end")
+        self.assertGreaterEqual(scene["end"], planlib.terminal_done_at(plan, tl["clips"], scene["start"]) + planlib.TERMINAL_HOLD - 0.01)
+        html = compose.render(plan, tl)
+        self.assertIn("bun run setup:api", html)
+        doc = make_video.voiceover_doc(plan, tl)
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 0, output)
+
+    def test_more_commands_than_the_terminal_shows(self):
+        many = [f"bun run step{i}" for i in range(9)]
+        digest = digest_with(lambda d: d["draft"]["try_it"].update(commands=many))
+        plan = planlib.build_plan(digest)
+        self.assertEqual(plan["try"]["commands"], many[:planlib.MAX_COMMANDS])
+        self.assertIn("the first 6", plan["note"])
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(doc["commands_shown"], planlib.MAX_COMMANDS)
+        html = compose.render(plan, tl)
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 0, output)
+        end = tl["scenes"][-1]
+        self.assertGreaterEqual(end["end"], planlib.terminal_done_at(plan, tl["clips"], end["start"]) + planlib.TERMINAL_HOLD - 0.01,
+                                "the last command is typed and read before the scene ends")
+        # the gate still refuses a terminal that drops a command it says it shows
+        status, output = run_gate(digest, doc, html.replace("bun run step3", "bun run step"))
+        self.assertEqual(status, 1)
+        self.assertIn("step3", output)
+        # and without the declaration every command of the digest is required
+        del doc["commands_shown"]
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("step7", output)
 
 
 class Narration(unittest.TestCase):

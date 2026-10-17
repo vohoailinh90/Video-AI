@@ -127,7 +127,11 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
                 line["speak"] = unit["speak"]
             line["source"] = unit["source"]
         lines.append(line)
-    return {"allow": (existing or {}).get("allow", []), "lines": lines}
+    doc = {"allow": (existing or {}).get("allow", [])}
+    if plan["try"] and plan["try"]["commands"]:
+        doc["commands_shown"] = len(plan["try"]["commands"])    # the terminal's commands the gate must find on screen, exactly
+    doc["lines"] = lines
+    return doc
 
 
 def refresh_speak(doc, plan) -> bool:
@@ -178,6 +182,15 @@ def gate(project: Path):
     result = run([sys.executable, "-I", VO / "check_facts.py", "--source", project / "source" / "draft-vi.json",
                   "--lines", project / "voiceover.json", "--html", project / "index.html"])
     return result.returncode == 0, (result.stdout + result.stderr).strip()
+
+
+def require_gate(project: Path) -> str:
+    """Run the facts gate and stop the whole command when it fails: nothing that does not trace to the digest is rendered."""
+    ok, output = gate(project)
+    if not ok:
+        print(output, file=sys.stderr)
+        fail("the facts gate failed: voiceover.json or index.html says something the digest does not; fix it, then run this again")
+    return output
 
 
 def report_path(project: Path) -> Path:
@@ -345,6 +358,7 @@ def final_mix_wer(args, project: Path, mp4: Path):
 def cmd_render(args, project=None) -> dict:
     project = project or project_dir(args.project, args.videos_dir)
     digest, plan, doc = load_project(project)
+    gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
     mp4 = project / "renders" / f"{project.name}.mp4"
     print("render: revoice.py (levels, npm run check, render) ...", flush=True)
     result = run([sys.executable, "-I", VO / "revoice.py", "--project", project, "--lines", project / "voiceover.json",
@@ -361,8 +375,7 @@ def cmd_render(args, project=None) -> dict:
     report = load_report(project)
     report["render"] = {"check": check_line.replace("check: ", ""), "duration": round(seconds, 2), "mean_db": mean, "peak_db": peak,
                         "warnings": warnings, "final_mix": final}
-    ok, output = gate(project)
-    report["gate"] = {"ok": ok, "output": output}
+    report["gate"] = {"ok": True, "output": gate_output}
     save_report(project, report)
     write_preview_json(project, plan, report)
     write_readme(project, plan, doc, report)
@@ -379,7 +392,7 @@ def cmd_render(args, project=None) -> dict:
         print(w)
     if final:
         print(f"final mix round trip: {final['edits']}/{final['ref_words']} words wrong ({100 * final['edits'] / max(final['ref_words'], 1):.0f}%)")
-    print("facts gate:", output.splitlines()[-1] if output else "ok")
+    print("facts gate:", gate_output.splitlines()[-1] if gate_output else "ok")
     return report
 
 

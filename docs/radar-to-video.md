@@ -39,7 +39,7 @@ Lời đọc đi vào bộ tổng hợp giọng có chữ số được đọc t
 | Vấn đề | `problem` | câu mở đầu, và câu nêu tên công cụ (nếu `problem` có hơn hai câu) | câu đầu là thẻ vấn đề, câu nêu tên công cụ là thẻ lời giải |
 | Cách chạy | `how_it_works.steps`, `components` | `text` của từng bước (tối đa 4) | `title` của từng bước thành ô nối bằng mũi tên; sau đó hàng "các mảnh ghép" (tên và đường dẫn bằng chứng) |
 | Học được gì | `learn` | từng mục (tối đa 3) | thẻ chứa nguyên văn |
-| Lưu ý và thử | `caveats`, `try_it` | từng lưu ý (tối đa 2), rồi `note` của `try_it` | thẻ lưu ý; cửa sổ terminal gõ các lệnh của `try_it.commands` (tối đa 4); địa chỉ `facts.url` ở chân |
+| Lưu ý và thử | `caveats`, `try_it` | từng lưu ý (tối đa 2), rồi `note` của `try_it` | thẻ lưu ý; cửa sổ terminal gõ các lệnh của `try_it.commands` (tối đa 6; nhiều hơn thì chỉ hiện 6 lệnh đầu, `plan` và `scaffold` in cảnh báo và `voiceover.json` ghi `commands_shown`); địa chỉ `facts.url` ở chân |
 
 Cảnh nào bài không có dữ liệu thì bị bỏ. Mỗi hàng chữ cố định (tiêu đề cảnh, "Số liệu theo ngày quét", "sao", "fork") nằm trong phần tử `data-label` của mẫu và không bị đối chiếu; mọi chữ khác phải đến từ bài.
 
@@ -49,7 +49,7 @@ lưu ý còn 1, mục học còn 2, bỏ ghi chú thử (các lệnh vẫn hiệ
 ## Cổng đối chiếu (không do model quyết định)
 
 `scripts/vo/check_facts.py` chạy ở mỗi bước. Mỗi dòng của `voiceover.json` ghi `source` (các trường của bài); mọi số, tên chữ Latin và lệnh trong dòng đó phải có trong các trường ấy, và chữ trên màn hình phải có trong toàn bộ bài.
-Mỗi lệnh của `try_it.commands` phải hiện đúng nguyên văn. Lỗi thì `voice` dừng, in lý do, nhưng file đã ghi nên có thể sửa tiếp.
+Mỗi lệnh của `try_it.commands` (hoặc `commands_shown` lệnh đầu, nếu terminal không chứa hết) phải hiện đúng nguyên văn. Lỗi thì `voice` dừng, in lý do, nhưng file đã ghi nên có thể sửa tiếp; `render` chạy cổng này **trước** mọi bước tốn thời gian và dừng nếu nó thất bại, nên sửa tay `voiceover.json` hoặc `index.html` thành nội dung không có trong bài sẽ không bao giờ ra thành MP4. Digest chỉ có lệnh thử (không có lưu ý, không có ghi chú) vẫn có cảnh cuối với terminal.
 
 Sửa lời đọc: được. Mở `voiceover.json`, sửa `text` (và `source` nếu cần) của dòng đó, rồi chạy `voice PROJECT --only vo-4 --tts-python ...`. Script giữ lại câu bạn sửa (kể cả khi chạy lại `voice`), tính lại chữ đọc, tạo lại giọng cho dòng đó và để cổng quyết định câu mới còn đúng với bài không.
 Từ tiếng Việt viết không dấu (như "giao", "cho", "ba") bị cổng báo nhầm là tên Latin; ghi vào mảng `allow` của `voiceover.json`.

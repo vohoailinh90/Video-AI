@@ -203,6 +203,7 @@
       tl.fromTo("#s5-cmd2", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 68.78);
       rise("#s5-foot", 60.78, 0.6);
 
+      window.__timelines = window.__timelines || {};
       window.__timelines["main"] = tl;
       tl.seek(0);
     </script>

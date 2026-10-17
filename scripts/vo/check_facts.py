@@ -9,7 +9,8 @@ A script decides, not a model, the way github-radar's gates do:
     cites; Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
-  * each command in try_it.commands must appear on screen exactly as the digest gives it.
+  * each command in try_it.commands must appear on screen exactly as the digest gives it (voiceover.json's `commands_shown`, when
+    present, limits this to the first N commands, for a terminal that cannot show them all).
 
 Numbers are compared without thousands separators (62.958 on screen equals 62958 in the facts). A Vietnamese word typed without
 any diacritic (giao, cho, ba) looks like a Latin token and is flagged when the source lacks it; list such a word in the
@@ -144,7 +145,10 @@ def main() -> int:
     if problems:
         print(f"{args.html}: on-screen text not in the source: {', '.join(problems)}")
         failures += 1
-    for command in source["draft"].get("try_it", {}).get("commands", []):
+    commands = source["draft"].get("try_it", {}).get("commands", [])
+    if doc.get("commands_shown") is not None:      # a video may show only the first N commands, and says so here
+        commands = commands[:doc["commands_shown"]]
+    for command in commands:
         if command not in screen:
             print(f"{args.html}: command from try_it is not shown exactly: {command!r}")
             failures += 1
