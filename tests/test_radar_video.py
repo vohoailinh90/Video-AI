@@ -524,6 +524,17 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(run_gate(digest, doc, html.replace("</head>", "", 1))[0], 0)
         self.assertEqual(run_gate(digest, doc, html.replace("</head>", "", 1).replace("</body>", "<p>ElevenLabs nhanh gấp 99999 lần</p></body>", 1))[0], 1)
 
+    def test_a_percent_sign_after_a_space_is_read_like_one_without(self):
+        self.assertEqual(numbers_vi.speak_text("giảm 19% và 19 % và -3 %"), "giảm mười chín phần trăm và mười chín phần trăm và âm ba phần trăm")
+        self.assertEqual(numbers_vi.speak_text("tăng 2,5\u00a0%"), "tăng hai phẩy năm phần trăm")
+        self.assertEqual(numbers_vi.speak_text("giảm 19 phần trăm"), "giảm mười chín phần trăm")
+        self.assertEqual(numbers_vi.speak_text("100% và 100 % ."), "một trăm phần trăm và một trăm phần trăm .")
+        # whatever spelling the gate counts as one value, the voice reads the same way
+        for spellings in (("19%", "19 %", "19\u00a0%", "19 phần trăm"), ("-3,5%", "−3,5 %", "-3,5 phần trăm"),
+                          ("62.958", "62,958"), ("-19", "−19")):
+            self.assertEqual(len({check_facts.canonical(s) for s in spellings}), 1, spellings)
+            self.assertEqual(len({numbers_vi.speak_text(s) for s in spellings}), 1, spellings)
+
     def test_a_grouped_number_longer_than_the_words_go_is_read_digit_by_digit(self):
         self.assertEqual(numbers_vi.speak_text("1.000.000.000.000 tham số"), " ".join(["một"] + ["không"] * 12) + " tham số")
         self.assertEqual(numbers_vi.speak_text("12,345,678,901,234"), "một hai ba bốn năm sáu bảy tám chín không một hai ba bốn")
