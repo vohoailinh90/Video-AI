@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      :root {
+        --bg: #0b0c10;
+        --ink: #f4f4f5;
+        --muted: #9ca3af;
+        --accent: #ff9d2e;
+        --accent-soft: rgba(255, 157, 46, 0.14);
+        --mint: #5eead4;
+        --line: rgba(255, 255, 255, 0.12);
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        color: var(--ink);
+      }
+
+      /* ---- background ---- */
+      .bg-grid {
+        background:
+          radial-gradient(ellipse 70% 60% at 50% 38%, rgba(255, 157, 46, 0.16), transparent 70%),
+          linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 96px 96px,
+          linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 96px 96px,
+          var(--bg);
+      }
+
+      .stage {
+        position: absolute;
+        inset: 0;
+        padding: 96px 120px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .tag {
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 26px;
+        letter-spacing: 0.22em;
+        color: var(--accent);
+        text-transform: uppercase;
+      }
+      h1.big {
+        font-size: 176px;
+        line-height: 1.02;
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        margin-top: 28px;
+      }
+      h1.big .line {
+        display: block;
+        overflow: hidden;
+        padding-bottom: 10px;
+      }
+      h1.big .line > span {
+        display: block;
+      }
+      h1.big em {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .sub {
+        font-size: 44px;
+        color: var(--muted);
+        margin-top: 36px;
+        font-weight: 500;
+      }
+      .sub b {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .bar {
+        width: 220px;
+        height: 8px;
+        border-radius: 4px;
+        background: var(--accent);
+        margin-top: 48px;
+        transform-origin: left center;
+      }
+
+      h2.head {
+        font-size: 84px;
+        font-weight: 800;
+        letter-spacing: -0.035em;
+        margin-top: 18px;
+      }
+      .cards {
+        display: flex;
+        gap: 40px;
+        margin-top: 72px;
+      }
+      .card {
+        flex: 1;
+        border: 2px solid var(--line);
+        border-radius: 28px;
+        padding: 44px 44px 48px;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+        min-height: 470px;
+      }
+      .card .num {
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 28px;
+        color: var(--accent);
+        letter-spacing: 0.16em;
+      }
+      .card h3 {
+        font-size: 58px;
+        line-height: 1.1;
+        font-weight: 750;
+        letter-spacing: -0.03em;
+        margin-top: 22px;
+      }
+      .card p {
+        font-size: 33px;
+        line-height: 1.4;
+        color: var(--muted);
+        margin-top: 22px;
+      }
+      .card .who {
+        display: inline-block;
+        margin-top: 30px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 23px;
+        line-height: 1.55;
+        color: var(--mint);
+      }
+
+      .flow {
+        display: flex;
+        align-items: center;
+        margin-top: 110px;
+      }
+      .node {
+        width: 340px;
+        height: 230px;
+        border-radius: 28px;
+        border: 2px solid var(--line);
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 36px;
+      }
+      .node small {
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 22px;
+        letter-spacing: 0.18em;
+        color: var(--accent);
+      }
+      .node strong {
+        font-size: 40px;
+        font-weight: 750;
+        letter-spacing: -0.03em;
+        margin-top: 12px;
+        line-height: 1.12;
+      }
+      .node.last {
+        border-color: var(--accent);
+        background: linear-gradient(160deg, var(--accent-soft), rgba(255, 157, 46, 0.03));
+      }
+      .arrow {
+        position: relative;
+        flex: 1;
+        height: 6px;
+      }
+      .arrow i {
+        position: absolute;
+        inset: 0;
+        background: var(--accent);
+        border-radius: 3px;
+        transform-origin: left center;
+      }
+      .arrow::after {
+        content: "";
+        position: absolute;
+        right: -2px;
+        top: -12px;
+        border-left: 26px solid var(--accent);
+        border-top: 15px solid transparent;
+        border-bottom: 15px solid transparent;
+        opacity: var(--tip, 0);
+      }
+      .note {
+        margin-top: 70px;
+        font-size: 38px;
+        color: var(--muted);
+      }
+      .note b {
+        color: var(--ink);
+      }
+
+      .term {
+        margin-top: 56px;
+        width: 1360px;
+        border: 2px solid var(--line);
+        border-radius: 24px;
+        background: #111318;
+        overflow: hidden;
+      }
+      .term .top {
+        height: 64px;
+        border-bottom: 2px solid var(--line);
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 28px;
+      }
+      .term .top i {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #3a3f4a;
+      }
+      .term .body {
+        padding: 44px 52px 52px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 44px;
+        line-height: 1.7;
+      }
+      .term .prompt {
+        color: var(--accent);
+      }
+      .term .ok {
+        color: var(--mint);
+      }
+      .term .dim {
+        color: var(--muted);
+      }
+      .cursor {
+        display: inline-block;
+        width: 24px;
+        height: 46px;
+        background: var(--ink);
+        vertical-align: -8px;
+        margin-left: 4px;
+      }
+      .foot {
+        margin-top: 44px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 30px;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="17"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- background -->
+      <div id="bg" class="clip bg-grid" data-start="0" data-duration="17" data-track-index="0"></div>
+
+      <!-- music bed (generated locally with ffmpeg) -->
+      <audio
+        id="music-bed"
+        src="assets/pad.wav"
+        data-start="0"
+        data-duration="17"
+        data-track-index="9"
+        data-volume="0.6"
+      ></audio>
+
+      <!-- Vietnamese narration (VieNeu-TTS v3 Turbo, voice Mai Anh; one clip per scene, start = scene start + ~0.4-0.6s) -->
+      <audio id="vo-1" src="assets/vo-1.wav" data-start="0.5" data-duration="1.45" data-track-index="10" data-volume="1"></audio>
+      <audio id="vo-2" src="assets/vo-2.wav" data-start="4.1" data-duration="3.69" data-track-index="11" data-volume="1"></audio>
+      <audio id="vo-3" src="assets/vo-3.wav" data-start="9.2" data-duration="2.89" data-track-index="12" data-volume="1"></audio>
+      <audio id="vo-4" src="assets/vo-4.wav" data-start="13.6" data-duration="1.69" data-track-index="13" data-volume="1"></audio>
+
+      <!-- scene 1: title -->
+      <section id="s1" class="clip" data-start="0" data-duration="3.5" data-track-index="1">
+        <div class="stage" id="s1-in">
+          <div class="tag" id="s1-tag">GitHub Radar · Demo HyperFrames</div>
+          <h1 class="big">
+            <span class="line"><span id="s1-l1">Video AI</span></span>
+            <span class="line"><span id="s1-l2">bằng <em>code</em></span></span>
+          </h1>
+          <div class="sub" id="s1-sub">HTML + GSAP → <b>MP4</b>, do Claude Code viết</div>
+          <div class="bar" id="s1-bar"></div>
+        </div>
+      </section>
+
+      <!-- scene 2: three layers -->
+      <section id="s2" class="clip" data-start="3.5" data-duration="5" data-track-index="1">
+        <div class="stage" id="s2-in">
+          <div class="tag" id="s2-tag">15 repo, 3 nhóm</div>
+          <h2 class="head" id="s2-head">3 lớp để tự động hóa video</h2>
+          <div class="cards">
+            <div class="card" id="c1">
+              <div class="num">01 · ENGINE</div>
+              <h3>Render code thành MP4</h3>
+              <p>Biến HTML hoặc React thành video</p>
+              <div class="who">HyperFrames<br />Remotion</div>
+            </div>
+            <div class="card" id="c2">
+              <div class="num">02 · SKILL</div>
+              <h3>Dạy Claude viết và render</h3>
+              <p>Quy trình dựng sẵn cho từng loại video</p>
+              <div class="who">/product-launch-video<br />remotion-dev/skills</div>
+            </div>
+            <div class="card" id="c3">
+              <div class="num">03 · KIẾN THỨC</div>
+              <h3>Chuyển động<br />có gu</h3>
+              <p>Timing, easing, nhịp chuyển cảnh</p>
+              <div class="who">gsap-skills<br />LottieFiles/motion-design-skill</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- scene 3: pipeline -->
+      <section id="s3" class="clip" data-start="8.5" data-duration="4.3" data-track-index="1">
+        <div class="stage" id="s3-in">
+          <div class="tag" id="s3-tag">Quy trình tự động</div>
+          <h2 class="head" id="s3-head">Từ ý tưởng đến file MP4</h2>
+          <div class="flow">
+            <div class="node" id="n1"><small>BƯỚC 1</small><strong>Ý tưởng<br />hoặc URL</strong></div>
+            <div class="arrow" id="a1"><i></i></div>
+            <div class="node" id="n2"><small>BƯỚC 2</small><strong>Claude Code<br />+ skill</strong></div>
+            <div class="arrow" id="a2"><i></i></div>
+            <div class="node" id="n3"><small>BƯỚC 3</small><strong>HTML<br />+ GSAP</strong></div>
+            <div class="arrow" id="a3"><i></i></div>
+            <div class="node last" id="n4"><small>KẾT QUẢ</small><strong>video.mp4</strong></div>
+          </div>
+          <div class="note" id="s3-note">Cùng input, cùng khung hình: <b>render lặp lại được</b></div>
+        </div>
+      </section>
+
+      <!-- scene 4: command -->
+      <section id="s4" class="clip" data-start="12.8" data-duration="4.2" data-track-index="1">
+        <div class="stage" id="s4-in">
+          <div class="tag" id="s4-tag">Thử ngay</div>
+          <h2 class="head" id="s4-head">Một lệnh để render</h2>
+          <div class="term" id="term">
+            <div class="top"><i></i><i></i><i></i></div>
+            <div class="body">
+              <div><span class="prompt">$ </span><span id="typed"></span><span class="cursor" id="cursor"></span></div>
+              <div class="ok" id="ok-line">✓ demo-video.mp4 · 1920×1080 · 17s</div>
+            </div>
+          </div>
+          <div class="foot" id="s4-foot">Apache-2.0 · Node 22+ · FFmpeg</div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // Split the typed command into per-character spans (deterministic, seek-safe).
+      const cmd = "npx hyperframes render";
+      const typed = document.getElementById("typed");
+      cmd.split("").forEach((c) => {
+        const s = document.createElement("span");
+        s.className = "ch";
+        s.textContent = c === " " ? " " : c;
+        typed.appendChild(s);
+      });
+
+      const E = "power3.out";
+      const fadeOut = (sel, end) => tl.to(sel, { opacity: 0, y: -18, duration: 0.35, ease: "power2.in" }, end - 0.35);
+
+      // ---- scene 1 (0 - 3.5) ----
+      tl.fromTo("#s1-tag", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: E }, 0.15);
+      tl.fromTo("#s1-l1", { yPercent: 110 }, { yPercent: 0, duration: 0.7, ease: "expo.out" }, 0.35);
+      tl.fromTo("#s1-l2", { yPercent: 110 }, { yPercent: 0, duration: 0.7, ease: "expo.out" }, 0.55);
+      tl.fromTo("#s1-sub", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, 1.05);
+      tl.fromTo("#s1-bar", { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: "power3.inOut" }, 1.3);
+      fadeOut("#s1-in", 3.5);
+
+      // ---- scene 2 (3.5 - 8.5) ----
+      const s2 = 3.5;
+      tl.fromTo("#s2-tag", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.45, ease: E }, s2 + 0.1);
+      tl.fromTo("#s2-head", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, s2 + 0.25);
+      ["#c1", "#c2", "#c3"].forEach((id, i) => {
+        tl.fromTo(
+          id,
+          { opacity: 0, y: 60, scale: 0.96 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: "back.out(1.3)" },
+          s2 + 0.8 + i * 0.35
+        );
+      });
+      fadeOut("#s2-in", s2 + 5);
+
+      // ---- scene 3 (8.5 - 12.8) ----
+      const s3 = 8.5;
+      tl.fromTo("#s3-tag", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.45, ease: E }, s3 + 0.1);
+      tl.fromTo("#s3-head", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, s3 + 0.25);
+      const steps = [
+        ["#n1", "#a1"],
+        ["#n2", "#a2"],
+        ["#n3", "#a3"],
+        ["#n4", null],
+      ];
+      steps.forEach(([node, arrow], i) => {
+        const t = s3 + 0.8 + i * 0.6;
+        tl.fromTo(node, { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(1.5)" }, t);
+        if (arrow) {
+          tl.fromTo(arrow + " i", { scaleX: 0 }, { scaleX: 1, duration: 0.4, ease: "power2.inOut" }, t + 0.3);
+          tl.fromTo(arrow, { "--tip": 0 }, { "--tip": 1, duration: 0.1 }, t + 0.65);
+        }
+      });
+      tl.fromTo("#s3-note", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, s3 + 3.2);
+      fadeOut("#s3-in", s3 + 4.3);
+
+      // ---- scene 4 (12.8 - 16) ----
+      const s4 = 12.8;
+      tl.fromTo("#s4-tag", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.45, ease: E }, s4 + 0.1);
+      tl.fromTo("#s4-head", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, s4 + 0.25);
+      tl.fromTo("#term", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.6, ease: E }, s4 + 0.5);
+      tl.fromTo(".ch", { opacity: 0 }, { opacity: 1, duration: 0.01, stagger: 0.055 }, s4 + 1.0);
+      tl.fromTo("#cursor", { opacity: 1 }, { opacity: 0, duration: 0.01, repeat: 7, repeatDelay: 0.24, yoyo: true }, s4 + 1.0);
+      tl.fromTo("#ok-line", { opacity: 0, x: -16 }, { opacity: 1, x: 0, duration: 0.4, ease: E }, s4 + 2.35);
+      tl.fromTo("#s4-foot", { opacity: 0 }, { opacity: 1, duration: 0.5 }, s4 + 2.5);
+      fadeOut("#s4-in", s4 + 4.2);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>
