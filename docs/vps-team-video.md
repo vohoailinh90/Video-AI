@@ -70,7 +70,10 @@ Có 13 mutation check cho script này (`tests/mutations/video_gates.yaml`).
   Ban Nha, Pháp, Hindi, Ý, Bồ Đào Nha (`hyperframes tts --list`).
 - **Tiếng Việt: Kokoro không có.** Hãy tự thu âm, hoặc tạo bằng công cụ TTS tiếng Việt
   bên ngoài, đặt file vào `assets/audio/` và ghi tên từng file trong `request.md`. Spec
-  sẽ chỉ định file nào cho cảnh nào, coder chỉ ghép và cân âm.
+  sẽ chỉ định file nào cho cảnh nào, coder chỉ ghép và cân âm. Danh sách công cụ TTS/STT
+  tiếng Việt (kèm giấy phép, chưa chạy thử) ở [`docs/vietnamese-audio.md`](vietnamese-audio.md);
+  team không gọi chúng: bạn tạo clip bên ngoài rồi đặt vào `videos/<id>/assets/audio/`, và ghi
+  giấy phép của model trong `request.md` (audit BLOCK file nhị phân không có giấy phép).
 - **Không bật TTS cần key (Gemini, HeyGen, ElevenLabs):** mỗi container chỉ nhận key
   của provider model nó chạy, và code do model viết chạy ngay cạnh key. Đưa thêm một key
   TTS vào worker là phá ranh giới đó. HeyGen cũng cần đăng nhập OAuth tương tác.
