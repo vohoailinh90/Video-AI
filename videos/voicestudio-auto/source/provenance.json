@@ -1,0 +1,8 @@
+{
+  "copied_from": "/home/user/video-ai/tests/fixtures/voicestudio.json",
+  "sha256": "d3f2c2e12dd985bfe26ccfe81fbd6db60458bf177af8ff7650eacd03cb14a975",
+  "last_commit_of_file": null,
+  "repo": "debpalash/VoiceStudio",
+  "scanned": "2026-10-13",
+  "generated_by": "scripts/radar/make_video.py scaffold"
+}
