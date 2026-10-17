@@ -1,12 +1,11 @@
 # Video thử: VoiceStudio (tự động từ bài GitHub Radar 2026-10-13)
 
-Video 70.8 giây, 1920×1080, 30 khung hình/giây, 5 cảnh, lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền tự tạo.
+Video 71.2 giây, 1920×1080, 30 khung hình/giây, 5 cảnh, lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền tự tạo.
 File này do `scripts/radar/make_video.py` tạo ra; cách làm và giới hạn: `docs/radar-to-video.md`.
 
 ## Nguồn
 
-`source/draft-vi.json` là bản sao nguyên văn của file bài `/home/user/video-ai/tests/fixtures/voicestudio.json` (bản ghi cuối cùng của file: `None`,
-sha256 `d3f2c2e12dd985bf...`). Repo được viết về: `debpalash/VoiceStudio`. Video không dùng mã, hình hay âm thanh nào của repo đó.
+`source/draft-vi.json` là bản sao nguyên văn của file `digests/2026-10-13/voicestudio/draft-vi.json` trong repo `https://github.com/vohoailinh90/Github-radar` (bản ghi cuối cùng của file: `d375c0a04d23171a105b51b974478f192fb55987 2026-10-13`); video này được dựng từ bản chép giống hệt từng byte của nó trong `tests/fixtures/voicestudio.json` (so bằng sha256) (sha256 `d3f2c2e12dd985bf...`). Repo được viết về: `debpalash/VoiceStudio`. Video không dùng mã, hình hay âm thanh nào của repo đó.
 Cảnh, lời đọc và chữ trên màn hình đều lấy từ các trường của bài; mỗi dòng của `voiceover.json` ghi trường nó lấy (`source`).
 
 ## Chạy lại
@@ -39,8 +38,8 @@ Sửa lời đọc trong `voiceover.json` rồi chạy `make_video.py voice vide
 
 - Cổng đối chiếu bài (`check_facts.py`): checked 9 lines and 34 on-screen text pieces (1 numbers in narration): all traced to the source
 - `npm run check`: 0 error(s), 6 warning(s), 0 info(s) | ◇  Check passed
-- File MP4: 70.8 giây; âm thanh cả file trung bình -20.6 dB, đỉnh -1.3 dB
-- PhoWhisper-small nghe lại âm thanh cắt từ MP4: sai 32/223 từ (14%). Máy nghe lại không thay được người nghe: từ tiếng Anh đọc kiểu Việt hóa có thể vẫn dễ hiểu với người Việt.
+- File MP4: 71.2 giây; âm thanh cả file trung bình -20.5 dB, đỉnh -1.3 dB
+- PhoWhisper-small nghe lại âm thanh cắt từ MP4: sai 29/226 từ (13%). Máy nghe lại không thay được người nghe: từ tiếng Anh đọc kiểu Việt hóa có thể vẫn dễ hiểu với người Việt.
 
 
 ## Giới hạn
