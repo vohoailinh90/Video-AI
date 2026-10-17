@@ -337,6 +337,26 @@ class ReviewFindings(unittest.TestCase):
         self.assertIn("step7", output)
 
 
+    def test_a_partial_redo_keeps_the_voice_of_the_project(self):
+        doc, report = {"voice": "Mai Anh"}, {"voice": {"voice": "Hải Đăng"}}
+        self.assertEqual(make_video.resolve_voice(None, doc, report, True), "Mai Anh")        # the project's own record wins
+        self.assertEqual(make_video.resolve_voice(None, {}, report, True), "Hải Đăng")        # else the report's
+        self.assertEqual(make_video.resolve_voice(None, {}, {}, True), make_video.DEFAULT_VOICE)
+        self.assertEqual(make_video.resolve_voice(None, doc, report, False), "Mai Anh")       # a full redo keeps it too
+        self.assertEqual(make_video.resolve_voice("Mai Anh", doc, report, True), "Mai Anh")
+        self.assertEqual(make_video.resolve_voice("Thái Sơn", doc, report, False), "Thái Sơn")  # a full redo may change it
+        with self.assertRaises(SystemExit):                                                    # a partial one may not: two narrators
+            make_video.resolve_voice("Thái Sơn", doc, report, True)
+
+    def test_the_recorded_voice_survives_rewriting_voiceover_json(self):
+        plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertNotIn("voice", doc)
+        doc["voice"] = "Mai Anh"
+        self.assertEqual(make_video.voiceover_doc(plan, tl, doc)["voice"], "Mai Anh")
+
+
 class Narration(unittest.TestCase):
     def test_reworded_lines_are_kept_and_judged_by_the_gate(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")

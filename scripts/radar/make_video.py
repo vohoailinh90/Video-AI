@@ -129,6 +129,8 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
             line["speak"] = spoken
         lines.append(line)
     doc = {"allow": (existing or {}).get("allow", [])}
+    if (existing or {}).get("voice"):
+        doc["voice"] = existing["voice"]                        # the narrator of the clips in assets/
     if plan["try"] and plan["try"]["commands"]:
         doc["commands_shown"] = len(plan["try"]["commands"])    # the terminal's commands the gate must find on screen, exactly
     doc["lines"] = lines
@@ -253,6 +255,16 @@ def cmd_scaffold(args) -> Path:
 
 
 # ----------------------------------------------------------------------------------------------------------------- voice
+def resolve_voice(requested, doc, report, redoing_some_lines) -> str:
+    """The narrator for this run. A project keeps one voice: `voice` in voiceover.json (else the report's), else the default.
+    Redoing only some lines with another voice would mix two narrators in one video, so that is refused."""
+    recorded = doc.get("voice") or report.get("voice", {}).get("voice")
+    if requested and recorded and requested != recorded and redoing_some_lines:
+        fail(f"this video is narrated by {recorded}; --only with --voice {requested!r} would mix two voices. "
+             f"Redo every line (no --only) to change the voice, or drop --voice to keep {recorded}")
+    return requested or recorded or DEFAULT_VOICE
+
+
 def tool_env(base_env, hf_home):
     env = dict(base_env)
     if hf_home:
@@ -273,6 +285,8 @@ def cmd_voice(args, project=None) -> dict:
     unknown = [i for i in only if i not in ids]
     if unknown:
         fail(f"not a line of voiceover.json: {unknown}")
+    voice_name = resolve_voice(args.voice, doc, load_report(project), set(only) != set(ids))
+    doc["voice"] = voice_name
     takes_dir = REPO / "build" / project.name / "takes"
     shutil.rmtree(takes_dir, ignore_errors=True)
     tts_env, asr_env = tool_env(os.environ, args.tts_hf_home), tool_env(os.environ, args.asr_hf_home)
@@ -281,7 +295,7 @@ def cmd_voice(args, project=None) -> dict:
     for take in range(1, args.takes + 1):
         out = takes_dir / f"take{take}"
         print(f"take {take}/{args.takes}: synthesizing {len(only)} line(s) ...", flush=True)
-        synth = run([args.tts_python, "-I", VO / "synth.py", "--lines", project / "voiceover.json", "--voice", args.voice,
+        synth = run([args.tts_python, "-I", VO / "synth.py", "--lines", project / "voiceover.json", "--voice", voice_name,
                      "--out", out, "--only", ",".join(only)], env=tts_env)
         if synth.returncode:
             fail("synth.py failed:\n" + synth.stderr[-1500:])
@@ -313,8 +327,8 @@ def cmd_voice(args, project=None) -> dict:
     make_pad(project / "assets" / "pad.wav", tl["duration"])
 
     report = load_report(project)
-    voice = report.setdefault("voice", {"voice": args.voice, "chosen": {}})
-    voice["voice"], voice["takes"], voice["asr"] = args.voice, args.takes, bool(args.asr_python)
+    voice = report.setdefault("voice", {"voice": voice_name, "chosen": {}})
+    voice["voice"], voice["takes"], voice["asr"] = voice_name, args.takes, bool(args.asr_python)
     for line_id, best in chosen.items():
         share = (best["edits"] / best["ref_words"]) if best["edits"] is not None and best["ref_words"] else None
         voice["chosen"][line_id] = {**best, "wer": None if share is None else round(share, 3), "flagged": bool(share is not None and share > TAKE_WORRY)}
@@ -367,6 +381,8 @@ def cmd_render(args, project=None) -> dict:
     final = final_mix_wer(args, project, mp4)
 
     report = load_report(project)
+    if not report.get("voice", {}).get("voice") and doc.get("voice"):     # no report (a fresh checkout): the project still says who narrates
+        report.setdefault("voice", {})["voice"] = doc["voice"]
     report["render"] = {"check": check_line.replace("check: ", ""), "duration": round(seconds, 2), "mean_db": mean, "peak_db": peak,
                         "warnings": warnings, "final_mix": final}
     report["gate"] = {"ok": True, "output": gate_output}
@@ -495,7 +511,7 @@ def add_voice_args(sub):
     sub.add_argument("--tts-hf-home", help="HF_HOME of the TTS environment (also sets HF_HUB_OFFLINE=1)")
     sub.add_argument("--asr-hf-home", help="HF_HOME of the ASR environment (also sets HF_HUB_OFFLINE=1)")
     sub.add_argument("--takes", type=int, default=3, help="takes per line (default: %(default)s)")
-    sub.add_argument("--voice", default=DEFAULT_VOICE, help="VieNeu-TTS preset voice (default: %(default)s)")
+    sub.add_argument("--voice", help=f"VieNeu-TTS preset voice (default: the voice the project already has, else {DEFAULT_VOICE})")
 
 
 def main() -> int:
