@@ -39,7 +39,10 @@ AUDIO_NUMBER_KEYS = {"min_coverage", "lufs_min", "lufs_max", "max_peak_db", "max
 AUDIO_KEYS = AUDIO_NUMBER_KEYS | {"required"}
 SILENCE_FLOOR_DB = -45  # below this a stretch counts as silence
 SILENCE_MIN_S = 0.2  # silencedetect reports stretches at least this long: short enough to see a trailing one that is
-EOF_EDGE_S = 0.25  # only completed by the missing tail of the audio. A silence ending this close to the stream's end reaches it
+# only completed by the missing tail of the audio.
+EOF_EDGE_S = 0.1  # A silence that ends this close to the stream's end (or starts this close to its start) reaches that edge: ffmpeg
+# closes the last one at the final frame, a frame or two short of the stream's length. Audible sound shorter than this is not
+# told apart from the edge and counts as silence, which can only make the gate stricter.
 LUFS_RE = re.compile(r"Integrated loudness:\s*\n\s*I:\s*(-?[\d.]+|-inf)\s*LUFS")
 PEAK_RE = re.compile(r"True peak:\s*\n\s*Peak:\s*(-?[\d.]+|-inf)\s*dBFS")
 SIL_START_RE = re.compile(r"silence_start:\s*(-?[\d.]+)")

@@ -762,11 +762,14 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
     stopped: list[str] = []
     finished = threading.Event()
 
+    def too_big(grown: int) -> str:
+        return f"\n[team] workspace grew by {grown} bytes (limit {workspace_growth}): container stopped\n"
+
     def guard(proc) -> None:
         while not finished.wait(WORKSPACE_POLL_S):
             grown = disk_usage(workspace) - baseline
             if grown > workspace_growth:
-                stopped.append(f"\n[team] workspace grew by {grown} bytes (limit {workspace_growth}): container stopped\n")
+                stopped.append(too_big(grown))
                 subprocess.run(["docker", "kill", name], capture_output=True)
                 proc.kill()
                 return
@@ -776,8 +779,10 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         reader = threading.Thread(target=pump, args=(proc.stdout, sink), daemon=True)
         reader.start()
+        watcher = None
         if workspace and workspace_growth > 0:
-            threading.Thread(target=guard, args=(proc,), daemon=True).start()
+            watcher = threading.Thread(target=guard, args=(proc,), daemon=True)
+            watcher.start()
         note = b""
         try:
             rc = proc.wait(timeout=timeout)
@@ -790,6 +795,13 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
         finally:
             finished.set()
         reader.join(timeout=30)
+        if watcher:
+            watcher.join()
+            # The guard looks every WORKSPACE_POLL_S: a container can write past the limit and exit between two looks, and
+            # finishing wakes the guard only to leave. So the last measurement is taken here, before the exit is accepted.
+            grown = 0 if stopped else disk_usage(workspace) - baseline
+            if grown > workspace_growth:
+                stopped.append(too_big(grown))
         if stopped:
             rc, note = 125, stopped[0].encode()
         if note:

@@ -471,8 +471,8 @@ mutations:
   replace: "        written = 0\n"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "a container's workspace is not watched"
-  find: "        if workspace and workspace_growth > 0:\n            threading.Thread(target=guard"
-  replace: "        if False:\n            threading.Thread(target=guard"
+  find: "        if workspace and workspace_growth > 0:\n            watcher = threading.Thread(target=guard"
+  replace: "        if False:\n            watcher = threading.Thread(target=guard"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
 - label: "workspace growth is measured from an empty directory"
   find: "    baseline = disk_usage(workspace) if workspace and workspace_growth > 0 else 0\n"
@@ -574,3 +574,7 @@ mutations:
   find: "    why = seals_problem(f)\n    if why:\n        return None, f\"{why}: run setup"
   replace: "    why = None\n    if why:\n        return None, f\"{why}: run setup"
   test: tests.test_team.PipelineTests.test_a_seals_symlink_left_by_an_older_install_is_neither_written_nor_believed
+- label: "a container that exits between two polls is accepted without a last look at its workspace"
+  find: "            grown = 0 if stopped else disk_usage(workspace) - baseline\n"
+  replace: "            grown = 0\n"
+  test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_and_exits_before_the_first_poll_is_still_caught

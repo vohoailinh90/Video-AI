@@ -122,3 +122,7 @@ mutations:
   find: "                trailing = audio_end - start + lead(start)\n            else:"
   replace: "                trailing = audio_end - start\n            else:"
   test: tests.test_video_gates.ParserTests.test_audio_that_is_silent_throughout_and_starts_late_is_one_silence_with_the_lead
+- label: "audible sound just before the end of the stream is read as part of the trailing silence"
+  find: "EOF_EDGE_S = 0.1  #"
+  replace: "EOF_EDGE_S = 0.25  #"
+  test: tests.test_video_gates.ParserTests.test_a_silence_that_stops_short_of_the_end_of_the_stream_is_not_the_trailing_one

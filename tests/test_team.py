@@ -1359,6 +1359,24 @@ class PipelineTests(Sandbox):
                                     team.base_env(), self.tmp / "q.log", workspace=work, workspace_growth=20_000_000)
         self.assertEqual(quiet[0], 0)
 
+    def test_a_container_that_fills_its_workspace_and_exits_before_the_first_poll_is_still_caught(self):
+        # Codex's twenty-second review: the guard only measures every WORKSPACE_POLL_S, and finishing woke it to exit without a
+        # last look, so a container that wrote past the limit and exited inside one interval was accepted.
+        work = self.tmp / "quick-workspace"
+        work.mkdir()
+        code = f"open({str(work / 'big.bin')!r}, 'wb').write(b'x' * 30_000_000)"
+        log = self.tmp / "quick.log"
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 60):
+            rc, output = team.run_docker([sys.executable, "-c", code], "t-quick", 120, team.base_env(), log,
+                                         workspace=work, workspace_growth=5_000_000)
+        self.assertEqual(rc, 125)
+        self.assertIn("workspace grew", output)
+        self.assertIn("workspace grew", log.read_text())
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 60):
+            ok = team.run_docker([sys.executable, "-c", "print('small')"], "t-small", 60, team.base_env(),
+                                 self.tmp / "small.log", workspace=work, workspace_growth=50_000_000)
+        self.assertEqual(ok[0], 0, "an exit inside the limit is still accepted, and nothing waits for the poll interval")
+
     def test_a_worker_that_fills_the_checkout_fails_and_its_files_are_discarded(self):
         f = self.new_feature()
         self.write_env({**MODELS, "TEAM_WORKSPACE_GROWTH_BYTES": "5000000"})

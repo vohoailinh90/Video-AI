@@ -109,6 +109,20 @@ class ParserTests(unittest.TestCase):
         # The first silence begins where the audio begins, so the 2.476 s before it belong to the same stretch of nothing.
         self.assertEqual([round(g, 2) for g in gaps], [3.5])
 
+    def test_a_silence_that_stops_short_of_the_end_of_the_stream_is_not_the_trailing_one(self):
+        # Codex's twenty-second review: 10 s of video, 9 s of audio, silent from 5.0 to 8.75 s and audible for the last 0.25 s.
+        # The longest silences are 3.75 s and the 1 s with no audio at all. Counting the audible 0.25 s as silence made
+        # one 5 s gap.
+        text = ("[silencedetect @ 0x1] silence_start: 5.0\n"
+                "[silencedetect @ 0x1] silence_end: 8.75 | silence_duration: 3.75\n")
+        gaps, trailing = gates.parse_silences(text, audio_length=9.0)
+        self.assertEqual(([round(g, 2) for g in gaps], trailing), ([3.75], 0.0))
+        checks = gates.evaluate(info(duration=10.0, audio_duration=9.0), (-14.0, -3.0), gaps, {**EXPECT, "duration_s": 10}, trailing)
+        self.assertEqual(failed(checks), [])
+        # ffmpeg closes a real trailing silence at the stream's last frame, which is within a frame or two of its end.
+        closed = text.replace("8.75 | silence_duration: 3.75", "8.97 | silence_duration: 3.97")
+        self.assertAlmostEqual(gates.parse_silences(closed, audio_length=9.0)[1], 4.0, places=2)
+
     def test_audio_that_is_silent_throughout_and_starts_late_is_one_silence_with_the_lead(self):
         gaps, trailing = gates.parse_silences("[silencedetect @ 0x1] silence_start: 3.0\n", audio_length=10.0, audio_start=3.0)
         self.assertEqual(gaps, [])
