@@ -775,6 +775,57 @@ class ReviewFindings(unittest.TestCase):
         self.assertTrue(all(check_facts.vietnamese_syllable(word) for word in ("Việt", "Đà", "nghiêng", "ừ", "ơ", "Huế", "yêu", "khuỷu")))
         self.assertFalse(any(check_facts.vietnamese_syllable(word) for word in ("GPTé", "npmé", "C++é", "Müller", "café")))
 
+    def test_text_that_touches_in_the_markup_is_read_as_the_browser_shows_it(self):
+        def read(markup):
+            parser = check_facts.Visible()
+            parser.feed(f"<body>{markup}</body>")
+            parser.close()
+            return parser.glued
+        self.assertEqual(read("<div><span>Open</span><span>AI</span></div>"), ["OpenAI"])
+        self.assertEqual(read("<b>G</b><i>P</i><span>T</span>"), ["GPT"])                      # a run of any length
+        self.assertEqual(read("<span>Open </span><span>AI</span>"), [])                       # a space on either side is a gap
+        self.assertEqual(read("<span>Open</span> <span>AI</span>"), [])
+        self.assertEqual(read("<span>Open</span>\n<span>AI</span>"), [])
+        self.assertEqual(read("<div>Open</div><div>AI</div>"), [])                            # blocks and line breaks separate
+        self.assertEqual(read("<p>Open</p><p>AI</p>"), [])
+        self.assertEqual(read("<span>Open</span><br><span>AI</span>"), [])
+        self.assertEqual(read("<b>62.958</b><span data-label>sao</span>"), ["62.958sao"])       # a template label touches too
+        # end to end: both words are in the digest, the name made of them is not
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        digest["facts"]["first"], digest["facts"]["second"] = "Open", "AI"
+        status, _ = run_gate(digest, doc, html)
+        self.assertEqual(status, 0)
+        status, output = run_gate(digest, doc, html.replace("</body>", "<div><span>Open</span><span>AI</span></div></body>", 1))
+        self.assertEqual(status, 1)
+        self.assertIn("OpenAI", output)
+        status, _ = run_gate(digest, doc, html.replace("</body>", "<div><span>Open</span> <span>AI</span></div></body>", 1))
+        self.assertEqual(status, 0)
+
+    def test_a_character_that_draws_nothing_does_not_split_a_name_or_a_number(self):
+        source = check_facts.blob({"field": "VoiceStudio chạy cục bộ", "n": "1 người, 9%"})
+        untraced = lambda text, source=source: check_facts.untraced(text, source, set())
+        for glued in ("G​P​T", "G‍P‌T", "G­PT", "G⁠P⁠T", "G﻿PT", "G‎PT", "G\x00PT", "G\U000e0041PT"):
+            self.assertEqual(untraced(glued), ["token 'GPT'"], repr(glued))
+        self.assertEqual(untraced("G​P​T", check_facts.blob({"field": "dùng GPT"})), [])        # the name the source has
+        self.assertEqual(check_facts.numbers("tăng 1​9%"), {"19%"})                                   # nor a number
+        self.assertEqual(untraced("1​9%"), ["number 19%"])                                           # 1 and 9% are in the source, 19% is not
+        # a symbol or a space is drawn or is a gap, so it still breaks a word
+        self.assertEqual(untraced("G™P™T"), [])
+        self.assertEqual(untraced("G P　T"), [])
+
+    def test_a_percentage_is_read_whatever_the_case_of_its_words(self):
+        for text in ("19 phần trăm", "19 PHẦN TRĂM", "19 Phần Trăm", "19 phần  trăm", "19 phần trăm", "19%", "19 %", "19％", "19﹪", "19٪"):
+            self.assertEqual(check_facts.numbers(text), {"19%"}, text)
+        plain = check_facts.blob({"fact": "19 người"})
+        for text in ("19 PHẦN TRĂM", "19％", "19 Phần Trăm"):
+            self.assertEqual(check_facts.untraced(text, plain, set()), ["number 19%"], text)             # the source states no percentage
+        self.assertEqual(check_facts.untraced("19 PHẦN TRĂM", check_facts.blob({"fact": "19 phần trăm"}), set()), [])
+        self.assertEqual(check_facts.numbers("19 PHẦN TRĂM".replace("Ầ", "Ầ")), {"19%"})        # decomposed, as pasted text can be
+        self.assertEqual(numbers_vi.speak_text("tăng 19％ và 5﹪"), "tăng mười chín phần trăm và năm phần trăm")
+
     def test_the_narration_has_to_be_in_the_render_not_just_the_music(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)

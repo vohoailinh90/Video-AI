@@ -12,7 +12,7 @@ GROUPS = ["", " nghìn", " triệu", " tỷ"]
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
 VERSION = re.compile(r"(?<=[A-Za-z])-(\d+(?:[.,]\d+)*)(?![\w])")
-NUMBER = re.compile(r"(?:(?<![\w.,\-−+])([-−+])|(?<![\w.,\-−]))(\d+(?:[.,]\d+)*)(\s?%)?(?![\w\-]|[.,]\d)")
+NUMBER = re.compile(r"(?:(?<![\w.,\-−+])([-−+])|(?<![\w.,\-−]))(\d+(?:[.,]\d+)*)(\s?[%％﹪٪])?(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:

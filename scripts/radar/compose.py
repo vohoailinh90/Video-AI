@@ -204,8 +204,8 @@ def how_scene(plan, scene, clips, n, js):
             flow.append(f'<div class="arrow" id="{sid}-a{i}"><i></i></div>')
     parts_html = ""
     if plan["components"]:
-        chips = "".join(
-            f'<div class="part" id="{sid}-pt{i}"><strong>{E(c["name"])}</strong>' + (f'<span>{E(c["evidence"])}</span>' if c["evidence"] else "") + "</div>"
+        chips = "".join(      # a space between the two blocks: the gate reads text that touches in the markup as touching on the screen
+            f'<div class="part" id="{sid}-pt{i}"><strong>{E(c["name"])}</strong>' + (f' <span>{E(c["evidence"])}</span>' if c["evidence"] else "") + "</div>"
             for i, c in enumerate(plan["components"]))
         parts_html = f'<div class="parts-title" id="{sid}-parts-title" data-label>{E(LABELS["parts"])}</div><div class="parts">{chips}</div>'
     markup = f"""
