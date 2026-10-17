@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      :root {
+        --bg: #0b0c10;
+        --ink: #f4f4f5;
+        --muted: #9ca3af;
+        --accent: #ff9d2e;
+        --accent-soft: rgba(255, 157, 46, 0.14);
+        --mint: #5eead4;
+        --line: rgba(255, 255, 255, 0.12);
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        color: var(--ink);
+      }
+      .bg-grid {
+        background:
+          radial-gradient(ellipse 70% 60% at 50% 38%, rgba(255, 157, 46, 0.16), transparent 70%),
+          linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 96px 96px,
+          linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 96px 96px,
+          var(--bg);
+      }
+      .stage {
+        position: absolute;
+        inset: 0;
+        padding: 88px 120px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .tag {
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 28px;
+        letter-spacing: 0.16em;
+        color: var(--accent);
+      }
+      h1.big {
+        font-size: 220px;
+        line-height: 1.02;
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        margin-top: 24px;
+      }
+      h1.big .line {
+        display: block;
+        overflow: hidden;
+        padding-bottom: 14px;
+      }
+      h1.big .line > span {
+        display: block;
+      }
+      h1.big em {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .sub {
+        font-size: 52px;
+        color: var(--muted);
+        margin-top: 30px;
+        font-weight: 500;
+        max-width: 1500px;
+        line-height: 1.25;
+      }
+      .chips {
+        display: flex;
+        gap: 22px;
+        margin-top: 56px;
+      }
+      .chip {
+        border: 2px solid var(--line);
+        border-radius: 999px;
+        padding: 16px 34px;
+        font-size: 36px;
+        font-weight: 650;
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .chip b {
+        color: var(--accent);
+        font-weight: 800;
+      }
+      .scan {
+        margin-top: 34px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 26px;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      h2.head {
+        font-size: 88px;
+        font-weight: 800;
+        letter-spacing: -0.035em;
+        margin-top: 16px;
+        line-height: 1.08;
+      }
+
+      /* scene 2: problem */
+      .problem {
+        display: flex;
+        align-items: center;
+        gap: 36px;
+        margin-top: 70px;
+      }
+      .pains {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        width: 880px;
+      }
+      .pain {
+        border: 2px solid var(--line);
+        border-radius: 24px;
+        padding: 30px 40px;
+        font-size: 40px;
+        font-weight: 650;
+        line-height: 1.2;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+      }
+      .pain::before {
+        content: "";
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--muted);
+        margin-right: 24px;
+        vertical-align: 4px;
+      }
+      .link {
+        position: relative;
+        width: 110px;
+        height: 6px;
+        flex: none;
+      }
+      .link i {
+        position: absolute;
+        inset: 0;
+        background: var(--accent);
+        border-radius: 3px;
+        transform-origin: left center;
+      }
+      .link::after {
+        content: "";
+        position: absolute;
+        right: -2px;
+        top: -12px;
+        border-left: 26px solid var(--accent);
+        border-top: 15px solid transparent;
+        border-bottom: 15px solid transparent;
+        opacity: var(--tip, 0);
+      }
+      .solution {
+        flex: 1;
+        min-height: 380px;
+        border: 2px solid var(--accent);
+        border-radius: 28px;
+        padding: 48px 48px;
+        background: linear-gradient(160deg, var(--accent-soft), rgba(255, 157, 46, 0.03));
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .solution small {
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 26px;
+        letter-spacing: 0.16em;
+        color: var(--accent);
+      }
+      .solution strong {
+        font-size: 56px;
+        line-height: 1.15;
+        font-weight: 780;
+        letter-spacing: -0.03em;
+        margin-top: 20px;
+      }
+
+      /* scene 3: how it works */
+      .flow {
+        display: flex;
+        align-items: center;
+        margin-top: 64px;
+      }
+      .node {
+        width: 470px;
+        height: 200px;
+        flex: none;
+        border-radius: 28px;
+        border: 2px solid var(--line);
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+        display: flex;
+        align-items: center;
+        padding: 0 40px;
+        font-size: 40px;
+        font-weight: 740;
+        letter-spacing: -0.02em;
+        line-height: 1.18;
+      }
+      .node.last {
+        border-color: var(--accent);
+        background: linear-gradient(160deg, var(--accent-soft), rgba(255, 157, 46, 0.03));
+      }
+      .arrow {
+        position: relative;
+        flex: 1;
+        height: 6px;
+      }
+      .arrow i {
+        position: absolute;
+        inset: 0;
+        background: var(--accent);
+        border-radius: 3px;
+        transform-origin: left center;
+      }
+      .arrow::after {
+        content: "";
+        position: absolute;
+        right: -2px;
+        top: -12px;
+        border-left: 26px solid var(--accent);
+        border-top: 15px solid transparent;
+        border-bottom: 15px solid transparent;
+        opacity: var(--tip, 0);
+      }
+      .parts-title {
+        margin-top: 64px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 28px;
+        letter-spacing: 0.16em;
+        color: var(--accent);
+      }
+      .parts {
+        display: flex;
+        gap: 28px;
+        margin-top: 22px;
+      }
+      .part {
+        flex: 1;
+        border: 2px solid var(--line);
+        border-radius: 22px;
+        padding: 28px 34px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .part strong {
+        display: block;
+        font-size: 40px;
+        font-weight: 750;
+        letter-spacing: -0.02em;
+      }
+      .part span {
+        display: block;
+        margin-top: 12px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 26px;
+        line-height: 1.4;
+        color: var(--mint);
+      }
+
+      /* scene 4: lessons */
+      .lessons {
+        display: flex;
+        gap: 36px;
+        margin-top: 70px;
+      }
+      .lesson {
+        flex: 1;
+        border: 2px solid var(--line);
+        border-radius: 28px;
+        padding: 46px 42px 44px;
+        min-height: 450px;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+        display: flex;
+        flex-direction: column;
+      }
+      .lesson p {
+        font-size: 44px;
+        line-height: 1.22;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+      }
+      .lesson .who {
+        margin-top: auto;
+        padding-top: 30px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 26px;
+        line-height: 1.45;
+        color: var(--mint);
+      }
+
+      /* scene 5: caveats + try it */
+      .cols {
+        display: flex;
+        gap: 56px;
+        margin-top: 28px;
+      }
+      .col {
+        flex: 1;
+      }
+      .col h2.head {
+        font-size: 72px;
+        margin-top: 0;
+      }
+      .caveat {
+        margin-top: 26px;
+        border: 2px solid var(--line);
+        border-left: 8px solid var(--accent);
+        border-radius: 22px;
+        padding: 26px 32px;
+        font-size: 33px;
+        line-height: 1.34;
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .caveat.minor {
+        border-left-color: var(--muted);
+        color: var(--muted);
+      }
+      .term {
+        margin-top: 26px;
+        border: 2px solid var(--line);
+        border-radius: 24px;
+        background: #111318;
+        overflow: hidden;
+      }
+      .term .top {
+        height: 56px;
+        border-bottom: 2px solid var(--line);
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 26px;
+      }
+      .term .top i {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #3a3f4a;
+      }
+      .term .body {
+        padding: 34px 40px 38px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 40px;
+        line-height: 1.75;
+      }
+      .term .prompt {
+        color: var(--accent);
+      }
+      .term .cmd {
+        display: inline-block;
+      }
+      .note {
+        margin-top: 22px;
+        font-size: 27px;
+        line-height: 1.38;
+        color: var(--muted);
+      }
+      .foot {
+        position: absolute;
+        left: 120px;
+        bottom: 56px;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 28px;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="53.6"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="bg" class="clip bg-grid" data-start="0" data-duration="53.6" data-track-index="0"></div>
+
+      <!-- music bed (generated locally with ffmpeg, see README) -->
+      <audio id="music-bed" src="assets/pad.wav" data-start="0" data-duration="53.6" data-track-index="9" data-volume="0.6"></audio>
+
+      <!-- Vietnamese narration: VieNeu-TTS v3 Turbo, default voice Hải Đăng. start, duration and volume are written by scripts/vo/revoice.py from voiceover.json -->
+      <audio id="vo-1" src="assets/vo-1.wav" data-start="0.6" data-duration="4.89" data-track-index="10" data-volume="0.84"></audio>
+      <audio id="vo-2" src="assets/vo-2.wav" data-start="7.2" data-duration="9.37" data-track-index="11" data-volume="0.92"></audio>
+      <audio id="vo-3" src="assets/vo-3.wav" data-start="18.4" data-duration="3.61" data-track-index="12" data-volume="0.94"></audio>
+      <audio id="vo-4" src="assets/vo-4.wav" data-start="22.5" data-duration="3.93" data-track-index="13" data-volume="1.15"></audio>
+      <audio id="vo-5" src="assets/vo-5.wav" data-start="26.9" data-duration="4.65" data-track-index="14" data-volume="0.93"></audio>
+      <audio id="vo-6" src="assets/vo-6.wav" data-start="33.3" data-duration="9.45" data-track-index="15" data-volume="1"></audio>
+      <audio id="vo-7" src="assets/vo-7.wav" data-start="44.5" data-duration="4.57" data-track-index="16" data-volume="0.9"></audio>
+      <audio id="vo-8" src="assets/vo-8.wav" data-start="49.6" data-duration="2.33" data-track-index="17" data-volume="1.14"></audio>
+
+      <!-- scene 1: name and numbers -->
+      <section id="s1" class="clip" data-start="0" data-duration="6.6" data-track-index="1">
+        <div class="stage" id="s1-in">
+          <div class="tag" id="s1-tag">debpalash/VoiceStudio</div>
+          <h1 class="big"><span class="line"><span id="s1-l1">Voice<em>Studio</em></span></span></h1>
+          <div class="sub" id="s1-sub">Bộ công cụ AI xử lý giọng nói cục bộ đa ngôn ngữ</div>
+          <div class="chips">
+            <div class="chip" id="s1-c1"><b>62.958</b> sao</div>
+            <div class="chip" id="s1-c2"><b>7.006</b> fork</div>
+            <div class="chip" id="s1-c3">AGPL-3.0</div>
+            <div class="chip" id="s1-c4">Python</div>
+          </div>
+          <div class="scan" id="s1-scan">Số liệu theo ngày quét 2026-10-13</div>
+        </div>
+      </section>
+
+      <!-- scene 2: the problem -->
+      <section id="s2" class="clip" data-start="6.6" data-duration="11.1" data-track-index="1">
+        <div class="stage" id="s2-in">
+          <div class="tag" id="s2-tag">VoiceStudio</div>
+          <h2 class="head" id="s2-head">Vấn đề nó giải quyết</h2>
+          <div class="problem">
+            <div class="pains">
+              <div class="pain" id="p1">Chi phí dịch vụ đám mây</div>
+              <div class="pain" id="p2">Rủi ro lộ dữ liệu âm thanh</div>
+              <div class="pain" id="p3">Cấu hình mô hình AI trên máy tính cá nhân phức tạp</div>
+            </div>
+            <div class="link" id="lk"><i></i></div>
+            <div class="solution" id="sol">
+              <small>VoiceStudio</small>
+              <strong>Ứng dụng desktop trọn gói, chạy khép kín trên máy</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- scene 3: how it works -->
+      <section id="s3" class="clip" data-start="17.7" data-duration="15" data-track-index="1">
+        <div class="stage" id="s3-in">
+          <div class="tag" id="s3-tag">VoiceStudio</div>
+          <h2 class="head" id="s3-head">Nó chạy như thế nào</h2>
+          <div class="flow">
+            <div class="node" id="n1">Nhập dữ liệu âm thanh và văn bản</div>
+            <div class="arrow" id="a1"><i></i></div>
+            <div class="node" id="n2">Kích hoạt mô hình suy luận</div>
+            <div class="arrow" id="a2"><i></i></div>
+            <div class="node last" id="n3">Xuất sản phẩm và kết nối agent</div>
+          </div>
+          <div class="parts-title" id="parts-title">Các mảnh ghép</div>
+          <div class="parts">
+            <div class="part" id="pt1"><strong>Electron UI</strong><span>electron/</span></div>
+            <div class="part" id="pt2"><strong>Python Backend</strong><span>backend/</span></div>
+            <div class="part" id="pt3"><strong>Hardware Runtime Engine</strong><span>NVIDIA CUDA · Apple Silicon MPS · CPU</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- scene 4: what to learn -->
+      <section id="s4" class="clip" data-start="32.7" data-duration="11.2" data-track-index="1">
+        <div class="stage" id="s4-in">
+          <div class="tag" id="s4-tag">VoiceStudio</div>
+          <h2 class="head" id="s4-head">Học được gì từ thiết kế này</h2>
+          <div class="lessons">
+            <div class="lesson" id="l1">
+              <p>Tách rõ giao diện desktop Electron và backend AI bằng Python</p>
+              <div class="who">electron/ · backend/</div>
+            </div>
+            <div class="lesson" id="l2">
+              <p>Chạy được từ card đồ họa cao cấp đến chỉ CPU</p>
+              <div class="who">NVIDIA CUDA · Apple Silicon MPS · CPU</div>
+            </div>
+            <div class="lesson" id="l3">
+              <p>Mở cho AI agent điều khiển qua giao thức MCP</p>
+              <div class="who">Model Context Protocol</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- scene 5: caveats and try it -->
+      <section id="s5" class="clip" data-start="43.9" data-duration="9.7" data-track-index="1">
+        <div class="stage" id="s5-in">
+          <div class="tag" id="s5-tag">VoiceStudio</div>
+          <div class="cols">
+            <div class="col" id="col-l">
+              <h2 class="head" id="s5-head-l">Lưu ý trước khi dùng</h2>
+              <div class="caveat" id="cv1">Mã nguồn dùng giấy phép AGPL-3.0, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng.</div>
+              <div class="caveat minor" id="cv2">Chạy trên CPU không có card đồ họa sẽ chậm hơn và yêu cầu khoảng 5 GB dung lượng trống để cài PyTorch.</div>
+            </div>
+            <div class="col" id="col-r">
+              <h2 class="head" id="s5-head-r">Tự thử</h2>
+              <div class="term" id="term">
+                <div class="top"><i></i><i></i><i></i></div>
+                <div class="body">
+                  <div class="row" id="r1"><span class="prompt">$</span> <span class="cmd" id="cmd1">bun install</span></div>
+                  <div class="row" id="r2"><span class="prompt">$</span> <span class="cmd" id="cmd2">bun run setup:api</span></div>
+                  <div class="row" id="r3"><span class="prompt">$</span> <span class="cmd" id="cmd3">bun run dev</span></div>
+                </div>
+              </div>
+              <div class="note" id="s5-note">Chuẩn bị trước môi trường Bun và các gói phụ thuộc Python để khởi chạy bản phát triển từ mã nguồn.</div>
+            </div>
+          </div>
+        </div>
+        <div class="foot" id="s5-foot">github.com/debpalash/VoiceStudio</div>
+      </section>
+    </div>
+
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      const E = "power3.out";
+      const fadeOut = (sel, end) => tl.to(sel, { opacity: 0, y: -18, duration: 0.35, ease: "power2.in" }, end - 0.35);
+      const rise = (sel, at, dur = 0.55) => tl.fromTo(sel, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: dur, ease: E }, at);
+      const pop = (sel, at) => tl.fromTo(sel, { opacity: 0, y: 50, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.65, ease: "back.out(1.3)" }, at);
+      const draw = (arrow, at) => {
+        tl.fromTo(arrow + " i", { scaleX: 0 }, { scaleX: 1, duration: 0.4, ease: "power2.inOut" }, at);
+        tl.fromTo(arrow, { "--tip": 0 }, { "--tip": 1, duration: 0.1 }, at + 0.35);
+      };
+
+      // scene starts, equal to the data-start of each <section>
+      const S1 = 0, S2 = 6.6, S3 = 17.7, S4 = 32.7, S5 = 43.9;
+
+      // ---- scene 1: name and numbers (voice 0.6 - 5.5) ----
+      rise("#s1-tag", S1 + 0.15, 0.5);
+      tl.fromTo("#s1-l1", { yPercent: 110 }, { yPercent: 0, duration: 0.8, ease: "expo.out" }, S1 + 0.3);
+      rise("#s1-sub", S1 + 1.0, 0.6);
+      ["#s1-c1", "#s1-c2", "#s1-c3", "#s1-c4"].forEach((id, i) => pop(id, S1 + 2.2 + i * 0.35));
+      rise("#s1-scan", S1 + 4.0, 0.6);
+      fadeOut("#s1-in", S1 + 6.6);
+
+      // ---- scene 2: the problem (voice 7.2 - 16.6; pauses 2.9 s and 5.3 s into the clip) ----
+      rise("#s2-tag", S2 + 0.1, 0.45);
+      rise("#s2-head", S2 + 0.25, 0.6);
+      pop("#p1", S2 + 0.8);
+      pop("#p2", S2 + 2.2);
+      pop("#p3", S2 + 3.9);
+      tl.fromTo("#lk i", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.inOut" }, S2 + 6.0);
+      tl.fromTo("#lk", { "--tip": 0 }, { "--tip": 1, duration: 0.1 }, S2 + 6.45);
+      pop("#sol", S2 + 6.5);
+      fadeOut("#s2-in", S2 + 11.1);
+
+      // ---- scene 3: how it works (voice 18.4, 22.5, 26.9) ----
+      rise("#s3-tag", S3 + 0.1, 0.45);
+      rise("#s3-head", S3 + 0.25, 0.6);
+      tl.fromTo("#n1", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.5)" }, S3 + 0.5);
+      tl.fromTo("#n2", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.5)" }, S3 + 4.6);
+      tl.fromTo("#n3", { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.5)" }, S3 + 9.0);
+      draw("#a1", S3 + 4.2);
+      draw("#a2", S3 + 8.6);
+      rise("#parts-title", S3 + 12.0, 0.5);
+      ["#pt1", "#pt2", "#pt3"].forEach((id, i) => rise(id, S3 + 12.3 + i * 0.3, 0.55));
+      fadeOut("#s3-in", S3 + 15);
+
+      // ---- scene 4: what to learn (voice 33.3; pauses 0.9 s, 4.3 s and 6.7 s into the clip) ----
+      rise("#s4-tag", S4 + 0.1, 0.45);
+      rise("#s4-head", S4 + 0.25, 0.6);
+      pop("#l1", S4 + 1.6);
+      pop("#l2", S4 + 5.15);
+      pop("#l3", S4 + 7.4);
+      fadeOut("#s4-in", S4 + 11.2);
+
+      // ---- scene 5: caveats and try it (voice 44.5 and 49.6) ----
+      rise("#s5-tag", S5 + 0.1, 0.45);
+      rise("#s5-head-l", S5 + 0.25, 0.6);
+      rise("#cv1", S5 + 0.7, 0.6);
+      rise("#cv2", S5 + 3.3, 0.6);
+      rise("#s5-head-r", S5 + 4.9, 0.6);
+      tl.fromTo("#term", { opacity: 0, y: 36 }, { opacity: 1, y: 0, duration: 0.55, ease: E }, S5 + 5.2);
+      ["#cmd1", "#cmd2", "#cmd3"].forEach((id, i) => {
+        tl.fromTo(id, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, S5 + 5.9 + i * 0.6);
+      });
+      rise("#s5-note", S5 + 7.6, 0.6);
+      rise("#s5-foot", S5 + 8.0, 0.6);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

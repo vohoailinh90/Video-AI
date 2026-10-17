@@ -1,0 +1,45 @@
+{
+  "allow": ["giao", "cho", "ba", "sao"],
+  "lines": [
+    {
+      "id": "vo-1", "start": 0.6, "scene_end": 6.6, "scene": "Mở đầu: tên và số liệu",
+      "text": "VoiceStudio tự nhân bản giọng nói và lồng tiếng ngay trên máy tính, không cần gửi dữ liệu lên đám mây.",
+      "source": ["draft.title", "draft.hook"]
+    },
+    {
+      "id": "vo-2", "start": 7.2, "scene_end": 17.7, "scene": "Vấn đề nó giải quyết",
+      "text": "Nhiều người e ngại chi phí đám mây và rủi ro lộ dữ liệu âm thanh, mà tự cấu hình mô hình AI trên máy lại phức tạp. VoiceStudio gói tất cả vào một ứng dụng desktop chạy khép kín trên máy.",
+      "source": ["draft.problem"]
+    },
+    {
+      "id": "vo-3", "start": 18.4, "scene_end": 32.7, "scene": "Cách chạy, bước 1",
+      "text": "Bạn chọn giọng mẫu hoặc tải âm thanh tham chiếu, rồi nhập văn bản cần đọc.",
+      "source": ["draft.how_it_works.steps[0]"]
+    },
+    {
+      "id": "vo-4", "start": 22.5, "scene_end": 32.7, "scene": "Cách chạy, bước 2",
+      "text": "Phần backend tải mô hình tương ứng, rồi giao việc tính toán cho phần cứng phù hợp.",
+      "source": ["draft.how_it_works.steps[1]"]
+    },
+    {
+      "id": "vo-5", "start": 26.9, "scene_end": 32.7, "scene": "Cách chạy, bước 3",
+      "text": "Kết quả là tệp âm thanh hoàn chỉnh, và có thể điều khiển tự động qua Local API.",
+      "source": ["draft.how_it_works.steps[2]"]
+    },
+    {
+      "id": "vo-6", "start": 33.3, "scene_end": 43.9, "scene": "Học được gì từ thiết kế này",
+      "text": "Ba điều đáng học: giao diện Electron tách riêng khỏi phần xử lý AI viết bằng Python, chạy được từ card đồ họa đến chỉ CPU, và mở cho tác tử AI điều khiển qua MCP.",
+      "source": ["draft.learn[0]", "draft.learn[1]", "draft.learn[2]", "draft.glossary[1]"]
+    },
+    {
+      "id": "vo-7", "start": 44.5, "scene_end": 53.6, "scene": "Lưu ý trước khi dùng",
+      "text": "Lưu ý: mã nguồn dùng giấy phép AGPL, còn trọng số mô hình có điều kiện cấp phép riêng.",
+      "source": ["draft.caveats[0]"]
+    },
+    {
+      "id": "vo-8", "start": 49.6, "scene_end": 53.6, "scene": "Tự thử bằng ba lệnh",
+      "text": "Muốn chạy thử từ mã nguồn, dùng ba lệnh này.",
+      "source": ["draft.try_it"]
+    }
+  ]
+}
