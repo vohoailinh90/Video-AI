@@ -389,7 +389,9 @@ def shown(text: str) -> str:
     return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
-SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)\s+(?=\d)", re.I)    # the words speak_text says for a sign, and their kin
+# the words speak_text says for a sign, and their kin, up to three spaces, colons, equals signs, dashes, opening brackets or quotes before the
+# number; not a full stop, comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
+SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=\d)", re.I)
 
 
 def numbers(text: str) -> set:
