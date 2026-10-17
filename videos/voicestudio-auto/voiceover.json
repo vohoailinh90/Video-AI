@@ -5,7 +5,7 @@
       "id": "vo-1",
       "unit": "hook",
       "start": 0.6,
-      "scene_end": 8.06,
+      "scene_end": 7.3,
       "scene": "Mở đầu: tên và số liệu",
       "text": "VoiceStudio. Tự nhân bản giọng nói và lồng tiếng đa ngôn ngữ ngay trên máy tính mà không cần gửi dữ liệu lên đám mây.",
       "source": [
@@ -16,8 +16,8 @@
     {
       "id": "vo-2",
       "unit": "problem:0",
-      "start": 8.66,
-      "scene_end": 23.97,
+      "start": 7.9,
+      "scene_end": 22.54,
       "scene": "Vấn đề nó giải quyết",
       "text": "Nhiều người sáng tạo nội dung và lập trình viên muốn tạo giọng đọc, lồng tiếng hay phiên âm nhưng e ngại chi phí dịch vụ đám mây cùng rủi ro lộ dữ liệu âm thanh.",
       "source": [
@@ -27,8 +27,8 @@
     {
       "id": "vo-3",
       "unit": "problem:2",
-      "start": 17.83,
-      "scene_end": 23.97,
+      "start": 16.4,
+      "scene_end": 22.54,
       "scene": "Vấn đề nó giải quyết",
       "text": "VoiceStudio giải quyết vấn đề này bằng một ứng dụng desktop trọn gói chạy khép kín trên máy.",
       "source": [
@@ -38,8 +38,8 @@
     {
       "id": "vo-4",
       "unit": "step:0",
-      "start": 24.57,
-      "scene_end": 48.74,
+      "start": 23.14,
+      "scene_end": 46.58,
       "scene": "Cách chạy, bước 1",
       "text": "Người dùng chọn giọng mẫu hoặc tải lên tệp âm thanh tham chiếu, sau đó nhập văn bản cần đọc hoặc chọn tệp video cần lồng tiếng.",
       "source": [
@@ -49,8 +49,8 @@
     {
       "id": "vo-5",
       "unit": "step:1",
-      "start": 31.95,
-      "scene_end": 48.74,
+      "start": 29.56,
+      "scene_end": 46.58,
       "scene": "Cách chạy, bước 2",
       "text": "Backend xử lý nạp mô hình tương ứng và điều phối việc tính toán đến phần cứng phù hợp để tổng hợp hoặc bóc băng giọng nói.",
       "source": [
@@ -60,8 +60,8 @@
     {
       "id": "vo-6",
       "unit": "step:2",
-      "start": 39.07,
-      "scene_end": 48.74,
+      "start": 36.22,
+      "scene_end": 46.58,
       "scene": "Cách chạy, bước 3",
       "text": "Hệ thống tạo ra tệp âm thanh hoàn chỉnh và cho phép điều khiển tự động qua giao tiếp Local API hoặc Model Context Protocol.",
       "source": [
@@ -71,8 +71,8 @@
     {
       "id": "vo-7",
       "unit": "learn:0",
-      "start": 49.34,
-      "scene_end": 61.76,
+      "start": 47.18,
+      "scene_end": 59.98,
       "scene": "Học được gì từ thiết kế này",
       "text": "Phân tách kiến trúc rõ ràng giữa giao diện desktop Electron và backend AI bằng Python để dễ bảo trì.",
       "source": [
@@ -82,8 +82,8 @@
     {
       "id": "vo-8",
       "unit": "learn:1",
-      "start": 55.3,
-      "scene_end": 61.76,
+      "start": 53.68,
+      "scene_end": 59.98,
       "scene": "Học được gì từ thiết kế này",
       "text": "Thiết kế cơ chế linh hoạt tận dụng đa dạng phần cứng từ card đồ họa cao cấp đến chỉ chạy trên CPU.",
       "source": [
@@ -93,8 +93,8 @@
     {
       "id": "vo-9",
       "unit": "caveat:0",
-      "start": 62.36,
-      "scene_end": 71.94,
+      "start": 60.58,
+      "scene_end": 70.78,
       "scene": "Lưu ý trước khi dùng",
       "text": "Mã nguồn dùng giấy phép AGPL-3.0, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng.",
       "source": [
