@@ -46,14 +46,6 @@ mutations:
   find: "  [ \"\\${actual}\" = \"\\${subnet}\" ] ||"
   replace: "  true ||"
   test: tests.test_team.EgressScriptTests.test_check_refuses_a_worker_network_the_rules_do_not_match
-- label: "the check does not look for the DOCKER-USER rules"
-  find: "      || fail \"rule missing: DOCKER-USER from \\${subnet} to \\${dest}\"\n"
-  replace: "      || true\n"
-  test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
-- label: "the check does not look for the INPUT rule"
-  find: "|| fail \"rule missing: INPUT from \\${subnet}\"\n"
-  replace: "    || true\n"
-  test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
 - label: "the proof does not name the verified network"
   find: "  printf '%s\\\\n' \"\\${network}\" > \"\\${ok}.tmp\"\n"
   replace: "  printf 'ok\\\\n' > \"\\${ok}.tmp\"\n"
@@ -110,3 +102,35 @@ mutations:
   find: "command -v visudo >/dev/null || { echo \"sudo is required (the egress check rule) and could not be installed\" >&2; exit 1; }\n"
   replace: ""
   test: tests.test_team.CodexTeamInstallTests.test_setup_requires_sudo_before_its_first_side_effect
+- label: "the check does not compare the first DOCKER-USER rules"
+  find: "[ \"\\$(have_user)\" = \"\\$(want_user)\" ] ||"
+  replace: "true ||"
+  test: tests.test_team.EgressScriptTests.test_check_refuses_rules_that_a_competing_rule_precedes
+- label: "the check does not compare the first INPUT rule"
+  find: "[ \"\\$(first_input)\" = \"-A INPUT -s \\${subnet} -j DROP\" ] ||"
+  replace: "true ||"
+  test: tests.test_team.EgressScriptTests.test_check_refuses_rules_that_a_competing_rule_precedes
+- label: "the first INPUT rule is read from the rules that match our subnet"
+  find: "awk '/^-A INPUT /{ print; exit }'"
+  replace: "awk '/^-A INPUT -s/{ print; exit }'"
+  test: tests.test_team.EgressScriptTests.test_check_refuses_rules_that_a_competing_rule_precedes
+- label: "maintain does not put the rules back"
+  find: "\"\\$0\" --check \"\\${2:-}\" >/dev/null 2>&1 || { \"\\$0\" && \"\\$0\" --check \"\\${2:-}\" >/dev/null; }\n"
+  replace: "\"\\$0\" --check \"\\${2:-}\" >/dev/null 2>&1 || true\n"
+  test: tests.test_team.EgressScriptTests.test_maintain_restores_flushed_or_outranked_rules_and_does_nothing_otherwise
+- label: "the rules are rebuilt on every run"
+  find: "if [ -n \"\\$(problem)\" ]; then\n"
+  replace: "if true; then\n"
+  test: tests.test_team.EgressScriptTests.test_applying_the_rules_puts_them_first_and_leaves_a_correct_set_alone
+- label: "old DOCKER-USER copies are left behind when the rules are rebuilt"
+  find: "    while iptables -C DOCKER-USER -s \"\\${subnet}\" -d \"\\${dest}\" -j DROP 2>/dev/null; do\n      iptables -D DOCKER-USER -s \"\\${subnet}\" -d \"\\${dest}\" -j DROP\n    done\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_applying_the_rules_puts_them_first_and_leaves_a_correct_set_alone
+- label: "an old INPUT copy is left behind when the rules are rebuilt"
+  find: "  while iptables -C INPUT -s \"\\${subnet}\" -j DROP 2>/dev/null; do iptables -D INPUT -s \"\\${subnet}\" -j DROP; done\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_applying_the_rules_puts_them_first_and_leaves_a_correct_set_alone
+- label: "the timer only checks and never repairs"
+  find: "ExecStart=/usr/local/sbin/team-egress --maintain\n"
+  replace: "ExecStart=/usr/local/sbin/team-egress --check\n"
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops

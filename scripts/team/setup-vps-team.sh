@@ -172,16 +172,31 @@ echo "== worker network team-net (internet only)"
 docker network inspect team-net >/dev/null 2>&1 || docker network create --subnet "${WORKER_SUBNET}" team-net >/dev/null
 cat > /usr/local/sbin/team-egress <<EGRESS
 #!/usr/bin/env bash
-# team-egress                  install the rules (the team-egress unit runs this at boot)
-# team-egress --check [PROOF]  prove they are live: ask docker for the subnet and iptables about every rule. The answer is
-#                              the verified network's name on stdout and in PROOF (default /run/team-egress.ok, which a
-#                              timer keeps fresh). Any miss removes PROOF, stops every container still running on the
-#                              worker network and exits 1. The conductor runs this through sudo before each container it
-#                              starts, so a flushed firewall refuses the launch instead of being noticed a minute later.
+# team-egress                    put the rules in force (the team-egress unit runs this at boot)
+# team-egress --check [PROOF]    prove they are in force: the worker network has the subnet the rules match, and the
+#                                DROP rules are the FIRST rules of DOCKER-USER and INPUT. A rule that exists but sits
+#                                behind an ACCEPT (a firewall manager, an administrator) decides nothing. The answer is
+#                                the verified network's name on stdout and in PROOF (default /run/team-egress.ok). Any
+#                                miss removes PROOF, stops every container still running on the worker network and
+#                                exits 1. The conductor runs this through sudo before each container it starts.
+# team-egress --maintain [PROOF] what the timer runs: --check, and when it fails put the rules back first and check again
 set -euo pipefail
 network=team-net
 subnet=${WORKER_SUBNET}
 dests="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10"
+ndests="\$(set -- \${dests}; echo \$#)"
+want_user() { for dest in \${dests}; do echo "-A DOCKER-USER -s \${subnet} -d \${dest} -j DROP"; done | sort; }
+have_user() { iptables -S DOCKER-USER | awk -v n="\${ndests}" '/^-A DOCKER-USER /{ if (++c <= n) print }' | sort; }
+first_input() { iptables -S INPUT | awk '/^-A INPUT /{ print; exit }'; }
+# Empty when the rules are in force, else why not.
+problem() {
+  [ "\$(have_user)" = "\$(want_user)" ] || { echo "the DROP rules for \${subnet} are missing from, or not the first rules of, DOCKER-USER"; return; }
+  [ "\$(first_input)" = "-A INPUT -s \${subnet} -j DROP" ] || echo "the DROP rule for \${subnet} is missing from, or not the first rule of, INPUT"
+}
+if [ "\${1:-}" = "--maintain" ]; then
+  "\$0" --check "\${2:-}" >/dev/null 2>&1 || { "\$0" && "\$0" --check "\${2:-}" >/dev/null; }
+  exit 0
+fi
 if [ "\${1:-}" = "--check" ]; then
   ok="\${2:-/run/team-egress.ok}"
   rm -f "\${ok}"
@@ -193,22 +208,25 @@ if [ "\${1:-}" = "--check" ]; then
   actual="\$(docker network inspect "\${network}" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | xargs)" \\
     || fail "cannot inspect \${network}"
   [ "\${actual}" = "\${subnet}" ] || fail "\${network} has subnet '\${actual}', the rules cover '\${subnet}'"
-  for dest in \${dests}; do
-    iptables -C DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP 2>/dev/null \\
-      || fail "rule missing: DOCKER-USER from \${subnet} to \${dest}"
-  done
-  iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null || fail "rule missing: INPUT from \${subnet}"
+  why="\$(problem)"
+  [ -z "\${why}" ] || fail "\${why}"
   printf '%s\\n' "\${network}" > "\${ok}.tmp"
   chmod 644 "\${ok}.tmp"
   mv -f "\${ok}.tmp" "\${ok}"
   cat "\${ok}"
   exit 0
 fi
-for dest in \${dests}; do
-  iptables -C DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP 2>/dev/null \\
-    || iptables -I DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP
-done
-iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null || iptables -I INPUT -s "\${subnet}" -j DROP
+# Rules that are already first stay as they are: rebuilding them would open a gap for nothing.
+if [ -n "\$(problem)" ]; then
+  for dest in \${dests}; do
+    while iptables -C DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP 2>/dev/null; do
+      iptables -D DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP
+    done
+    iptables -I DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP
+  done
+  while iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null; do iptables -D INPUT -s "\${subnet}" -j DROP; done
+  iptables -I INPUT -s "\${subnet}" -j DROP
+fi
 EGRESS
 chmod 755 /usr/local/sbin/team-egress
 cat > /etc/systemd/system/team-egress.service <<'UNIT'
@@ -227,8 +245,8 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
-# The unit above only installs the rules. This one re-proves them every 20 s, so a flush after boot (iptables -F, a
-# firewall reload) stops the conductor from starting workers within the minute (EGRESS_OK_MAX_AGE_S in team.py).
+# The unit above only installs the rules. This one re-proves them every 20 s and, when they are gone or outranked (iptables -F,
+# a firewall reload, another tool inserting above them), stops what ran unprotected and puts them back.
 cat > /etc/systemd/system/team-egress-check.service <<'UNIT'
 [Unit]
 Description=Verify the egress limits of team worker containers
@@ -236,7 +254,7 @@ After=team-egress.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/team-egress --check
+ExecStart=/usr/local/sbin/team-egress --maintain
 UNIT
 cat > /etc/systemd/system/team-egress-check.timer <<'UNIT'
 [Unit]

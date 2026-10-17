@@ -709,6 +709,14 @@ def gate_argv(cfg: dict[str, str], work: Path, command: str, network: str, name:
             "-v", f"{work}:/work", "-w", "/work", cfg["TEAM_IMAGE"], "bash", "-lc", command]
 
 
+def handoff_digest(f: Feature) -> str:
+    """What the audit read besides the diff: the pack quotes spec.md and acceptance.md, which live outside the checkout."""
+    digest = hashlib.sha256()
+    for name in ("spec.md", "acceptance.md"):
+        digest.update(f"{name}\0".encode() + read(f.file(name)).encode("utf-8") + b"\0")
+    return digest.hexdigest()[:16]
+
+
 def commands_digest(commands: list[str]) -> str:
     """What identifies a gate suite: the commands, not the prose around them in acceptance.md."""
     return hashlib.sha256(json.dumps(commands).encode("utf-8")).hexdigest()[:12]
@@ -944,6 +952,7 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
         return 1
     pack.write_text(text, encoding="utf-8")
     state["pack_head"] = head(f.repo)
+    state["pack_handoff"] = handoff_digest(f)
     f.save_state(state)
     say(f"audit pack: {pack} ({lines} lines)")
     return 0
@@ -1176,6 +1185,9 @@ def cmd_push(args, home, cfg) -> int:
                 raise SystemExit("verdict.md has no 'VERDICT: APPROVE' line: audit first")
             if state.get("pack_head") != source:
                 raise SystemExit("HEAD changed after the audit pack was built: rebuild the pack and audit again")
+            if state.get("pack_handoff") != handoff_digest(f):
+                raise SystemExit("spec.md or acceptance.md changed after the audit pack was built: "
+                                 "rebuild the pack and audit again")
             if f.file("verdict.md").stat().st_mtime < f.file("audit-pack.md").stat().st_mtime:
                 raise SystemExit("verdict.md is older than audit-pack.md: audit the current pack")
             source = state["pack_head"]

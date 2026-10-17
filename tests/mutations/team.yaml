@@ -386,3 +386,19 @@ mutations:
   find: "                    git(f.repo, \"reset\", \"-q\", \"--hard\", before)\n"
   replace: ""
   test: tests.test_team.PipelineTests.test_a_fix_attempt_that_breaks_the_gates_is_reverted_and_reported
+- label: "push ignores a spec or acceptance change made after the pack"
+  find: "            if state.get(\"pack_handoff\") != handoff_digest(f):\n"
+  replace: "            if False:\n"
+  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
+- label: "the pack does not record the handoff digest"
+  find: "    state[\"pack_handoff\"] = handoff_digest(f)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
+- label: "the handoff digest ignores the spec"
+  find: "    for name in (\"spec.md\", \"acceptance.md\"):\n        digest.update("
+  replace: "    for name in (\"acceptance.md\",):\n        digest.update("
+  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
+- label: "the handoff digest ignores the acceptance file"
+  find: "    for name in (\"spec.md\", \"acceptance.md\"):\n        digest.update("
+  replace: "    for name in (\"spec.md\",):\n        digest.update("
+  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack

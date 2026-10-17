@@ -1038,6 +1038,27 @@ class PipelineTests(Sandbox):
         self.assertEqual(run_cli("pack", "F1", "--force")[0], 0)
         self.assertGreater(len(f.file("audit-pack.md").read_text()), 20000)
 
+    def test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack(self):
+        # Codex's eleventh review: the pack quotes spec.md and acceptance.md, which live outside the git checkout, so editing
+        # them after the audit left pack_head and the verdict timestamp valid and the branch publishable.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        f.file("verdict.md").write_text("VERDICT: APPROVE\n")
+        pack_time = f.file("audit-pack.md").stat().st_mtime
+        os.utime(f.file("verdict.md"), (pack_time + 5, pack_time + 5))
+        for name, text in (("acceptance.md", ACCEPTANCE.replace("check_feature.py", "other_check.py")),
+                           ("spec.md", SPEC + "\n## Also\nsubtract(a, b).\n")):
+            original = f.file(name).read_text()
+            f.file(name).write_text(text)
+            code, out = run_cli("push", "F1")
+            self.assertNotEqual(code, 0, name)
+            self.assertIn("spec.md or acceptance.md changed after the audit pack", out)
+            self.assertEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "", f"{name}: nothing was published")
+            f.file(name).write_text(original)
+        self.assertEqual(run_cli("push", "F1")[0], 0, "unchanged again: the audited work is published")
+        self.assertIn("team/F1", git(self.origin, "branch", "--list", "team/F1"))
+
     def test_a_pack_is_refused_when_the_gates_ran_on_other_code(self):
         # Codex's sixth review: `pack` embedded whatever gates.log said, so after a new commit it showed PASS for older code.
         f = self.new_feature()
@@ -1671,11 +1692,32 @@ class EgressScriptTests(unittest.TestCase):
                                   capture_output=True, text=True, check=True).stdout
         self.script = self.tmp / "team-egress"
         self.script.write_text(rendered)
+        self.script.chmod(0o755)  # --maintain runs the script again by its own path
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
         self.rules, self.subnet, self.ok = self.tmp / "rules", self.tmp / "subnet", self.tmp / "egress.ok"
-        (self.bin / "iptables").write_text(
-            '#!/bin/sh\ncase "$1" in\n  -C) shift; grep -qxF -- "$*" "$FAKE_RULES" ;;\n  -I) shift; echo "$*" >> "$FAKE_RULES" ;;\nesac\n')
+        self.log = self.tmp / "iptables.log"
+        # An ordered rule list ("CHAIN spec" per line, first match wins) with the four calls the script makes.
+        (self.bin / "iptables").write_text(textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import os, sys
+            path, args = os.environ["FAKE_RULES"], sys.argv[1:]
+            with open(os.environ["FAKE_LOG"], "a") as log:
+                log.write(" ".join(args) + "\\n")
+            rules = open(path).read().splitlines() if os.path.exists(path) else []
+            op, chain, rest = args[0], args[1], " ".join(args[2:])
+            if op == "-S":
+                print("\\n".join(f"-A {rule}" for rule in rules if rule.split(" ", 1)[0] == chain))
+            elif op == "-C":
+                sys.exit(0 if f"{chain} {rest}" in rules else 1)
+            elif op == "-I":
+                rules.insert(0, f"{chain} {rest}")
+            elif op == "-D":
+                if f"{chain} {rest}" not in rules:
+                    sys.exit(1)
+                rules.remove(f"{chain} {rest}")
+            open(path, "w").write("".join(rule + "\\n" for rule in rules))
+        '''))
         self.running, self.killed = self.tmp / "running", self.tmp / "killed"
         self.running.write_text("")
         (self.bin / "docker").write_text(
@@ -1691,9 +1733,10 @@ class EgressScriptTests(unittest.TestCase):
 
     def run_script(self, *args: str) -> subprocess.CompletedProcess:
         env = {**os.environ, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "FAKE_RULES": str(self.rules),
-               "FAKE_SUBNET": str(self.subnet), "FAKE_RUNNING": str(self.running), "FAKE_KILLED": str(self.killed)}
+               "FAKE_SUBNET": str(self.subnet), "FAKE_RUNNING": str(self.running), "FAKE_KILLED": str(self.killed),
+               "FAKE_LOG": str(self.log)}
         # umask 077: without the chmod in the script the proof would be unreadable to the team user.
-        args = [*args, str(self.ok)] if args == ("--check",) else args  # the proof path is the second argument
+        args = [*args, str(self.ok)] if args in (("--check",), ("--maintain",)) else args  # the proof path is the second argument
         return subprocess.run(["bash", "-c", 'umask 077; exec bash "$0" "$@"', str(self.script), *args],
                               capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
 
@@ -1712,7 +1755,52 @@ class EgressScriptTests(unittest.TestCase):
             result = self.run_script("--check")
             self.assertNotEqual(result.returncode, 0, gone)
             self.assertFalse(self.ok.exists(), f"stale proof left behind after {gone} went missing")
-            self.assertIn("missing", result.stderr, gone)
+            self.assertIn("first", result.stderr, gone)
+
+    def rules_of(self, chain: str) -> list[str]:
+        return [rule.split(" ", 1)[1] for rule in self.rules.read_text().splitlines() if rule.split(" ", 1)[0] == chain]
+
+    def test_check_refuses_rules_that_a_competing_rule_precedes(self):
+        # Codex's eleventh review: `iptables -C` only proves a rule exists. An ACCEPT above it (a firewall manager, an
+        # administrator) decides the packet first, so the DROP rules count only as the first rules of their chains.
+        for competing in ("DOCKER-USER -j ACCEPT", "INPUT -i lo -j ACCEPT"):
+            self.set_state([competing, *self.RULES], "172.30.99.0/24")
+            self.ok.write_text("team-net\n")
+            result = self.run_script("--check")
+            self.assertNotEqual(result.returncode, 0, competing)
+            self.assertFalse(self.ok.exists(), competing)
+            self.assertIn(f"{competing.split()[0]}", result.stderr)
+            self.assertIn("first", result.stderr)
+        self.set_state([*self.RULES, "DOCKER-USER -j RETURN", "INPUT -j ACCEPT"], "172.30.99.0/24")
+        self.assertEqual(self.run_script("--check").returncode, 0, "rules that come after ours do not matter")
+
+    def test_applying_the_rules_puts_them_first_and_leaves_a_correct_set_alone(self):
+        self.set_state(["DOCKER-USER -j ACCEPT", "INPUT -i lo -j ACCEPT", *self.RULES], "172.30.99.0/24")
+        self.assertEqual(self.run_script().returncode, 0)
+        self.assertEqual(sorted(self.rules_of("DOCKER-USER")[:5]), sorted(r.split(" ", 1)[1] for r in self.RULES[:5]))
+        self.assertEqual(self.rules_of("INPUT")[0], "-s 172.30.99.0/24 -j DROP")
+        self.assertIn("-j ACCEPT", self.rules_of("DOCKER-USER")[5:][0], "the competing rule is kept, behind ours")
+        self.assertEqual(len(self.rules_of("DOCKER-USER")), 6, "no duplicates")
+        self.assertEqual(len(self.rules_of("INPUT")), 2, "no duplicates")
+        self.assertEqual(self.run_script("--check").returncode, 0)
+        self.log.write_text("")
+        self.assertEqual(self.run_script().returncode, 0)
+        changed = [row for row in self.log.read_text().splitlines() if row.split()[0] in ("-I", "-D")]
+        self.assertEqual(changed, [], "rules that are already first are not rebuilt, so there is never a gap")
+
+    def test_maintain_restores_flushed_or_outranked_rules_and_does_nothing_otherwise(self):
+        self.running.write_text("c1\n")
+        self.assertEqual(self.run_script("--maintain").returncode, 0)
+        self.assertFalse(self.killed.exists())
+        for state in ([], ["DOCKER-USER -j ACCEPT", *self.RULES]):
+            self.killed.unlink(missing_ok=True)
+            self.ok.unlink(missing_ok=True)
+            self.set_state(state, "172.30.99.0/24")
+            result = self.run_script("--maintain")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.ok.read_text(), "team-net\n", "healed, and proved again")
+            self.assertEqual(self.run_script("--check").returncode, 0)
+            self.assertEqual(self.killed.read_text().split(), ["c1"], "what ran unprotected is stopped, not trusted")
 
     def test_a_failed_check_stops_the_containers_already_running_on_the_worker_network(self):
         # Codex's ninth review: removing the proof does not stop a container that started before the rules went away.
@@ -1742,7 +1830,7 @@ class EgressScriptTests(unittest.TestCase):
         self.assertIn("ExecStartPost=/usr/local/sbin/team-egress --check", script)
         self.assertIn("ExecStop=/bin/rm -f /run/team-egress.ok", script)
         self.assertIn("/etc/systemd/system/team-egress-check.timer", script)
-        self.assertIn("ExecStart=/usr/local/sbin/team-egress --check", script)
+        self.assertIn("ExecStart=/usr/local/sbin/team-egress --maintain", script)
         self.assertIn("systemctl enable --now team-egress-check.timer", script)
         # the conductor runs the check itself before every launch, as root, through exactly one sudo rule
         self.assertIn("printf 'team ALL=(root) NOPASSWD: /usr/local/sbin/team-egress --check\\n'", script)
