@@ -290,10 +290,16 @@ def names_in(source_blob: str) -> set:
     return names
 
 
-def has_name(token: str, names: set) -> bool:
-    """The token is made of names the source writes; github.com/debpalash/VoiceStudio is three of them."""
-    parts = NAME.findall(token.lower())
-    return bool(parts) and all(part in names for part in parts)
+def has_name(token: str, names: set, source_blob: str) -> bool:
+    """The token is a name the source writes. A token of several names (github.com/debpalash/VoiceStudio, setup:api) must also be
+    written that way in the source, as a whole: its parts turning up separately somewhere do not make an address up."""
+    low = token.lower()
+    parts = NAME.findall(low)
+    if not parts or not all(part in names for part in parts):
+        return False
+    if len(parts) == 1:
+        return True
+    return re.search(rf"(?<![a-z0-9_]){re.escape(low)}(?![a-z0-9_])", source_blob) is not None
 
 
 def canonical(number: str) -> str:
@@ -340,7 +346,7 @@ def untraced(text: str, source_blob: str, allow: set) -> list:
             problems.append(f"number {number}")
     names = names_in(source_blob)
     for token in latin_tokens(text, allow):
-        if not has_name(token, names):
+        if not has_name(token, names, source_blob):
             problems.append(f"token {token!r}")
     return problems
 

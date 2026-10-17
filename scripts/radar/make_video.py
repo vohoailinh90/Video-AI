@@ -20,6 +20,7 @@ usage:
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -76,6 +77,38 @@ def require_audible(mean, peak):
     if mean is None or peak is None or mean < AUDIBLE_DB:
         fail(f"the rendered MP4 has no audible sound (mean {mean} dB, peak {peak} dB; the narration is missing or silent). "
              f"Check assets/*.wav and the audio of index.html, then render again")
+
+
+NARRATION_OVER_MUSIC_DB = 6.0    # a clip's stretch of the MP4 has to be this much louder than the music bed alone
+
+
+def segment_mean(path, start: float, seconds: float):
+    """Mean volume (dB) of `seconds` of the audio of `path` from `start`, or None when there is no audio there."""
+    err = run(["ffmpeg", "-hide_banner", "-nostats", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}", "-i", path, "-vn", "-af", "volumedetect",
+               "-f", "null", "-"]).stderr
+    mean = re.search(r"mean_volume:\s*(-?[\d.]+) dB", err)
+    return float(mean.group(1)) if mean else None
+
+
+def music_bed_db(project: Path) -> float:
+    """How loud the music bed is in the render: its own mean level plus its data-volume in index.html (0.6 if the page says nothing)."""
+    mean = segment_mean(project / "assets" / "pad.wav", 0.0, clip_seconds(project / "assets" / "pad.wav"))
+    volume = re.search(r'id="music-bed"[^>]*data-volume="([\d.]+)"', (project / "index.html").read_text(encoding="utf-8"))
+    factor = float(volume.group(1)) if volume else 0.6
+    return (mean if mean is not None else -91.0) + 20 * math.log10(factor) if factor > 0 else -91.0
+
+
+def silent_narration(project: Path, doc, mp4) -> list:
+    """Ids of the lines whose stretch of the render is no louder than the music bed alone: the whole mix can clear the audible level on
+    music only (the bed sits near -34 dB), so each clip's own seconds are measured."""
+    floor = music_bed_db(project) + NARRATION_OVER_MUSIC_DB
+    missing = []
+    for line in doc["lines"]:
+        wav = project / "assets" / f"{line['id']}.wav"
+        mean = segment_mean(mp4, line["start"], clip_seconds(wav))
+        if mean is None or mean < floor:
+            missing.append(line["id"])
+    return missing
 
 
 def make_pad(path: Path, seconds: float):
@@ -448,6 +481,10 @@ def cmd_render(args, project=None) -> dict:
     warnings = [l.strip() for l in text.splitlines() if "WARNING" in l]
     mean, peak = whole_file_levels(mp4)
     require_audible(mean, peak)                  # before the report, README and preview call this render a success
+    silent = silent_narration(project, json.loads((project / "voiceover.json").read_text(encoding="utf-8")), mp4)
+    if silent:
+        fail(f"the render has no narration where {', '.join(silent)} should be heard (only the music bed, or less): the clips of assets/ "
+             f"did not reach the MP4. Check the audio elements of index.html, then render again")
     seconds = clip_seconds(mp4)
     final = final_mix_wer(args, project, mp4)
 
