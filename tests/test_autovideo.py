@@ -36,6 +36,9 @@ FAKE_CLI = textwrap.dedent('''
         print("echoed by MPT: %(marker_secret)s", file=sys.stderr)  # what MPT logs at ERROR level when it cannot mix the music, and then renders without it
         print('2026-10-17 13:43:35 | ERROR    | "./app/services/video.py:1856": generate_video - failed to mix background music: type=custom, file=./storage/bgm/x.mp3', file=sys.stderr)
     entry = {"index": 1, "task_id": tid, "status": "succeeded", "result": None, "failed_stage": None, "error": None}
+    if "STAGESEC" in subject:  # a stage name that repeats the key
+        entry.update(status="failed", failed_stage="audio %(secret)s", error="no")
+        print(json.dumps({"total": 1, "succeeded": 0, "failed": 1, "tasks": [entry]})); sys.exit(1)
     if "FAIL" in subject:
         entry.update(status="failed", failed_stage="audio", error="TTS said no, key %(secret)s")
         print(json.dumps({"total": 1, "succeeded": 0, "failed": 1, "tasks": [entry]})); sys.exit(1)
@@ -61,7 +64,8 @@ FAKE_CLI = textwrap.dedent('''
             srt += f"{n + 1}\\n{stamp(a)} --> {stamp(b)}\\n{line}\\n\\n"
         (d / "subtitle.srt").write_text(srt, encoding="utf-8")
     entry["result"] = {"videos": [str(d / "final-1.mp4")], "audio_file": "" if "NONARRATION" in subject else str(d / "audio.mp3"), "audio_duration": float(dur),
-                       "subtitle_path": str(d / "subtitle.srt") if srt else "", "warnings": None}
+                       "subtitle_path": str(d / "subtitle.srt") if srt else "",
+                       "warnings": [{"code": "provider", "detail": "request failed for key %(secret)s"}] if "WARNSEC" in subject else None}
     print(json.dumps({"total": 1, "succeeded": 1, "failed": 0, "tasks": [entry]}))
 ''') % {"secret": SECRET, "marker_secret": MARKER_SECRET}
 
@@ -213,6 +217,16 @@ class PackTests(unittest.TestCase):
             self.assertIn("font:", self.problems([video()], {"font": name}), repr(name))
         for name in ("a/b.mp3", "a\\b.mp3", ".mp3", "x.mp3\n", "x\ty.mp3", ".bgm-upload-x.mp3", ".BGM-UPLOAD-x.mp3", ""):
             self.assertIn("bgm: must be none, random", self.problems([video()], {"bgm": name}), repr(name))  # (the empty name is caught one check earlier)
+
+    def test_identifiers_must_match_as_a_whole_not_up_to_a_trailing_newline(self):
+        # `$` matches just before a final newline: that newline would end up in a folder name, a log line and an argument for MPT
+        with self.assertRaises(packmod.PackError) as ctx:
+            packmod.load_pack(write_pack(self.root, [video()], batch="demo\n"))
+        self.assertIn("batch", str(ctx.exception))
+        self.assertIn("id:", self.problems([video(vid="job\n")]))
+        self.assertIn("language:", self.problems([video()], {"language": "vi-VN\n"}))
+        self.assertIn("voice:", self.problems([video()], {"voice": "vi-VN-HoaiMyNeural\n"}))
+        packmod.load_pack(write_pack(self.root, [video(vid="job")], batch="demo"))  # and the same values without it are fine
 
     def test_text_that_is_printed_cannot_carry_control_characters(self):
         # the title and the file names are written to the terminal by plan and run, so a newline or an escape sequence in them could forge a log line
@@ -719,6 +733,22 @@ class RunnerTests(FakeMptCase):
             self.assertIn(engine_mpt.MUSIC_FAILED_TAG, (folder / "mpt.log").read_text())
             if secret == "music":  # and the redaction itself is plain: the short secret is hidden everywhere
                 self.assertEqual(engine_mpt.redact("file=music.mp3 and some music", self.env), "file=***.mp3 and some ***")
+
+    def test_engine_warnings_are_hidden_like_the_rest_before_they_are_stored(self):
+        summary, _ = self.run_pack([video(title="WARNSEC")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "done")  # a warning is not a failure
+        text = (self.out / "test-batch" / "01-first" / "report.json").read_text()
+        self.assertNotIn(SECRET, text)
+        report = json.loads(text)
+        self.assertEqual(report["engine"]["warnings"], [{"code": "provider", "detail": "request failed for key ***"}])  # same shape, secret gone
+
+    def test_a_failed_stage_name_is_hidden_like_the_rest_before_it_is_stored(self):
+        summary, _ = self.run_pack([video(title="STAGESEC")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "failed")
+        files = [self.out / "test-batch" / "01-first" / "report.json", self.out / "test-batch" / "summary.json", self.out / "test-batch" / "state.json"]
+        for file in files:
+            self.assertNotIn(SECRET, file.read_text(), file.name)
+        self.assertEqual(summary["videos"][0]["stage"], "audio ***")
 
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA

@@ -222,6 +222,17 @@ def redact(text: str, env: MptEnv) -> str:
     return text
 
 
+def redact_deep(value, env: MptEnv):
+    """`redact` for everything in a structure MPT returned (strings inside lists and dicts), keeping its shape."""
+    if isinstance(value, str):
+        return redact(value, env)
+    if isinstance(value, list):
+        return [redact_deep(item, env) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_deep(item, env) for key, item in value.items()}
+    return value
+
+
 def _summary(stdout: str) -> dict | None:
     for line in reversed(stdout.strip().splitlines()):
         line = line.strip()
@@ -285,7 +296,7 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     result = entry.get("result") or {}
     if entry.get("status") != "succeeded":
         return EngineResult(
-            False, task_id=entry.get("task_id"), failed_stage=entry.get("failed_stage") or "unknown",
+            False, task_id=entry.get("task_id"), failed_stage=redact(str(entry.get("failed_stage") or "unknown"), env),
             error=redact(str(entry.get("error") or "unknown error"), env), log_tail=tail,
         )
     videos = result.get("videos") or []
@@ -295,7 +306,7 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     return EngineResult(
         True, task_id=entry.get("task_id"), video=video, audio=_path(env, result.get("audio_file")),
         subtitle=_path(env, result.get("subtitle_path")), task_dir=video.parent,
-        audio_seconds=result.get("audio_duration"), warnings=tuple(result.get("warnings") or ()), log_tail=tail,
+        audio_seconds=result.get("audio_duration"), warnings=tuple(redact_deep(result.get("warnings") or [], env)), log_tail=tail,
     )
 
 

@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
-SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")
-VOICE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z0-9-]+$")
+SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}\Z")  # \Z, not $: a $ also matches before a final newline
+LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}\Z")
+VOICE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z0-9-]+\Z")
 FONT_EXTENSIONS = (".ttf", ".ttc")  # MPT's CLI refuses any other subtitle font suffix, comparing it in lower case
 
 ASPECTS = ("9:16", "16:9", "1:1")
