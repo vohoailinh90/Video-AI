@@ -54,12 +54,13 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
   The language of on-screen text follows the brief; the owner's default is Vietnamese.
 - The system font Inter renders Vietnamese diacritics correctly; check any other font for Vietnamese coverage.
 - `npx hyperframes tts` (Kokoro-82M) has **no Vietnamese voice** (it covers English, Spanish, French, Hindi, Italian,
-  Portuguese, Japanese and Chinese). An English voice reading espeak `vi` phonemes loses the tones and was never checked for
-  intelligibility. For Vietnamese narration, prefer a TTS that supports Vietnamese: put one clip per scene in
-  `assets/`, and set each `data-duration` from `ffprobe`.
+  Portuguese, Japanese and Chinese). An English voice reading espeak `vi` phonemes loses the tones: a PhoWhisper round trip gave
+  103% word error rate on the demo narration and 58% on plain Vietnamese, so that voice is unintelligible. For Vietnamese narration use
+  a TTS that supports Vietnamese. VieNeu-TTS v3 Turbo (CPU, Apache-2.0) was tested and understood 100% on plain sentences, but it
+  reads English loanwords the Vietnamese way. Put one clip per scene in `assets/`, and set each `data-duration` from `ffprobe`.
 - `docs/vietnamese-audio.md` ranks the GitHub repos with Vietnamese TTS and speech recognition (stars, licenses, install
-  commands, which are non-commercial). None of them has been run yet. Read its licence notes before using a voice in a
-  video that will be published.
+  commands, which are non-commercial) and records what was run here: PhoWhisper-small, VieNeu-TTS v3 Turbo and Kokoro. The
+  others have not been run. Read its licence notes before using a voice in a video that will be published.
 
 ## Safety and privacy
 
@@ -78,8 +79,10 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
 - The cloud image has Node 22 and FFmpeg. It has no Chrome headless shell: run `npx hyperframes browser ensure`, or put that
   command in the environment's setup script so it is cached.
 - A cloud session is ephemeral: commit sources, because renders and caches are lost when it ends.
-- `huggingface.co` was blocked by the default network policy, so anything that downloads models from it (for example
-  Whisper) can fail there.
+- `huggingface.co` is not in the default network allowlist. Models (PhoWhisper, VieNeu-TTS, Whisper) download only after the
+  environment uses Custom network access with the Hugging Face domains added; the list is in `docs/vietnamese-audio.md`, section 4.
+  Loading ONNX models from the Hugging Face cache can fail with `External data path escapes model directory`; the fix is in
+  section 0 of the same file.
 
 ## VPS agent team (`team-video`)
 

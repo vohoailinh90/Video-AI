@@ -72,7 +72,8 @@ Có 13 mutation check cho script này (`tests/mutations/video_gates.yaml`).
   bên ngoài, đặt file vào `videos/<id>.inputs/` (cạnh, không phải trong, thư mục dự án: `hyperframes init`
   từ chối thư mục không rỗng) rồi commit lên nhánh trước khi chạy, và ghi tên từng file trong `request.md`. Spec
   sẽ chỉ định file nào cho cảnh nào, coder chỉ ghép và cân âm. Danh sách công cụ TTS/STT
-  tiếng Việt (kèm giấy phép, chưa chạy thử) ở [`docs/vietnamese-audio.md`](vietnamese-audio.md);
+  tiếng Việt (kèm giấy phép; PhoWhisper-small, VieNeu-TTS v3 Turbo và Kokoro đã được chạy thử và đo, các công cụ
+  khác chưa) ở [`docs/vietnamese-audio.md`](vietnamese-audio.md);
   team không gọi chúng: bạn tạo clip bên ngoài rồi đặt vào `videos/<id>.inputs/`, và ghi
   giấy phép của model trong `request.md` (audit BLOCK file nhị phân không có giấy phép).
 - **Không bật TTS cần key (Gemini, HeyGen, ElevenLabs):** mỗi container chỉ nhận key
