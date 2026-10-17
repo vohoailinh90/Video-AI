@@ -206,10 +206,17 @@ def config_of(env: MptEnv) -> dict:
 
 
 def redact(text: str, env: MptEnv) -> str:
-    """Replace every secret value of MPT's config.toml in `text`. Logs and error messages go through here before they are stored."""
-    for secret in sorted(_secrets(config_of(env)), key=len, reverse=True):
-        text = text.replace(secret, "***")
-    return text
+    """Replace every secret value of MPT's config.toml in `text`. Logs and error messages go through here before they are stored.
+    MIX_FAILED is public text from MPT's source that QA looks for, so it is kept whole: a secret that is a word of it (a short test
+    value such as "music") must not turn it into something QA no longer recognises. The secret is hidden everywhere else."""
+    secrets = sorted(_secrets(config_of(env)), key=len, reverse=True)
+
+    def hide(part: str) -> str:
+        for secret in secrets:
+            part = part.replace(secret, "***")
+        return part
+
+    return MIX_FAILED.join(hide(part) for part in text.split(MIX_FAILED))
 
 
 def _summary(stdout: str) -> dict | None:

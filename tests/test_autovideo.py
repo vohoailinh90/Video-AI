@@ -699,6 +699,18 @@ class RunnerTests(FakeMptCase):
             log.write_bytes(original)
         self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "qa_failed")  # the real log gives the real answer again
 
+    def test_hiding_a_short_secret_does_not_hide_the_music_failure_from_qa(self):
+        # MPT's marker is public text from its source, and QA needs it whole; a secret that happens to be a word of it must not break it
+        (self.env.home / "config.toml").write_text(
+            f'[app]\npexels_api_keys = ["{SECRET}"]\ntest_secret = "music"\nsubtitle_provider = "edge"\n', encoding="utf-8")
+        summary, _ = self.run_pack([video(title="MIXERR")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "qa_failed")
+        self.assertIn("music_mixed", summary["videos"][0]["qa_failures"])
+        self.assertIn("failed to mix background music", (self.out / "test-batch" / "01-first" / "mpt.log").read_text())
+        # the secret is still hidden wherever it appears outside that marker
+        text = engine_mpt.redact("failed to mix background music: file=music.mp3; some music", self.env)
+        self.assertEqual(text, "failed to mix background music: file=***.mp3; some ***")
+
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
         self.assertEqual((summary["qa_failed"], self.renders()), (1, 2))
