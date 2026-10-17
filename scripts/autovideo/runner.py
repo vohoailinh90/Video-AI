@@ -117,22 +117,23 @@ def qa_basis(job: Job) -> list[float]:
 def job_status(entry: dict | None, job: Job, dest: Path) -> str:
     """What a job amounts to now: pending, stale, missing, unchecked, or the status its last run recorded (done, qa_failed, failed, running).
 
-    `done` is only said when the state, the files and the QA limits agree: the state alone is not enough, because a failed render of an
-    edited job leaves the old video in the folder, a video can be deleted, and narrowing target_seconds changes what passes."""
+    `done` (and `qa_failed`) is only said when the state, the files and the QA limits agree: the state alone is not enough, because a
+    failed render of an edited job leaves the old video in the folder, a video can be deleted, and changing target_seconds changes what
+    passes, in both directions."""
     if not entry:
         return "pending"
     if entry.get("fingerprint") != job.fingerprint():
         return "stale"  # the pack changed after it was rendered
     status = entry.get("status", "pending")
-    if status != "done":
+    if status not in ("done", "qa_failed"):
         return status
     if not (dest / "video.mp4").is_file():
         return "missing"
     if rendered_fingerprint(dest) != job.fingerprint():
         return "stale"
     if entry.get("qa_basis") != qa_basis(job):
-        return "unchecked"  # done under other QA limits
-    return "done"
+        return "unchecked"  # judged under other QA limits
+    return status
 
 
 def run(
@@ -165,9 +166,17 @@ def run(
         status = "pending" if force else job_status(entry, job, dest)
         if status == "unchecked":
             # Only the QA limits changed since the last check: look at the video that is there again, do not render it again.
-            status = requalify_job(job, dest, state)["status"]
+            checked = requalify_job(job, dest, state)
             write_json(batch_dir / "state.json", state)
+            status = checked["status"]
             log(f"{label}: QA limits changed, checked again: {status}")
+            if status == "qa_failed":
+                # Nothing that goes into the render changed, so rendering again would give the same video: report it and go on.
+                # Changing the pack renders it again, and so does `run --force --only {id}`.
+                failures = [c["name"] for c in checked["checks"] if c["level"] == "error" and not c["ok"]]
+                log(f"{label}: still fails QA ({', '.join(failures)}); edit the pack or the limits, or run --force --only {job.id} to render again")
+                rows.append({"id": job.id, "status": "qa_failed", "seconds": entry.get("seconds"), "qa_failures": failures})
+                continue
         if status == "done":
             log(f"{label}: done already, skipped")
             rows.append({"id": job.id, "status": "skipped", "seconds": entry.get("seconds"), "qa_failures": []})

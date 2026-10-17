@@ -57,8 +57,15 @@ def locate(home: str | os.PathLike | None = None, python: str | None = None) -> 
         )
     chosen = python or os.environ.get("MPT_PYTHON")
     if chosen:
-        # A path (not a bare command name) is relative to where the user is, and MPT is started from its own directory.
-        return MptEnv(path, (str(Path(chosen).expanduser().resolve()) if os.sep in chosen else chosen,))
+        if os.sep in chosen:
+            # A path (not a bare command name) is relative to where the user is, and MPT is started from its own directory.
+            command = str(Path(chosen).expanduser().resolve())
+            runnable = Path(command).is_file() and os.access(command, os.X_OK)
+        else:
+            command, runnable = chosen, shutil.which(chosen) is not None
+        if not runnable:
+            raise MptError(f"cannot run {chosen!r} (from --mpt-python or $MPT_PYTHON): it is not an executable file, nor a command on PATH")
+        return MptEnv(path, (command,))
     venv_python = path / ".venv" / "bin" / "python"
     if venv_python.is_file():
         return MptEnv(path, (str(venv_python),))
@@ -150,7 +157,10 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     manifest = workdir.resolve() / "mpt-task.jsonl"  # MPT runs in its own directory, so a relative path would not be found there
     manifest.write_text(json.dumps(video_params(job), ensure_ascii=False) + "\n", encoding="utf-8")
     cmd = [*env.python, "cli.py", "--batch-file", str(manifest), "--stop-at", "video"]
-    proc = subprocess.Popen(cmd, cwd=env.home, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        proc = subprocess.Popen(cmd, cwd=env.home, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except OSError as exc:  # the interpreter went away after locate(), or cannot be executed
+        return EngineResult(False, failed_stage="startup", error=f"cannot start {env.python[0]}: {exc.strerror or exc}")
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

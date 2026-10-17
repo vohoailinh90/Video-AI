@@ -103,6 +103,11 @@ class FakeMptCase(unittest.TestCase):
     def state(self):
         return json.loads((self.out / "test-batch" / "state.json").read_text())["jobs"]
 
+    def renders(self) -> int:
+        """How many times the fake MPT ran (it makes one task folder per run)."""
+        tasks = self.env.home / "storage" / "tasks"
+        return len(list(tasks.glob("*"))) if tasks.exists() else 0
+
 
 class PackTests(unittest.TestCase):
     def setUp(self):
@@ -179,10 +184,19 @@ class PackTests(unittest.TestCase):
         env = fake_mpt(self.root)
         (self.root / "bin").mkdir()
         (self.root / "bin" / "py").write_text("")
+        (self.root / "bin" / "py").chmod(0o755)
         with contextlib.chdir(self.root):
             located = engine_mpt.locate(str(env.home), "bin/py")
         self.assertEqual(located.python, (str((self.root / "bin" / "py").resolve()),))
         self.assertEqual(engine_mpt.locate(str(env.home), "python3").python, ("python3",))
+
+    def test_locate_refuses_a_python_that_cannot_run(self):
+        env = fake_mpt(self.root)
+        (self.root / "plain.txt").write_text("not executable")
+        for bad in (str(self.root / "missing" / "python"), "no-such-command-anywhere", str(self.root / "plain.txt")):
+            with self.assertRaises(engine_mpt.MptError, msg=bad) as ctx:
+                engine_mpt.locate(str(env.home), bad)
+            self.assertIn("--mpt-python", str(ctx.exception))
 
     def test_mpt_params_for_each_kind_of_job(self):
         job = packmod.load_pack(write_pack(self.root, [video(bgm="none")])).jobs[0]
@@ -338,13 +352,29 @@ class RunnerTests(FakeMptCase):
 
     def test_narrowed_target_seconds_that_no_longer_holds_is_not_reported_done(self):
         self.run_pack([video()])
-        summary, _ = self.run_pack([video()], {"target_seconds": [1, 2]}, retries=0)  # the video is 3 s: too long now
+        summary, _ = self.run_pack([video()], {"target_seconds": [1, 2]}, retries=2)  # the video is 3 s: too long now
         self.assertEqual((summary["skipped"], summary["qa_failed"]), (0, 1))
         self.assertIn("duration", summary["videos"][0]["qa_failures"])
+        self.assertEqual(self.renders(), 1)  # nothing that goes into the render changed, so it was not rendered again
+        self.assertEqual(self.state()["01-first"]["status"], "qa_failed")
+
+    def test_widened_target_seconds_checks_a_qa_failed_video_again_without_rendering(self):
+        self.run_pack([video()], {"target_seconds": [1, 2]}, retries=0)  # 3 s video: fails QA on duration
+        self.assertEqual(self.state()["01-first"]["status"], "qa_failed")
+        summary, _ = self.run_pack([video()], retries=0)  # limits back to [1, 30]: the same video passes
+        self.assertEqual((summary["done"], summary["skipped"], summary["qa_failed"]), (0, 1, 0))
+        self.assertEqual(self.renders(), 1)
+        self.assertEqual(self.state()["01-first"]["status"], "done")
 
     def test_run_refuses_a_negative_retry_count(self):
         with self.assertRaises(ValueError):
             self.run_pack([video()], retries=-1)
+
+    def test_a_python_that_cannot_start_is_a_startup_failure_not_a_traceback(self):
+        broken = engine_mpt.MptEnv(self.env.home, (str(self.root / "gone" / "python"),))
+        summary, _ = self.run_pack([video("01-a"), video("02-b")], env=broken, retries=2)
+        self.assertEqual([r["stage"] for r in summary["videos"]], ["startup", "startup"])  # both ran, none crashed the batch
+        self.assertEqual(self.state()["01-a"]["attempts"], 1)  # and a second try cannot help
 
     def test_timeout_kills_the_engine(self):
         (self.env.home / "cli.py").write_text("import time\ntime.sleep(60)\n")
@@ -434,6 +464,16 @@ class CliTests(FakeMptCase):
         self.assertEqual(status(write_pack(self.root, [video()], {"target_seconds": [1, 2]})), (1, "unchecked"))  # the limits changed, no QA since
         (folder / "video.mp4").unlink()
         self.assertEqual(status(path), (1, "missing"))
+
+    def test_status_of_a_qa_failed_video_follows_the_limits_too(self):
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        self.call("run", str(write_pack(self.root, [video()], {"target_seconds": [1, 2]})), "--retries", "0", *base)
+        status = lambda p: (lambda r: (r[0], json.loads(r[1])[0]["status"]))(self.call("status", str(p), "--json", *base))
+        self.assertEqual(status(write_pack(self.root, [video()], {"target_seconds": [1, 2]})), (1, "qa_failed"))
+        widened = write_pack(self.root, [video()], {"target_seconds": [1, 30]})
+        self.assertEqual(status(widened), (1, "unchecked"))  # the limit that failed it is gone, but nobody looked again
+        self.assertEqual(self.call("qa", str(widened), *base)[0], 0)
+        self.assertEqual(status(widened), (0, "done"))
 
     def test_qa_after_new_limits_makes_status_truthful_again(self):
         base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]

@@ -77,6 +77,7 @@ muốn nghe lại thì dùng `scripts/vo/roundtrip.py` (PhoWhisper).
 
 Mỗi video được đo trên file thật. Mục `error` mà trượt thì không đăng: đọc được, có một luồng hình, có tiếng, đúng khổ, độ dài trong `target_seconds`,
 tiếng không im lặng (trung bình dưới -50 dB), phụ đề có đủ, đúng thứ tự, không vượt độ dài video, và phủ ít nhất 80% từ của lời đọc. Mục `warn`: độ dài video lệch quá 3 giây so với tiếng.
+Đổi `target_seconds` không làm render lại: `run` và `qa` chỉ kiểm lại video có sẵn (`status` báo `unchecked` cho tới khi kiểm). Video vẫn trượt thì giữ `qa_failed`; sửa gói hoặc ngưỡng, hoặc `run --force --only <id>` để render lại.
 Khóa API trong log của MPT bị thay bằng `***` trước khi lưu.
 
 ## Đã kiểm tra gì, chưa kiểm tra gì
