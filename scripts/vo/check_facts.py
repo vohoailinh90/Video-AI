@@ -36,6 +36,7 @@ import argparse
 import hashlib
 import json
 import re
+import string
 import sys
 import unicodedata
 from collections import Counter
@@ -326,7 +327,9 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
         return False
     if len(parts) == 1:
         return True
-    return re.search(rf"(?<![a-z0-9_]){re.escape(low)}(?![a-z0-9_])", source_blob) is not None
+    # whole, by the grammar of NAME: nothing that continues a name (letters, digits, _, a - or . and a letter after it, + or #) may touch it
+    # on either side, so https://foo.com/example/repo is not in https://foo.com/example/repo-extra, nor foo.com/x in my-foo.com/x
+    return re.search(rf"(?<![a-z0-9_])(?<![a-z0-9_][-.]){re.escape(low)}(?![a-z0-9_]|[-.][a-z0-9_]|\+|#)", source_blob) is not None
 
 
 def canonical(number: str) -> str:
@@ -345,17 +348,44 @@ def numbers(text: str) -> set:
     return {canonical(n) for n in NUMBER.findall(text)} - {""}
 
 
+VIETNAMESE_SYLLABLE = re.compile(r"(?:ngh|ng|gh|nh|ph|th|tr|ch|kh|gi|qu|[bcdghklmnprstvx])?[aeiouy]{1,3}(?:ng|nh|ch|[cmnpt])?")
+EDGE_PUNCTUATION = "".join(c for c in string.punctuation if c not in "+#_")
+
+
+def vietnamese_syllable(piece: str) -> bool:
+    """A syllable of written Vietnamese: with its tone marks and diacritics taken off (ư, ơ, ê, đ ...) it is an optional initial
+    consonant, one to three vowels and an optional final consonant (Việt, nghiêng, Nguyễn, quyển). GPTé, npmé and C++é are not."""
+    base = "".join(c for c in unicodedata.normalize("NFD", piece.strip(EDGE_PUNCTUATION).lower()) if unicodedata.category(c) != "Mn")
+    return VIETNAMESE_SYLLABLE.fullmatch(base.replace("đ", "d")) is not None
+
+
+def glued_names(chunk: str):
+    """The names in a chunk that holds a letter outside ASCII. Its syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh) are words and are
+    left out; whatever is not one is a name with a letter glued on (ElevenLabsé, GPTé, npmé, C++é), however short, and the letters
+    of other alphabets stand for a break."""
+    kept = []
+    for piece in re.split(r"([-./:]+)", chunk):
+        if re.fullmatch(r"[-./:]+", piece) or not vietnamese_syllable(piece):
+            kept.append(re.sub(r"[^\x00-\x7f]", " ", piece))
+        else:
+            kept.append(" ")
+    for name in "".join(kept).split():
+        name = name.strip(".:,;-/")
+        if name:
+            yield name
+
+
 def ascii_chunks(text: str, need_letter: bool = True):
     """The chunks of a text made only of ASCII (names, acronyms, commands, addresses; a chunk ends at a space or at one of SPLIT).
     A character outside ASCII that is not a letter (a symbol like (tm) or an emoji, a zero-width or combining mark) ends a word and
-    hides nothing; a non-ASCII letter makes the chunk a Vietnamese word (only its runs of five or more ASCII letters are kept)."""
+    hides nothing; a chunk with a non-ASCII letter is a Vietnamese word unless it is not one (see glued_names)."""
     text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in unicodedata.normalize("NFC", text))
     for chunk in SPLIT.split(text):
         chunk = chunk.strip(".:,;")
         if re.search(r"[^\x00-\x7f]", chunk):
-            # A Vietnamese word, or a name with a letter glued on (ElevenLabsé). No Vietnamese syllable has five ASCII letters in a
-            # row, so a run of that length in such a chunk is a name; shorter runs are pieces of a word and are not compared.
-            yield from re.findall(r"[A-Za-z]{5,}", chunk)
+            for name in glued_names(chunk):
+                if not need_letter or re.search(r"[A-Za-z]", name):
+                    yield name
         elif chunk and (not need_letter or re.search(r"[A-Za-z]", chunk)):
             yield chunk
 

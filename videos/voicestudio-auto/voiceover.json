@@ -14,7 +14,8 @@
         "facts.full_name",
         "draft.hook"
       ],
-      "voiced": "9d7cb98d030d"
+      "voiced": "9d7cb98d030d",
+      "clip": "845a499bc401e416"
     },
     {
       "id": "vo-2",
@@ -26,7 +27,8 @@
       "source": [
         "draft.problem"
       ],
-      "voiced": "30531635b667"
+      "voiced": "30531635b667",
+      "clip": "f42a8575eef9e9fb"
     },
     {
       "id": "vo-3",
@@ -38,7 +40,8 @@
       "source": [
         "draft.problem"
       ],
-      "voiced": "e9ed153a445c"
+      "voiced": "e9ed153a445c",
+      "clip": "30894b9a33bbc0da"
     },
     {
       "id": "vo-4",
@@ -50,7 +53,8 @@
       "source": [
         "draft.how_it_works.steps[0]"
       ],
-      "voiced": "777049f657ec"
+      "voiced": "777049f657ec",
+      "clip": "b943ec919ebcda75"
     },
     {
       "id": "vo-5",
@@ -62,7 +66,8 @@
       "source": [
         "draft.how_it_works.steps[1]"
       ],
-      "voiced": "4ef05412ede4"
+      "voiced": "4ef05412ede4",
+      "clip": "32f429c68c8d022d"
     },
     {
       "id": "vo-6",
@@ -74,7 +79,8 @@
       "source": [
         "draft.how_it_works.steps[2]"
       ],
-      "voiced": "7cee4a12ce77"
+      "voiced": "7cee4a12ce77",
+      "clip": "af8a4019e1b5b3bb"
     },
     {
       "id": "vo-7",
@@ -86,7 +92,8 @@
       "source": [
         "draft.learn[0]"
       ],
-      "voiced": "c36e490fb6df"
+      "voiced": "c36e490fb6df",
+      "clip": "5fb6e04120e43eba"
     },
     {
       "id": "vo-8",
@@ -98,7 +105,8 @@
       "source": [
         "draft.learn[1]"
       ],
-      "voiced": "355cf2b15e4d"
+      "voiced": "355cf2b15e4d",
+      "clip": "afdae093a72e9aeb"
     },
     {
       "id": "vo-9",
@@ -111,7 +119,8 @@
         "draft.caveats[0]"
       ],
       "speak": "Mã nguồn dùng giấy phép AGPL ba chấm không, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng.",
-      "voiced": "68a00ed91cbe"
+      "voiced": "68a00ed91cbe",
+      "clip": "284b7528334d32f8"
     }
   ]
 }

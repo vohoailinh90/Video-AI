@@ -750,6 +750,31 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("debpalash/OmniVoice"), ["token 'debpalash/OmniVoice'"])
         self.assertEqual(untraced("VoiceStudio và OmniVoice"), [])                 # separate names are still fine
 
+    def test_a_compound_name_is_not_found_inside_a_longer_one(self):
+        parts = {"a": "repo", "b": "example", "c": "x", "d": "foo.com", "e": "https", "f": "c"}
+        longer = check_facts.blob({**parts, "url": "https://foo.com/example/repo-extra", "other": "my-foo.com/x", "lang": "github.com/o/c++"})
+        untraced = lambda text, source=longer: check_facts.untraced(text, source, set())
+        # every part is a name of the source, but the address is only there with something after (or before) it
+        self.assertEqual(untraced("https://foo.com/example/repo"), ["token 'https://foo.com/example/repo'"])
+        self.assertEqual(untraced("foo.com/x"), ["token 'foo.com/x'"])
+        self.assertEqual(untraced("github.com/o/c"), ["token 'github.com/o/c'"])
+        self.assertEqual(untraced("https://foo.com/example/repo-extra"), [])
+        whole = check_facts.blob({**parts, "url": "https://foo.com/example/repo", "other": "see foo.com/x."})
+        self.assertEqual(untraced("https://foo.com/example/repo, foo.com/x.", whole), [])      # a full stop or a comma after it ends it
+        self.assertEqual(untraced("https://foo.com/example/repo.git", whole), ["token 'https://foo.com/example/repo.git'"])
+
+    def test_a_short_name_glued_to_a_letter_is_still_checked(self):
+        source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
+        untraced = lambda text, source=source: check_facts.untraced(text, source, set())
+        for glued, name in (("GPTé", "GPT"), ("npmé", "npm"), ("C++é", "C++"), ("Việt-GPTé", "GPT"), ("éGPT", "GPT"), ("Tōkyō", "ky")):
+            self.assertEqual(untraced(glued), [f"token '{name}'"], glued)
+        self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPT"})), [])            # the name the source has, with a letter glued on
+        self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPTé"})), [])
+        # a syllable of Vietnamese is a word, not a name, whatever it is made of
+        self.assertEqual(untraced("Việt, Hà Nội, Hồ-Chí-Minh, nghiêng, khuỷu, Nguyễn, quyển, thuyền, uống, ngoằn, Đức, ừm, ý, giường, gì, loắt, hoặc"), [])
+        self.assertTrue(all(check_facts.vietnamese_syllable(word) for word in ("Việt", "Đà", "nghiêng", "ừ", "ơ", "Huế", "yêu", "khuỷu")))
+        self.assertFalse(any(check_facts.vietnamese_syllable(word) for word in ("GPTé", "npmé", "C++é", "Müller", "café")))
+
     def test_the_narration_has_to_be_in_the_render_not_just_the_music(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -833,6 +858,11 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(planlib.solution_index(["a", "VoiceStudio's chạy cục bộ.", "b"], "VoiceStudio"), 1)      # a possessive is still the name
         self.assertEqual(planlib.solution_index(["a", "(VoiceStudio) chạy cục bộ.", "b"], "voicestudio"), 1)
         self.assertEqual(planlib.solution_index(["a", "Không có tên.", "Cũng không."], "Go"), 2)                  # none names it: the last one
+        # a + or # after a name belongs to it, as the facts gate reads names: C is not C++ or C#
+        self.assertEqual(planlib.solution_index(["a", "C++ nhanh hơn nhiều.", "C là ngôn ngữ cũ."], "C"), 2)
+        self.assertEqual(planlib.solution_index(["a", "Viết bằng C#.", "C đơn giản."], "C"), 2)
+        self.assertEqual(planlib.solution_index(["a", "C++ nhanh.", "Cũng vậy."], "C++"), 1)                      # the name with its signs is found
+        self.assertEqual(planlib.solution_index(["a", "C, C++ và Go.", "Kết thúc."], "C"), 1)                      # a comma after it ends it
 
     def test_the_page_of_a_generated_project_is_what_compose_writes(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
@@ -961,19 +991,25 @@ class ReviewFindings(unittest.TestCase):
         plan = planlib.build_plan(digest)
         tl = planlib.timeline(plan, estimated_durations(plan))
         doc = make_video.voiceover_doc(plan, tl)
-        self.assertEqual(make_video.stale_voices(doc), [line["id"] for line in doc["lines"]])       # nothing was voiced yet
-        for line in doc["lines"]:
-            line["voiced"] = make_video.voiced_fingerprint(line["text"])
-        self.assertEqual(make_video.stale_voices(doc), [])
-        # the file is rewritten when the project is (voice does it): the record of what was voiced stays with each line
-        again = make_video.voiceover_doc(plan, tl, doc)
-        self.assertEqual([l["voiced"] for l in again["lines"]], [l["voiced"] for l in doc["lines"]])
-        # a line reworded afterwards, and not voiced again, is named
-        first = doc["lines"][0]
-        first["text"] = first["text"].replace("VoiceStudio", "VoiceStudio hôm nay", 1)
-        self.assertEqual(make_video.stale_voices(doc), [first["id"]])
-        first["voiced"] = make_video.voiced_fingerprint(first["text"])
-        self.assertEqual(make_video.stale_voices(doc), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = Path(tmp) / "assets"
+            assets.mkdir()
+            for line in doc["lines"]:
+                (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
+            self.assertEqual(make_video.stale_voices(doc, assets), [line["id"] for line in doc["lines"]])       # nothing was voiced yet
+            for line in doc["lines"]:
+                line["voiced"] = make_video.voiced_fingerprint(line["text"])
+                line["clip"] = make_video.clip_fingerprint(assets / f"{line['id']}.wav")
+            self.assertEqual(make_video.stale_voices(doc, assets), [])
+            # the file is rewritten when the project is (voice does it): the record of what was voiced stays with each line
+            again = make_video.voiceover_doc(plan, tl, doc)
+            self.assertEqual([(l["voiced"], l["clip"]) for l in again["lines"]], [(l["voiced"], l["clip"]) for l in doc["lines"]])
+            # a line reworded afterwards, and not voiced again, is named
+            first = doc["lines"][0]
+            first["text"] = first["text"].replace("VoiceStudio", "VoiceStudio hôm nay", 1)
+            self.assertEqual(make_video.stale_voices(doc, assets), [first["id"]])
+            first["voiced"] = make_video.voiced_fingerprint(first["text"])
+            self.assertEqual(make_video.stale_voices(doc, assets), [])
         # and the render command stops before any slow step
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -984,6 +1020,27 @@ class ReviewFindings(unittest.TestCase):
             args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None})()
             with self.assertRaises(SystemExit):
                 make_video.cmd_render(args, project)
+
+    def test_a_clip_swapped_for_another_lines_is_not_rendered(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = Path(tmp)
+            for line in doc["lines"]:
+                (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
+                line["voiced"] = make_video.voiced_fingerprint(line["text"])
+                line["clip"] = make_video.clip_fingerprint(assets / f"{line['id']}.wav")
+            self.assertEqual(make_video.stale_voices(doc, assets), [])
+            # the second line's file becomes a copy of the first line's: the words are the ones that were voiced, the clip is not
+            shutil.copyfile(assets / "vo-1.wav", assets / "vo-2.wav")
+            self.assertEqual(make_video.stale_voices(doc, assets), ["vo-2"])
+            (assets / "vo-2.wav").unlink()                                                          # a clip that is gone is named too
+            self.assertEqual(make_video.stale_voices(doc, assets), ["vo-2"])
+            (assets / "vo-2.wav").write_bytes(b"clip of vo-2")                                      # the recorded file, back: fine
+            self.assertEqual(make_video.stale_voices(doc, assets), [])
+            del doc["lines"][2]["clip"]                                                             # a project voiced before clips were recorded
+            self.assertEqual(make_video.stale_voices(doc, assets), [doc["lines"][2]["id"]])
 
     def test_a_digest_url_with_a_query_or_fragment_is_refused(self):
         for url in ("https://github.com/o/r?access_token=SECRET", "https://github.com/o/r#SECRET", "https://github.com/o/r?"):
