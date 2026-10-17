@@ -63,7 +63,7 @@ python3 scripts/autovideo/main.py status   batches/meo-lam-video      # pending 
 python3 scripts/autovideo/main.py qa       batches/meo-lam-video      # chạy lại QA trên video đã có, không render
 ```
 
-Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`, tính cả file thật và ngưỡng QA hiện tại), 1 có video lỗi, không qua QA, chưa render, mất hoặc hỏng file kết quả (`missing`: thiếu file, hoặc nội dung file khác với lúc render (so băm SHA-256, nên `status` và `run` đọc mỗi file kết quả một lần)), hoặc là bản cũ so với gói (`stale`) (với `plan`: không tìm thấy MPT, hoặc thiếu khóa/font/nhạc khiến `run` không chạy được), 2 gói hoặc tham số sai (kể cả `--retries` âm, `--timeout` không dương), 3 một lần chạy khác đang giữ batch. Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
+Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`, tính cả file thật và ngưỡng QA hiện tại), 1 có video lỗi, không qua QA, chưa render, mất hoặc hỏng file kết quả (`missing`: thiếu file, hoặc nội dung file khác với lúc render; tính cả `mpt.log` vì QA đọc nó để biết nhạc có được trộn không (so băm SHA-256, nên `status` và `run` đọc mỗi file kết quả một lần)), hoặc là bản cũ so với gói (`stale`) (với `plan`: không tìm thấy MPT, hoặc thiếu khóa/font/nhạc khiến `run` không chạy được), 2 gói hoặc tham số sai (kể cả `--retries` âm, `--timeout` không dương), 3 một lần chạy khác đang giữ batch. Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
 
 ```
 state.json  summary.json  summary.md

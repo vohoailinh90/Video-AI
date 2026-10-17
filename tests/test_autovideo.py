@@ -687,6 +687,18 @@ class RunnerTests(FakeMptCase):
             summary, _ = self.run_pack([video(title="MIXERR")], no_music, retries=0)
             self.assertEqual(summary["videos"][0]["status"], "done", no_music)
 
+    def test_the_log_that_qa_reads_cannot_be_removed_to_turn_a_failure_into_a_pass(self):
+        summary, pack = self.run_pack([video(title="MIXERR")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "qa_failed")  # music_mixed, from the line in mpt.log
+        log = self.out / "test-batch" / "01-first" / "mpt.log"
+        original = log.read_bytes()
+        for tamper in (lambda: log.unlink(), lambda: log.write_bytes(b"")):
+            tamper()
+            self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "missing")  # QA's own evidence is gone: nothing whole to check
+            self.assertEqual(self.state()["01-first"]["status"], "qa_failed")  # and the job was not turned into done
+            log.write_bytes(original)
+        self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "qa_failed")  # the real log gives the real answer again
+
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
         self.assertEqual((summary["qa_failed"], self.renders()), (1, 2))

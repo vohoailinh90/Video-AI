@@ -156,12 +156,12 @@ def _sha256(path: Path) -> str | None:
 
 
 def stored_outputs(dest: Path) -> dict[str, str]:
-    """Name and SHA-256 of every result file in a job's folder: the video, the narration and subtitles when there are any, and the
-    transcripts. The state keeps them so that a render which is later cut short, loses a file, or has a file swapped for another is not
-    still called finished. They are taken from the folder when QA accepts or refuses it (after a render, and after `qa`), so a file the
-    owner added by hand and QA then counted is covered from then on. job.json is not in the list: its content is checked against the
-    job's fingerprint."""
-    names = ["video.mp4", *sorted(p.name for p in dest.glob("narration.*")), "subtitles.srt", "transcript.txt", "transcript.json"]
+    """Name and SHA-256 of every result file in a job's folder: the video, the narration and subtitles when there are any, the
+    transcripts, and MPT's log, which QA reads for the music. The state keeps them so that a render which is later cut short, loses a
+    file, or has a file swapped for another is not still called finished. They are taken from the folder when QA accepts or refuses it
+    (after a render, and after `qa`), so a file the owner added by hand and QA then counted is covered from then on. job.json is not in
+    the list: its content is checked against the job's fingerprint."""
+    names = ["video.mp4", *sorted(p.name for p in dest.glob("narration.*")), "subtitles.srt", "transcript.txt", "transcript.json", "mpt.log"]
     return {name: _sha256(dest / name) or "" for name in names if (dest / name).is_file()}
 
 
