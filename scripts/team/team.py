@@ -473,9 +473,21 @@ def export_head(repo: Path, dest: Path) -> None:
 
 # ------------------------------------------------------------- spec handling
 
+def map_files(files: list[str]) -> list[str]:
+    """What the repo map lists. A video repository carries upstream HyperFrames skills (hundreds of
+    files, pinned by skills-lock.json) that would fill the whole map: the video team lists each
+    skill's SKILL.md and nothing below it, so `videos/` and the repo's own files stay visible."""
+    if team_lead().name != "video":
+        return files
+    return [path for path in files
+            if not path.startswith(".claude/skills/") or (path.endswith("/SKILL.md") and path.count("/") == 3)]
+
+
 def repo_map(repo: Path, max_lines: int) -> str:
-    files = git(repo, "ls-files").splitlines()
-    lines = [f"# repo map ({len(files)} tracked files)", "", "## signatures"]
+    tracked = git(repo, "ls-files").splitlines()
+    files = map_files(tracked)
+    omitted = f", {len(tracked) - len(files)} upstream skill files not listed" if len(files) != len(tracked) else ""
+    lines = [f"# repo map ({len(tracked)} tracked files{omitted})", "", "## signatures"]
     for rel in files:
         pattern = SIGNATURES.get(Path(rel).suffix)
         path = repo / rel

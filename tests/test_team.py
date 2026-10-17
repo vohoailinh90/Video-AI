@@ -1715,6 +1715,26 @@ class VideoTeamTests(Sandbox):
             self.assertIn(flag, (ROOT / "scripts" / "team" / "setup-vps-team.sh").read_text() + (ROOT / "scripts" / "team" / "team.py").read_text())
         self.assertIn("docs/vps-team-video.md", (ROOT / "docs" / "vps-team.md").read_text(encoding="utf-8"))
 
+    def test_the_video_repo_map_lists_the_videos_not_the_upstream_skill_internals(self):
+        repo = self.tmp / "maprepo"
+        for rel, text in {".claude/skills/hyper/SKILL.md": "# skill\n",
+                          ".claude/skills/hyper/scripts/frames.mjs": "export function buildFrames() {}\n",
+                          ".claude/skills/hyper/references/deep/a.md": "x\n",
+                          "videos/V0/index.html": "<html></html>\n", "CLAUDE.md": "rules\n"}.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        git(repo, "add", "-A")
+        video = team.repo_map(repo, 600)
+        for kept in ("videos/V0/index.html", "CLAUDE.md", ".claude/skills/hyper/SKILL.md", "(5 tracked files, 2 upstream"):
+            self.assertIn(kept, video)
+        for hidden in ("frames.mjs", "buildFrames", "references/deep/a.md"):
+            self.assertNotIn(hidden, video)
+        with mock.patch.dict(os.environ, {"TEAM_LEAD": "claude"}):
+            code = team.repo_map(repo, 600)
+        self.assertIn("buildFrames", code)
+        self.assertIn(".claude/skills/hyper/references/deep/a.md", code)
+
     def test_the_prompts_follow_the_video_ai_conventions(self):
         coder = run_cli("prompt", "coder", "V1")[1]
         self.assertIn("hyperframes init V1 --example blank --non-interactive", coder)

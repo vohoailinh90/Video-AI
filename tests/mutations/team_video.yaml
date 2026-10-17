@@ -54,3 +54,11 @@ mutations:
   find: '        if team_lead().name != "video":'
   replace: '        if False:'
   test: tests.test_team.VideoTeamTests.test_smoke_is_refused_outside_the_video_team
+- label: the video repo map is filled with upstream skill internals
+  find: "    if team_lead().name != \"video\":\n        return files\n"
+  replace: "    return files\n"
+  test: tests.test_team.VideoTeamTests.test_the_video_repo_map_lists_the_videos_not_the_upstream_skill_internals
+- label: the code teams lose their skill files from the repo map
+  find: "    if team_lead().name != \"video\":\n        return files\n"
+  replace: "    if False:\n        return files\n"
+  test: tests.test_team.VideoTeamTests.test_the_video_repo_map_lists_the_videos_not_the_upstream_skill_internals
