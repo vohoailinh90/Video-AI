@@ -834,6 +834,57 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(planlib.solution_index(["a", "(VoiceStudio) chạy cục bộ.", "b"], "voicestudio"), 1)
         self.assertEqual(planlib.solution_index(["a", "Không có tên.", "Cũng không."], "Go"), 2)                  # none names it: the last one
 
+    def test_the_page_of_a_generated_project_is_what_compose_writes(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "source").mkdir()
+            (project / "assets").mkdir()
+            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
+            durations = {}
+            for unit in plan["units"]:
+                durations[unit["id"]] = unit["est"]
+                subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", str(unit["est"]),
+                                str(project / "assets" / f"{unit['id']}.wav")], check=True)
+            tl = planlib.timeline(plan, {uid: make_video.clip_seconds(project / "assets" / f"{uid}.wav") for uid in durations})
+            make_video.write_composition(project, plan, tl)
+            make_video.make_pad(project / "assets" / "pad.wav", tl["duration"])
+            page = project / "index.html"
+            original = page.read_text(encoding="utf-8")
+            make_video.require_generated_page(project)                                  # what voice wrote is what compose writes
+            # revoice.py sets the level of each voice clip, nothing else
+            page.write_text(re.sub(r'(<audio id="vo-1"[^>]*?) data-volume="[^"]*"', r'\1 data-volume="1.37"', original), encoding="utf-8")
+            make_video.require_generated_page(project)
+            tampered = {
+                "gsap hides the commands": original.replace("window.__timelines[", 'tl.set(".term .cmd", { opacity: 0 }, 0);\n      window.__timelines[', 1),
+                "a statement of the template's own kind on a command": original.replace("window.__timelines[", 'fadeOut("#s5-cmd0", 1);\n      window.__timelines[', 1),
+                "the music bed is turned up": original.replace('id="music-bed" src="assets/pad.wav" data-start="0"', 'id="music-bed" src="assets/pad.wav" data-start="5"', 1),
+                "a timing moved": re.sub(r'(<section id="s2" class="clip" data-start=")[\d.]+', r"\g<1>1", original, count=1),
+                "a word of the page changed": original.replace(">Python<", ">Python hơn<", 1),
+                "a comment": original.replace("</body>", "<!-- note --></body>", 1),
+            }
+            for what, changed in tampered.items():
+                self.assertNotEqual(changed, original, what)
+                page.write_text(changed, encoding="utf-8")
+                with self.assertRaises(SystemExit, msg=what):
+                    make_video.require_generated_page(project)
+            # rebuild writes the page again from the digest and the clips, with no model and no network
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp})()
+            make_video.cmd_rebuild(args, project)
+            make_video.require_generated_page(project)
+            self.assertEqual(page.read_text(encoding="utf-8"), original)
+            page.write_text(re.sub(r'(<audio id="vo-1"[^>]*?) data-volume="[^"]*"', r'\1 data-volume="1.37"', original), encoding="utf-8")
+            make_video.cmd_rebuild(args, project)                                       # the level that revoice.py set is kept
+            self.assertIn('id="vo-1" src="assets/vo-1.wav"', page.read_text(encoding="utf-8"))
+            self.assertRegex(page.read_text(encoding="utf-8"), r'<audio id="vo-1"[^>]*data-volume="1.37"')
+            make_video.require_generated_page(project)
+            # a clip that is missing is named, not a traceback
+            (project / "assets" / "vo-2.wav").unlink()
+            with self.assertRaises(SystemExit):
+                make_video.require_generated_page(project)
+
     def rendered_plan(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
         return plan, planlib.timeline(plan, estimated_durations(plan))

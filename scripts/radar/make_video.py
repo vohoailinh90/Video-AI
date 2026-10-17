@@ -69,6 +69,37 @@ def whole_file_levels(path):
     return (float(mean.group(1)), float(peak.group(1))) if mean and peak else (None, None)
 
 
+def clip_durations(project: Path, doc) -> dict:
+    """Length of each line's clip in assets/; a missing clip stops the command with its name."""
+    missing = [line["id"] for line in doc["lines"] if not (project / "assets" / f"{line['id']}.wav").is_file()]
+    if missing:
+        fail(f"no clip in assets/ for {', '.join(missing)}; run `voice {rel(project)}` first")
+    return {line["id"]: clip_seconds(project / "assets" / f"{line['id']}.wav") for line in doc["lines"]}
+
+
+CLIP_VOLUME = re.compile(r'(<audio id="vo-[^"]*"[^>]*?) data-volume="[^"]*"')
+
+
+def expected_page(project: Path) -> str:
+    """The index.html that compose.py writes for this project: the digest in source/, the lines of voiceover.json, the clips in assets/."""
+    digest, plan, doc = load_project(project)
+    return compose.render(plan, planlib.timeline(plan, clip_durations(project, doc)))
+
+
+def require_generated_page(project: Path):
+    """index.html of a generated project is what compose.py writes, except the data-volume of the voice clips (revoice.py sets those).
+    The facts gate reads the page's text and a list of what its code may contain; this closes what a list cannot: an edit that uses
+    only what the template itself uses (a GSAP call that fades out a command row, a moved start time)."""
+    mask = lambda html: CLIP_VOLUME.sub(r'\1 data-volume="V"', html)
+    actual, expected = mask((project / "index.html").read_text(encoding="utf-8")), mask(expected_page(project))
+    if actual != expected:
+        lines = zip(actual.splitlines() + [""] * len(expected.splitlines()), expected.splitlines() + [""] * len(actual.splitlines()))
+        first = next(((n, a, e) for n, (a, e) in enumerate(lines, 1) if a != e), (0, "", ""))
+        fail(f"index.html is not what compose.py writes for this project (first difference at line {first[0]}: "
+             f"{first[1].strip()[:90]!r} instead of {first[2].strip()[:90]!r}). A change to the page belongs in compose.py; "
+             f"`make_video.py rebuild {rel(project)}` writes the page again from the digest and the clips")
+
+
 AUDIBLE_DB = -45.0     # a mean volume below this is a render with no narration in it (the voice sits near -20 dB)
 
 
@@ -373,6 +404,22 @@ def tool_env(base_env, hf_home):
     return env
 
 
+def cmd_rebuild(args, project=None):
+    """Write index.html, voiceover.json and the music bed again from source/, the lines and the clips in assets/ (no model, no network)."""
+    project = project or project_dir(args.project, args.videos_dir)
+    digest, plan, doc = load_project(project)
+    tl = planlib.timeline(plan, clip_durations(project, doc))
+    page = project / "index.html"
+    levels = dict(re.findall(r'<audio id="(vo-[^"]*)"[^>]*? data-volume="([^"]*)"', page.read_text(encoding="utf-8"))) if page.is_file() else {}
+    write_composition(project, plan, tl, doc)
+    make_pad(project / "assets" / "pad.wav", tl["duration"])
+    html = page.read_text(encoding="utf-8")
+    for clip, level in levels.items():                      # the levels revoice.py set stay; render sets them again anyway
+        html = re.sub(rf'(<audio id="{re.escape(clip)}"[^>]*?) data-volume="[^"]*"', rf'\1 data-volume="{level}"', html)
+    page.write_text(html, encoding="utf-8")
+    print(f"rebuilt {rel(project)}: video length {tl['duration']:.1f} s")
+
+
 def cmd_voice(args, project=None) -> dict:
     project = project or project_dir(args.project, args.videos_dir)
     if not args.tts_python:
@@ -466,6 +513,7 @@ def cmd_render(args, project=None) -> dict:
     project = project or project_dir(args.project, args.videos_dir)
     digest, plan, doc = load_project(project)
     gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
+    require_generated_page(project)
     stale = stale_voices(doc)
     if stale:
         fail(f"the clip of {', '.join(stale)} was not made from the line's current words (reworded since, or never voiced): "
@@ -643,6 +691,10 @@ def main() -> int:
     add_common(s)
     add_voice_args(s)
 
+    s = subs.add_parser("rebuild", help="write index.html and voiceover.json again from the digest and the clips (no model, no network)")
+    s.add_argument("project")
+    add_common(s)
+
     s = subs.add_parser("render", help="levels, check, render, measure, README and preview.json")
     s.add_argument("project")
     s.add_argument("--asr-python")
@@ -665,6 +717,8 @@ def main() -> int:
         cmd_scaffold(args)
     elif args.command == "voice":
         cmd_voice(args)
+    elif args.command == "rebuild":
+        cmd_rebuild(args)
     elif args.command == "render":
         cmd_render(args)
     else:
