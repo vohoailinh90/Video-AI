@@ -20,6 +20,7 @@ import json
 import re
 from pathlib import Path
 
+from check_facts import MAX_COMMANDS_SHOWN
 from numbers_vi import speak_text
 
 CHARS_PER_SECOND = 19.0   # measured on the Hai Dang narration of videos/voicestudio
@@ -32,7 +33,8 @@ TERMINAL_HOLD = 1.0          # seconds the finished terminal stays after its las
 TERM_FIRST, TERM_STEP, TERM_TYPE = 0.9, 0.5, 0.5   # after the heading, between commands, and the time one command takes to type
 
 SCENE_ORDER = ["cover", "problem", "how", "learn", "end"]
-MAX_STEPS, MAX_LEARN, MAX_CAVEATS, MAX_COMPONENTS, MAX_COMMANDS = 4, 3, 2, 6, 6
+MAX_STEPS, MAX_LEARN, MAX_CAVEATS, MAX_COMPONENTS = 4, 3, 2, 6
+MAX_COMMANDS = MAX_COMMANDS_SHOWN   # one number for the generator and for the gate that checks `commands_shown`
 
 
 def clean(text) -> str:

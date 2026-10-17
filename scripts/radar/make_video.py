@@ -189,16 +189,30 @@ def require_gate(project: Path) -> str:
     return output
 
 
+BUILD = REPO / "build"   # gitignored; one folder per project name
+
+
+def reset_build(project: Path):
+    """A new project starts with nothing from an earlier project that had the same name."""
+    shutil.rmtree(BUILD / project.name, ignore_errors=True)
+    shutil.rmtree(BUILD / f"{project.name}-preview", ignore_errors=True)
+
+
 def report_path(project: Path) -> Path:
-    return REPO / "build" / project.name / "report.json"
+    return BUILD / project.name / "report.json"
 
 
 def load_report(project: Path) -> dict:
+    """The project's report, or {} when there is none or it belongs to another project with the same name (another folder)."""
     path = report_path(project)
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not path.exists():
+        return {}
+    report = json.loads(path.read_text(encoding="utf-8"))
+    return report if report.get("project") == str(project.resolve()) else {}
 
 
 def save_report(project: Path, report: dict):
+    report["project"] = str(project.resolve())
     path = report_path(project)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, report)
@@ -219,6 +233,7 @@ def cmd_scaffold(args) -> Path:
     if project.exists():
         fail(f"{project} already exists; pick another --name (nothing is overwritten)")
     videos_dir.mkdir(parents=True, exist_ok=True)
+    reset_build(project)
     env = {**os.environ, "HYPERFRAMES_SKIP_SKILLS": "1", "DO_NOT_TRACK": "1"}
     init = run(["npx", "--yes", f"hyperframes@{HYPERFRAMES_VERSION}", "init", name, "--example", "blank", "--non-interactive"],
                cwd=videos_dir, env=env)
@@ -287,7 +302,7 @@ def cmd_voice(args, project=None) -> dict:
         fail(f"not a line of voiceover.json: {unknown}")
     voice_name = resolve_voice(args.voice, doc, load_report(project), set(only) != set(ids))
     doc["voice"] = voice_name
-    takes_dir = REPO / "build" / project.name / "takes"
+    takes_dir = BUILD / project.name / "takes"
     shutil.rmtree(takes_dir, ignore_errors=True)
     tts_env, asr_env = tool_env(os.environ, args.tts_hf_home), tool_env(os.environ, args.asr_hf_home)
 
@@ -353,7 +368,7 @@ def cmd_voice(args, project=None) -> dict:
 def final_mix_wer(args, project: Path, mp4: Path):
     if not args.asr_python:
         return None
-    out = REPO / "build" / project.name / "final-mix.json"
+    out = BUILD / project.name / "final-mix.json"
     result = run([args.asr_python, "-I", VO / "roundtrip.py", "--out", out, "--video", mp4, "--lines", project / "voiceover.json",
                   "--label", "final mix"], env=tool_env(os.environ, args.asr_hf_home))
     if result.returncode:
@@ -390,7 +405,7 @@ def cmd_render(args, project=None) -> dict:
     write_preview_json(project, plan, report)
     write_readme(project, plan, doc, report)
     if args.preview:
-        page = REPO / "build" / f"{project.name}-preview" / "index.html"
+        page = BUILD / f"{project.name}-preview" / "index.html"
         built = run([sys.executable, "-I", REPO / "scripts" / "preview" / "build_preview.py", "--config", project / "preview.json", "--out", page])
         if built.returncode:
             fail("build_preview.py failed:\n" + (built.stdout + built.stderr)[-1500:])

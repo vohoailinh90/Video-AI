@@ -12,7 +12,8 @@ A script decides, not a model, the way github-radar's gates do:
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
     traced;
   * each command in try_it.commands must appear on screen exactly as the digest gives it (voiceover.json's `commands_shown`, when
-    present, limits this to the first N commands, for a terminal that cannot show them all).
+    present, limits this to the first N commands, for a terminal that cannot show them all; N must be what the video can show,
+    min(commands, MAX_COMMANDS_SHOWN), or the gate fails).
 
 Numbers are compared without thousands separators (62.958 on screen equals 62958 in the facts). A Vietnamese word typed without
 any diacritic (giao, cho, ba) looks like a Latin token and is flagged when the source lacks it; list such a word in the
@@ -33,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
 from numbers_vi import speak_text  # noqa: E402
 
+MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; scripts/radar/plan.py takes its cap from here
 NUMBER = re.compile(r"\d[\d.,]*")
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
@@ -76,6 +78,11 @@ def resolve(root, path):
         for index in re.findall(r"\[(\d+)\]", match.group(2)):
             node = node[int(index)]
     return node
+
+
+def normalize(text) -> str:
+    """A command as the video shows it: no code backticks, one space between words (scripts/radar/plan.clean)."""
+    return re.sub(r"\s+", " ", str(text or "").replace("`", "")).strip()
 
 
 def blob(value) -> str:
@@ -154,10 +161,16 @@ def main() -> int:
     if problems:
         print(f"{args.html}: on-screen text not in the source: {', '.join(problems)}")
         failures += 1
-    commands = source["draft"].get("try_it", {}).get("commands", [])
+    commands = [normalize(c) for c in source["draft"].get("try_it", {}).get("commands", []) if normalize(c)]
+    required = commands
     if doc.get("commands_shown") is not None:      # a video may show only the first N commands, and says so here
-        commands = commands[:doc["commands_shown"]]
-    for command in commands:
+        expected = min(len(commands), MAX_COMMANDS_SHOWN)
+        if doc["commands_shown"] != expected:      # the claim is checked, not trusted: it cannot shrink the list of commands to find
+            print(f"{args.lines}: commands_shown is {doc['commands_shown']!r}, but a video of this digest shows "
+                  f"{expected} of its {len(commands)} commands")
+            failures += 1
+        required = commands[:expected]
+    for command in required:
         if command not in screen:
             print(f"{args.html}: command from try_it is not shown exactly: {command!r}")
             failures += 1

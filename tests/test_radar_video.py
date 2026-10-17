@@ -357,6 +357,45 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(make_video.voiceover_doc(plan, tl, doc)["voice"], "Mai Anh")
 
 
+    def test_commands_shown_is_checked_not_trusted(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html = compose.render(plan, tl)
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(doc["commands_shown"], 3)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        # a stale or edited 0, with the terminal's lines removed, must not slip through
+        doc["commands_shown"] = 0
+        bare = html
+        for command in ("bun install", "bun run setup:api", "bun run dev"):
+            bare = bare.replace(f">{command}<", "><")
+        status, output = run_gate(digest, doc, bare)
+        self.assertEqual(status, 1)
+        self.assertIn("commands_shown is 0", output)
+        # and one that is too large is refused as well
+        doc["commands_shown"] = 9
+        self.assertEqual(run_gate(digest, doc, html)[0], 1)
+
+    def test_a_report_of_another_project_with_the_same_name_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            saved = make_video.BUILD
+            make_video.BUILD = tmp / "build"
+            try:
+                a, b = tmp / "one" / "video", tmp / "two" / "video"
+                a.mkdir(parents=True), b.mkdir(parents=True)
+                make_video.save_report(a, {"voice": {"voice": "Mai Anh", "chosen": {"vo-1": {"take": 2}}}})
+                self.assertEqual(make_video.load_report(a)["voice"]["voice"], "Mai Anh")
+                self.assertEqual(make_video.load_report(b), {})          # same name, another folder
+                self.assertEqual(make_video.resolve_voice(None, {}, make_video.load_report(b), True), make_video.DEFAULT_VOICE)
+                make_video.reset_build(a)                                  # a scaffold of the same name starts clean
+                self.assertEqual(make_video.load_report(a), {})
+                self.assertFalse((make_video.BUILD / "video").exists())
+            finally:
+                make_video.BUILD = saved
+
+
 class Narration(unittest.TestCase):
     def test_reworded_lines_are_kept_and_judged_by_the_gate(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
