@@ -20,7 +20,7 @@ Claude Code (bạn tự chạy)  →  spec.md (brief + kịch bản đọc) · t
  │                              team-video check-spec
  ▼
 team-video run  (script điều phối, KHÔNG phải model)
- ├─ tester   model free A → videos/<id>/expected.json   → gates phải FAIL (chưa có video)
+ ├─ tester   model free A → videos/<id>.expected.json   → gates phải FAIL (chưa có video)
  ├─ coder    model free B → cảnh HTML + giọng đọc + SFX → gates (checkout sạch, KHÔNG mạng)
  │                          lint · check · render draft · video_gates.py
  │                          sai thì thử lại ≤3 lần, đổi model, kèm log lỗi

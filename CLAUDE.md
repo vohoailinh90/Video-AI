@@ -90,7 +90,7 @@ A free-model team can make videos on a VPS with Claude Code as architect and aud
   task: write `spec.md`, `tasks.md`, `acceptance.md`, or write `verdict.md` from `audit-pack.md` only. Builders (free models)
   create `videos/<id>/` with `hyperframes init <id> --example blank`, vendor GSAP, make the audio and edit nothing else.
 - **The gate is a script.** `scripts/team/video/video_gates.py` judges a render's streams, length, size, loudness, true peak and
-  silence from `videos/<id>/expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
+  silence from `videos/<id>.expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
 - **Audit BLOCKs:** a loosened `expected.json`; any change under `.claude/` the spec did not ask for; a project `AGENTS.md` or
   `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
 - **Audio.** Local Kokoro voices only (no Vietnamese, see Language above): Vietnamese narration is a supplied clip per scene.

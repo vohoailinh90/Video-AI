@@ -7,5 +7,5 @@
 cd videos/{{id}} && hyperframes lint
 cd videos/{{id}} && hyperframes check
 cd videos/{{id}} && mkdir -p renders && hyperframes render --quality draft --output renders/{{id}}.mp4
-python3 /usr/local/lib/team-video/video_gates.py videos/{{id}}/renders/{{id}}.mp4 --expect videos/{{id}}/expected.json
+python3 /usr/local/lib/team-video/video_gates.py videos/{{id}}/renders/{{id}}.mp4 --expect videos/{{id}}.expected.json
 ```

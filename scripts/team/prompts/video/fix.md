@@ -5,7 +5,7 @@ Read first: /handoff/feedback.md (what is wrong: failing gate output, a reviewer
 Goal: fix the cause of every problem in the feedback so that every command in /handoff/acceptance.md exits 0.
 
 Rules:
-- A failing audio check is fixed in the audio or the mix (levels with loudnorm, a missing `<audio>` id, a scene longer than its voice), never by editing `videos/{{id}}/expected.json`.
+- A failing audio check is fixed in the audio or the mix (levels with loudnorm, a missing `<audio>` id, a scene longer than its voice), never by editing `videos/{{id}}.expected.json`.
 - Change only what the feedback requires. Never touch a file under "Do not touch" in /handoff/tasks.md or anything in `.claude/`.
 - Read a file before you edit it. Run the acceptance commands yourself before you finish.
 

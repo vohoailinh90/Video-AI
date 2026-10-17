@@ -1,0 +1,16 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# Found by Codex's review and then by running `hyperframes init` into a folder that holds a file: init refuses a
+# non-empty folder. The tester's expected.json therefore sits beside the project, and the tester is the one role
+# allowed to write the file every task lists under "Do not touch".
+target: scripts/team/prompts/video/tester.md
+note: The tester writes videos/<id>.expected.json beside the project, and is exempt from the do-not-touch rule for it.
+mutations:
+- label: the tester is again forbidden to write the file it must create
+  find: ", except `videos/{{id}}.expected.json`: every task lists it there to keep the builder out, and writing it is this task."
+  replace: "."
+  test: tests.test_team.VideoTeamTests.test_the_tester_may_write_the_one_file_every_task_forbids_the_builder
+- label: the tester is no longer told to keep expected.json out of the project folder
+  find: "It sits BESIDE the project folder, not inside `videos/{{id}}/`"
+  replace: "It sits in the project folder `videos/{{id}}/`"
+  test: tests.test_team.VideoTeamTests.test_the_tester_output_sits_beside_the_project_so_init_can_scaffold_it

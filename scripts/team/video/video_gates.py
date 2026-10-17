@@ -6,7 +6,7 @@ check has a computable answer, so none of it is left to a model (CLAUDE.md,
 "Deterministic work is not agent work"): a model listening to a file can be
 wrong; ffprobe and ffmpeg's loudness meter cannot.
 
-    video_gates.py renders/draft.mp4 --expect videos/V01/expected.json
+    video_gates.py renders/draft.mp4 --expect videos/V01.expected.json
 
 `expected.json` is written by the tester stage from the spec. Keys (all optional
 except `duration_s`; an unknown key is an error, so a typo cannot disable a check):

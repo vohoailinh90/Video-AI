@@ -1541,7 +1541,7 @@ class VideoTeamTests(Sandbox):
         self.assertIn("team-video prompt video-spec V2", out)
         self.assertIn("Scenes", f.file("spec.md").read_text())
         acceptance = f.file("acceptance.md").read_text()
-        self.assertIn("python3 /usr/local/lib/team-video/video_gates.py videos/V2/renders/V2.mp4 --expect videos/V2/expected.json",
+        self.assertIn("python3 /usr/local/lib/team-video/video_gates.py videos/V2/renders/V2.mp4 --expect videos/V2.expected.json",
                       acceptance)
         self.assertEqual(len(team.acceptance_commands(acceptance)), 4)
         self.assertIn("narration", f.file("request.md").read_text().lower())
@@ -1606,7 +1606,8 @@ class VideoTeamTests(Sandbox):
         f = self.new_feature("V1")
         project = {f"videos/V1/{name}": b"x\n" for name in
                    ("AGENTS.md", "CLAUDE.md", "hyperframes.json", "index.html", "meta.json", "package.json",
-                    "assets/vendor/gsap.min.js", "assets/audio/vo-01.wav", "expected.json")}
+                    "assets/vendor/gsap.min.js", "assets/audio/vo-01.wav")}
+        project["videos/V1.expected.json"] = b"{}\n"
         self.assertEqual(self.commit_paths(f, project), sorted(project))
 
     def test_the_code_teams_keep_a_renders_package_and_a_hyperframes_directory(self):
@@ -1734,6 +1735,27 @@ class VideoTeamTests(Sandbox):
             code = team.repo_map(repo, 600)
         self.assertIn("buildFrames", code)
         self.assertIn(".claude/skills/hyper/references/deep/a.md", code)
+
+    def test_the_tester_output_sits_beside_the_project_so_init_can_scaffold_it(self):
+        import re
+        # `hyperframes init` refuses a folder that is not empty (found by running it): a tester file inside
+        # videos/<id>/ would stop the builder from ever creating the project.
+        inside = re.compile(r"videos/(?:\{\{id\}\}|<id>|V\d+)/expected\.json")
+        texts = [*sorted((team.PROMPTS / "video").glob("*.md")), *sorted((team.TEMPLATES / "video").glob("*.md")),
+                 ROOT / "docs" / "vps-team-video.md"]
+        for path in texts:
+            self.assertIsNone(inside.search(path.read_text(encoding="utf-8")), f"{path.name} puts expected.json inside the project")
+        tester = run_cli("prompt", "tester", "V1")[1]
+        self.assertIn("videos/V1.expected.json", tester)
+        self.assertIn("BESIDE the project folder", tester)
+        acceptance = (team.TEMPLATES / "video" / "acceptance.md").read_text()
+        self.assertIn("--expect videos/{{id}}.expected.json", acceptance)
+
+    def test_the_tester_may_write_the_one_file_every_task_forbids_the_builder(self):
+        tester = run_cli("prompt", "tester", "V1")[1]
+        self.assertIn("except `videos/V1.expected.json`", tester)
+        tasks = (team.TEMPLATES / "video" / "tasks.md").read_text()
+        self.assertIn("videos/{{id}}.expected.json", tasks)
 
     def test_the_prompts_follow_the_video_ai_conventions(self):
         coder = run_cli("prompt", "coder", "V1")[1]
