@@ -82,8 +82,8 @@ Có 13 mutation check cho script này (`tests/mutations/video_gates.yaml`).
 ## 3. Cài đặt
 
 ```bash
-git clone https://github.com/vohoailinh90/claude-agent-routing-template.git
-cd claude-agent-routing-template
+git clone https://github.com/vohoailinh90/Video-AI.git
+cd Video-AI
 sudo ./scripts/team/setup-vps-team.sh --admin "$USER" --with-video [--with-hermes]
 # đăng xuất rồi đăng nhập lại để nhóm `team` có hiệu lực
 ```

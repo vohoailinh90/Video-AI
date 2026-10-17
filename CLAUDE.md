@@ -92,5 +92,7 @@ A free-model team can make videos on a VPS with Claude Code as architect and aud
   `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
 - **Audio.** Local Kokoro voices only (no Vietnamese, see Language above): Vietnamese narration is a supplied clip per scene.
   No provider key ever goes to a worker container.
+- **Language.** `verdict.md`, the pre-review and the gate output are English, machine-read artifacts; summarise them to the owner in
+  Vietnamese, as above.
 - **Changing the team itself:** `python3 -m unittest discover -s tests` and, from a clean tree, `python3 scripts/mutation_check.py --all`
   (needs PyYAML). Docs: `docs/vps-team.md` (security model), `docs/vps-team-video.md` (this team).

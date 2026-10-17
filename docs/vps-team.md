@@ -54,8 +54,8 @@ sửa được nó.
 ## 2. Cài đặt
 
 ```bash
-git clone https://github.com/vohoailinh90/claude-agent-routing-template.git
-cd claude-agent-routing-template
+git clone https://github.com/vohoailinh90/Video-AI.git
+cd Video-AI
 sudo ./scripts/team/setup-vps-team.sh --admin "$USER" --with-hermes
 # đăng xuất rồi đăng nhập lại để nhóm `team` có hiệu lực
 ```
@@ -246,7 +246,7 @@ Không đảm bảo, cần bạn tự quản:
   `team`.
 - Free tier có thể huấn luyện trên code của bạn.
 - Runner GitHub chạy chung máy: nếu user của runner thuộc nhóm `docker`, job CI cũng
-  tương đương root. Xem `docs/ci-runner-mode.md`.
+  tương đương root. Xem `docs/ci-runner-mode.md` trong repo claude-agent-routing-template.
 
 ## 6. Xử lý sự cố
 

@@ -54,7 +54,7 @@ file nhị phân) không thể lệch nhau giữa hai team. Test kiểm điều 
 Đã cài team Claude rồi thì chỉ cần chạy lại, thêm `--with-codex`:
 
 ```bash
-cd claude-agent-routing-template && git pull
+cd Video-AI && git pull
 sudo ./scripts/team/setup-vps-team.sh --admin "$USER" --with-codex --with-hermes
 ```
 
@@ -122,7 +122,7 @@ phiên tương tác có thể xin bạn cho vượt sandbox. Gói audit là dữ
 - chỉ nhận tùy chọn `--model` (hoặc `-m`): `--search`, `--add-dir`, `--sandbox`, `-c`… sẽ âm thầm gỡ các ràng buộc trên nên bị từ chối;
   muốn chạy khác đi thì tự chạy `codex` trần, biết rằng lúc đó audit không còn được bó.
 
-Các khóa `sandbox_workspace_write.*` là bộ mà `scripts/codex_cli.py` dùng cho `codex exec` của repo này. Đăng nhập một lần
+Các khóa `sandbox_workspace_write.*` là bộ mà `scripts/codex_cli.py` (của repo claude-agent-routing-template) dùng cho `codex exec` của repo này. Đăng nhập một lần
 trong hồ sơ đó (mục 2).
 
 **Codex lần 1, viết spec:**
@@ -203,7 +203,7 @@ Như `docs/vps-team.md` mục 6, thêm:
 
 Session viết bộ này không có Docker, Codex hay Hermes. Cần kiểm lần đầu với một feature nhỏ:
 
-- **Codex CLI:** tên package `@openai/codex` và `codex login` lấy từ cách `scripts/codex_cli.py`
+- **Codex CLI:** tên package `@openai/codex` và `codex login` lấy từ cách `scripts/codex_cli.py` (của repo claude-agent-routing-template)
   trong repo này gọi nó; cờ `--sandbox` và `--config sandbox_workspace_write.network_access=false`
   (gồm `writable_roots`, `exclude_tmpdir_env_var`, `exclude_slash_tmp`) cho phiên tương tác (khác với `codex exec` mà repo dùng) **chưa chạy thử**; nếu một khóa không có tác dụng, sandbox rộng hơn mô tả ở trên. Cờ `--ask-for-approval never` cho phiên tương tác và việc sandbox đúng là cho đọc rộng như mô tả ở mục 3 cũng chưa được thử. Việc `bubblewrap` chạy được trên VPS của bạn (kernel và AppArmor cho phép user namespace) cũng chưa kiểm chứng. Khóa `shell_environment_policy.inherit=core`, `allow_login_shell=false` (và việc `core` đủ cho `TMPDIR`) cũng chưa chạy thử. Biến `CODEX_HOME` (hồ sơ riêng), khóa `web_search = "disabled"` và việc hồ sơ rỗng thật sự không nạp MCP server hay plugin nào **cũng chưa kiểm chứng**: trước lần audit đầu, mở `codex-lead` và xác nhận trong phiên rằng không có MCP server hay công cụ tìm kiếm nào (lệnh `/mcp` nếu bản của bạn có). Kết nối ChatGPT gắn ở cấp tài khoản (app, connector) có thể vẫn hiện; repo này chưa kiểm. Nếu VPS không mở
   được trình duyệt để đăng nhập, xem tài liệu Codex về đăng nhập không có màn hình; repo này chưa thử.
