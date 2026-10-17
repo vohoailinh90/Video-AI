@@ -103,13 +103,14 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
 
 ## VPS agent team (`team-video`)
 
-A free-model team can make videos on a VPS with Claude Code as architect and auditor: guide in `docs/vps-team-video.md`
-(Vietnamese), conductor and worker image in `scripts/team/`. It follows this file's layout and rules; what it adds:
+A free-model team can make videos on a VPS with Claude Code as architect and auditor. The team itself (conductor, worker image,
+gate script, setup and the Vietnamese guide `docs/vps-team-video.md`) lives in `vohoailinh90/claude-agent-routing-template`, under
+`scripts/team/`; this repository holds only the videos it makes. It follows this file's layout and rules; what it adds:
 
 - **Roles.** In a `/srv/team-video/work/<id>` session the prompt printed by `team-video prompt video-spec|video-audit <id>` is the
   task: write `spec.md`, `tasks.md`, `acceptance.md`, or write `verdict.md` from `audit-pack.md` only. Builders (free models)
   create `videos/<id>/` with `hyperframes init <id> --example blank`, vendor GSAP, make the audio and edit nothing else.
-- **The gate is a script.** `scripts/team/video/video_gates.py` judges a render's streams, length, size, loudness, true peak and
+- **The gate is a script.** `scripts/team/video/video_gates.py` (in the template) judges a render's streams, length, size, loudness, true peak and
   silence from `videos/<id>.expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
 - **Audit BLOCKs:** a loosened `expected.json`; any change under `.claude/` the spec did not ask for; a project `AGENTS.md` or
   `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
@@ -118,8 +119,8 @@ A free-model team can make videos on a VPS with Claude Code as architect and aud
   (Gemini, HeyGen, ElevenLabs) never goes to a worker container.
 - **Language.** `verdict.md`, the pre-review and the gate output are English, machine-read artifacts; summarise them to the owner in
   Vietnamese, as above.
-- **Changing the team itself:** `python3 -m unittest discover -s tests` and, from a clean tree, `python3 scripts/mutation_check.py --all`
-  (needs PyYAML). Docs: `docs/vps-team.md` (security model), `docs/vps-team-video.md` (this team).
+- **Changing the team itself:** do it in the template repository, where its tests and mutation checks run, not here. Its docs:
+  `docs/vps-team.md` (security model), `docs/vps-team-video.md` (this team).
 
 <!-- team-onboarding:start -->
 ## Team agent process
