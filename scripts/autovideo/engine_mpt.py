@@ -21,6 +21,7 @@ from .pack import NO_VOICE, Job
 
 DEFAULT_HOME = Path("~/MoneyPrinterTurbo")
 FILE_MISSING = "missing"  # what input_digests says for a file the job needs and MPT's directories do not have (never a hex digest)
+FILE_UNREADABLE = "unreadable"  # ... and for one that is there but cannot be read (permissions, or it went away while it was being read)
 SECRET_KEY = re.compile(r"key|token|secret|password", re.I)
 
 
@@ -112,8 +113,11 @@ def _digest_in(env: MptEnv, name: str, folders: tuple[str, ...]) -> str:
     for folder in folders:
         path = env.home / folder / name
         if path.is_file():
-            with open(path, "rb") as handle:
-                return hashlib.file_digest(handle, "sha256").hexdigest()
+            try:
+                with open(path, "rb") as handle:
+                    return hashlib.file_digest(handle, "sha256").hexdigest()
+            except OSError:
+                return FILE_UNREADABLE
     return FILE_MISSING
 
 
@@ -121,7 +125,7 @@ def input_digests(env: MptEnv, job: Job) -> dict[str, str]:
     """SHA-256 of the files the pack names that MPT reads from its own directories: the custom music (only when its volume is above zero;
     MPT looks in storage/bgm, then resource/songs) and the subtitle font (only when subtitles are on; resource/fonts).
 
-    A file that is needed and not there is FILE_MISSING. These files are outside the pack, so the job's fingerprint cannot cover them:
+    A file that is needed and not there is FILE_MISSING, one that is there and cannot be read is FILE_UNREADABLE. These files are outside the pack, so the job's fingerprint cannot cover them:
     the digests are kept beside the fingerprint instead. What the pack does not name (MPT's config.toml, MPT itself) is not covered."""
     digests: dict[str, str] = {}
     if job.bgm not in ("none", "random") and job.bgm_volume > 0:

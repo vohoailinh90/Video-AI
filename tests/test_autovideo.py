@@ -226,6 +226,18 @@ class PackTests(unittest.TestCase):
         self.assertEqual(engine_mpt.input_digests(env, job(bgm="missing.mp3"))["bgm"], engine_mpt.FILE_MISSING)  # asked for and gone
         self.assertEqual(engine_mpt.input_digests(env, job(font="Gone.ttf"))["font"], engine_mpt.FILE_MISSING)
 
+    def test_a_file_that_cannot_be_read_is_a_problem_not_a_traceback(self):
+        env = fake_mpt(self.root)
+        job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]
+        unreadable = mock.patch.object(engine_mpt.hashlib, "file_digest", side_effect=PermissionError(13, "Permission denied"))
+        with unreadable:  # (these tests run as root, which can read anything, so the failure is simulated)
+            self.assertEqual(engine_mpt.input_digests(env, job), {"font": engine_mpt.FILE_UNREADABLE})
+            self.assertIn("cannot be read", runner.preflight(env, job))
+            summary = runner.run(packmod.load_pack(write_pack(self.root, [video()])), env, self.root / "out", log=lambda line: None)
+            self.assertEqual((summary["failed"], summary["videos"][0]["stage"]), (1, "preflight"))
+            self.assertIn("cannot be read", summary["videos"][0]["error"])
+        self.assertEqual(engine_mpt.input_digests(env, job)["font"], hashlib.sha256(b"").hexdigest())  # readable again
+
     def test_preflight_names_a_missing_ffmpeg_or_ffprobe(self):
         env = fake_mpt(self.root)
         job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]

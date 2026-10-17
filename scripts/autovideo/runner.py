@@ -91,6 +91,9 @@ def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
         return f"font {job.font} is not in {env.home}/resource/fonts"
     if job.bgm not in ("none", "random") and job.bgm_volume > 0 and not any((env.home / d / job.bgm).is_file() for d in ("storage/bgm", "resource/songs")):
         return f"music file {job.bgm} is in neither storage/bgm nor resource/songs of {env.home}"
+    for what, digest in engine_mpt.input_digests(env, job).items():
+        if digest == engine_mpt.FILE_UNREADABLE:  # there, per the checks above, but not readable: MPT would stumble on it as well
+            return f"the {'music' if what == 'bgm' else 'font'} file {job.bgm if what == 'bgm' else job.font} cannot be read (permissions?)"
     if job.audio_file and job.subtitles and info["subtitle_provider"] != "whisper":
         return "audio_file with subtitles needs subtitle_provider = \"whisper\" in config.toml; set subtitles to false or change it"
     return None
