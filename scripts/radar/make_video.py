@@ -80,6 +80,16 @@ def make_pad(path: Path, seconds: float):
         fail(f"ffmpeg could not make the music bed: {result.stderr[-400:]}")
 
 
+def where_it_came_from(path: Path) -> dict:
+    """The digest's place in its git repository (remote, path, last commit), or just its file name when it is not in one."""
+    top = run(["git", "-C", path.parent, "rev-parse", "--show-toplevel"])
+    if top.returncode:
+        return {"file": path.name}
+    remote = run(["git", "-C", path.parent, "remote", "get-url", "origin"]).stdout.strip() or None
+    last = run(["git", "-C", path.parent, "log", "-1", "--format=%H %cs", "--", path.name]).stdout.strip() or None
+    return {"git_remote": remote, "path_in_repo": str(path.relative_to(Path(top.stdout.strip()).resolve())), "last_commit_of_file": last}
+
+
 def project_dir(arg, videos_dir) -> Path:
     path = Path(arg)
     if path.is_dir():
@@ -186,11 +196,9 @@ def cmd_scaffold(args) -> Path:
     source.mkdir()
     shutil.copyfile(args.digest, source / "draft-vi.json")
     digest_path = Path(args.digest).resolve()
-    commit = run(["git", "-C", digest_path.parent, "log", "-1", "--format=%H %cs", "--", digest_path.name])
     provenance = {
-        "copied_from": str(digest_path),
+        **where_it_came_from(digest_path),
         "sha256": hashlib.sha256(digest_path.read_bytes()).hexdigest(),
-        "last_commit_of_file": commit.stdout.strip() or None,
         "repo": digest["facts"]["full_name"],
         "scanned": digest["facts"].get("scanned"),
         "generated_by": "scripts/radar/make_video.py scaffold",
@@ -380,6 +388,12 @@ def write_readme(project: Path, plan, doc, report):
         measured = f"{c['edits']}/{c['ref_words']}" if c.get("edits") is not None else "chưa đo"
         shown = line["text"] if len(line["text"]) <= 150 else line["text"][:147] + "..."
         rows.append(f"| `{line['id']}` | {line['start']:g} s | {shown} | {c.get('take', '?')} | {measured}{' (cờ)' if c.get('flagged') else ''} |")
+    if prov.get("path_in_repo"):
+        origin_text = (f"file `{prov['path_in_repo']}` trong repo `{prov.get('git_remote')}` (bản ghi cuối cùng của file: `{prov.get('last_commit_of_file')}`)")
+    else:
+        origin_text = f"file `{prov.get('file', '?')}`"
+    if prov.get("also_via"):
+        origin_text += f"; {prov['also_via']}"
     final = render.get("final_mix")
     levels = (f"âm thanh cả file trung bình {render['mean_db']} dB, đỉnh {render['peak_db']} dB" if render.get("mean_db") is not None else "chưa đo mức âm")
     errors = (f"PhoWhisper-small nghe lại âm thanh cắt từ MP4: sai {final['edits']}/{final['ref_words']} từ "
@@ -391,8 +405,7 @@ File này do `scripts/radar/make_video.py` tạo ra; cách làm và giới hạn
 
 ## Nguồn
 
-`source/draft-vi.json` là bản sao nguyên văn của file bài `{prov.get('copied_from', '?')}` (bản ghi cuối cùng của file: `{prov.get('last_commit_of_file', '?')}`,
-sha256 `{prov.get('sha256', '?')[:16]}...`). Repo được viết về: `{plan['full_name']}`. Video không dùng mã, hình hay âm thanh nào của repo đó.
+`source/draft-vi.json` là bản sao nguyên văn của {origin_text} (sha256 `{prov.get('sha256', '?')[:16]}...`). Repo được viết về: `{plan['full_name']}`. Video không dùng mã, hình hay âm thanh nào của repo đó.
 Cảnh, lời đọc và chữ trên màn hình đều lấy từ các trường của bài; mỗi dòng của `voiceover.json` ghi trường nó lấy (`source`).
 
 ## Chạy lại

@@ -1,7 +1,9 @@
 {
-  "copied_from": "/home/user/video-ai/tests/fixtures/voicestudio.json",
+  "git_remote": "https://github.com/vohoailinh90/Github-radar",
+  "path_in_repo": "digests/2026-10-13/voicestudio/draft-vi.json",
+  "last_commit_of_file": "d375c0a04d23171a105b51b974478f192fb55987 2026-10-13",
+  "also_via": "video này được dựng từ bản chép giống hệt từng byte của nó trong `tests/fixtures/voicestudio.json` (so bằng sha256)",
   "sha256": "d3f2c2e12dd985bfe26ccfe81fbd6db60458bf177af8ff7650eacd03cb14a975",
-  "last_commit_of_file": null,
   "repo": "debpalash/VoiceStudio",
   "scanned": "2026-10-13",
   "generated_by": "scripts/radar/make_video.py scaffold"
