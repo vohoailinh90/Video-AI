@@ -80,11 +80,11 @@
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="71.18" data-width="1920" data-height="1080">
-      <div id="bg" class="clip bg-grid" data-start="0" data-duration="71.18" data-track-index="0"></div>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="70.38" data-width="1920" data-height="1080">
+      <div id="bg" class="clip bg-grid" data-start="0" data-duration="70.38" data-track-index="0"></div>
 
       <!-- music bed (assets/pad.wav, made with ffmpeg by scripts/radar/make_video.py) -->
-      <audio id="music-bed" src="assets/pad.wav" data-start="0" data-duration="71.18" data-track-index="9" data-volume="0.6"></audio>
+      <audio id="music-bed" src="assets/pad.wav" data-start="0" data-duration="70.38" data-track-index="9" data-volume="0.6"></audio>
 
       <!-- Vietnamese narration. start, duration and volume are written by scripts/vo/revoice.py from voiceover.json -->
       <audio id="vo-1" src="assets/vo-1.wav" data-start="0.6" data-duration="5.61" data-track-index="10" data-volume="1"></audio>
@@ -95,7 +95,7 @@
       <audio id="vo-6" src="assets/vo-6.wav" data-start="36.22" data-duration="7.37" data-track-index="15" data-volume="0.93"></audio>
       <audio id="vo-7" src="assets/vo-7.wav" data-start="47.18" data-duration="6.01" data-track-index="16" data-volume="1"></audio>
       <audio id="vo-8" src="assets/vo-8.wav" data-start="53.68" data-duration="5.21" data-track-index="17" data-volume="1.1"></audio>
-      <audio id="vo-9" src="assets/vo-9.wav" data-start="60.58" data-duration="6.81" data-track-index="18" data-volume="1"></audio>
+      <audio id="vo-9" src="assets/vo-9.wav" data-start="60.58" data-duration="6.01" data-track-index="18" data-volume="1.11"></audio>
 
       <!-- scene 1: name and numbers -->
       <section id="s1" class="clip" data-start="0" data-duration="7.3" data-track-index="1">
@@ -140,7 +140,7 @@
         </div>
       </section>
       <!-- scene 5: caveats and try it -->
-      <section id="s5" class="clip" data-start="59.98" data-duration="11.2" data-track-index="1">
+      <section id="s5" class="clip" data-start="59.98" data-duration="10.4" data-track-index="1">
         <div class="stage" id="s5-in">
           <div class="tag" id="s5-tag">VoiceStudio</div>
           <div class="cols"><div class="col"><h2 class="head" id="s5-head-l" data-label>Lưu ý trước khi dùng</h2><div class="caveat" id="s5-cv0" style="font-size:33px">Mã nguồn dùng giấy phép AGPL-3.0, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng.</div></div><div class="col"><h2 class="head" id="s5-head-r" data-label>Tự thử</h2><div class="term" id="s5-term"><div class="top"><i></i><i></i><i></i></div><div class="body"><div class="row"><span class="prompt">$</span> <span class="cmd" id="s5-cmd0">bun install</span></div><div class="row"><span class="prompt">$</span> <span class="cmd" id="s5-cmd1">bun run setup:api</span></div><div class="row"><span class="prompt">$</span> <span class="cmd" id="s5-cmd2">bun run dev</span></div></div></div></div></div>
@@ -196,11 +196,11 @@
       rise("#s5-tag", 60.08, 0.45);
       rise("#s5-head-l", 60.23, 0.6);
       rise("#s5-cv0", 60.38, 0.6);
-      rise("#s5-head-r", 67.68, 0.6);
-      tl.fromTo("#s5-term", { opacity: 0, y: 36 }, { opacity: 1, y: 0, duration: 0.55, ease: E }, 67.98);
-      tl.fromTo("#s5-cmd0", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 68.58);
-      tl.fromTo("#s5-cmd1", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 69.08);
-      tl.fromTo("#s5-cmd2", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 69.58);
+      rise("#s5-head-r", 66.88, 0.6);
+      tl.fromTo("#s5-term", { opacity: 0, y: 36 }, { opacity: 1, y: 0, duration: 0.55, ease: E }, 67.18);
+      tl.fromTo("#s5-cmd0", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 67.78);
+      tl.fromTo("#s5-cmd1", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 68.28);
+      tl.fromTo("#s5-cmd2", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }, 68.78);
       rise("#s5-foot", 60.78, 0.6);
 
       window.__timelines["main"] = tl;

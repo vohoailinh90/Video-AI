@@ -1,6 +1,6 @@
 # Video thử: VoiceStudio (tự động từ bài GitHub Radar 2026-10-13)
 
-Video 71.2 giây, 1920×1080, 30 khung hình/giây, 5 cảnh, lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền tự tạo.
+Video 70.4 giây, 1920×1080, 30 khung hình/giây, 5 cảnh, lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền tự tạo.
 File này do `scripts/radar/make_video.py` tạo ra; cách làm và giới hạn: `docs/radar-to-video.md`.
 
 ## Nguồn
@@ -32,14 +32,14 @@ Sửa lời đọc trong `voiceover.json` rồi chạy `make_video.py voice vide
 | `vo-6` | 36.22 s | Hệ thống tạo ra tệp âm thanh hoàn chỉnh và cho phép điều khiển tự động qua giao tiếp Local API hoặc Model Context Protocol. | 1 | 4/25 |
 | `vo-7` | 47.18 s | Phân tách kiến trúc rõ ràng giữa giao diện desktop Electron và backend AI bằng Python để dễ bảo trì. | 3 | 4/20 |
 | `vo-8` | 53.68 s | Thiết kế cơ chế linh hoạt tận dụng đa dạng phần cứng từ card đồ họa cao cấp đến chỉ chạy trên CPU. | 1 | 2/23 |
-| `vo-9` | 60.58 s | Mã nguồn dùng giấy phép AGPL-3.0, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng. | 1 | 9/22 (cờ) |
+| `vo-9` | 60.58 s | Mã nguồn dùng giấy phép AGPL-3.0, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng. | 2 | 4/25 |
 
 ## Đã kiểm tra
 
 - Cổng đối chiếu bài (`check_facts.py`): checked 9 lines and 34 on-screen text pieces (1 numbers in narration): all traced to the source
 - `npm run check`: 0 error(s), 6 warning(s), 0 info(s) | ◇  Check passed
-- File MP4: 71.2 giây; âm thanh cả file trung bình -20.5 dB, đỉnh -1.3 dB
-- PhoWhisper-small nghe lại âm thanh cắt từ MP4: sai 29/226 từ (13%). Máy nghe lại không thay được người nghe: từ tiếng Anh đọc kiểu Việt hóa có thể vẫn dễ hiểu với người Việt.
+- File MP4: 70.4 giây; âm thanh cả file trung bình -20.5 dB, đỉnh -1.3 dB
+- PhoWhisper-small nghe lại âm thanh cắt từ MP4: sai 27/226 từ (12%). Máy nghe lại không thay được người nghe: từ tiếng Anh đọc kiểu Việt hóa có thể vẫn dễ hiểu với người Việt.
 
 
 ## Giới hạn

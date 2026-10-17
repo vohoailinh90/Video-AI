@@ -55,6 +55,23 @@ Sửa lời đọc: được. Mở `voiceover.json`, sửa `text` (và `source` 
 Từ tiếng Việt viết không dấu (như "giao", "cho", "ba") bị cổng báo nhầm là tên Latin; ghi vào mảng `allow` của `voiceover.json`.
 Dòng nào lượt tốt nhất vẫn sai quá 30% số từ được đánh cờ trong báo cáo: thường vì từ tiếng Anh, hãy viết lại câu bằng từ tiếng Việt như đã làm với video VoiceStudio ("nạp" thành "tải", "agent" thành "tác tử AI").
 
+## Kết quả đã chạy (2026-10-17)
+
+Chạy trọn `all` (giọng, chọn lượt, render, đo) trên bài VoiceStudio ngày 2026-10-13: `videos/voicestudio-auto/`, bản chép giống hệt từng byte bài gốc trong repo `github-radar`.
+
+| | Làm tay (`videos/voicestudio/`) | Tự động (`videos/voicestudio-auto/`) |
+|---|---|---|
+| Độ dài | 53,6 giây, 8 clip | 70,4 giây, 9 clip |
+| Lời đọc | viết lại ngắn gọn, đổi từ khó đọc | nguyên văn các câu của bài |
+| `npm run check` | 0 lỗi, 6 cảnh báo | 0 lỗi, 6 cảnh báo |
+| Cổng đối chiếu bài | qua (8 dòng, 51 đoạn chữ) | qua (9 dòng, 34 đoạn chữ) |
+| PhoWhisper nghe lại file MP4 | sai 19/179 từ (11%) | sai 27/226 từ (12%) |
+
+- Mức dễ hiểu theo máy gần như nhau dù bản tự động dùng nguyên văn; nhưng đó là số đo của máy nghe lại, chưa có người nghe. Bản tự động dài hơn vì câu của bài dài.
+- Lần đầu có một câu bị đánh cờ: câu giấy phép "AGPL-3.0" (sai 9/22 từ) vì bộ tổng hợp đọc cả dấu gạch nối ("a gờ phê lờ gạch ngang ba chấm không"). Sửa bằng quy tắc đọc số của `numbers_vi.py` (phiên bản sau dấu gạch nối được đọc thành số) và chạy `voice --only vo-9`: sai 4/25 từ. Việc này cũng lộ ra một lỗi của chính script (chữ đọc lưu sẵn trong `voiceover.json` không được làm mới trước khi tạo giọng), đã sửa và có bài kiểm thử.
+- Từ tiếng Anh vẫn là chỗ sai nhiều nhất ("Backend" đầu câu bị nghe thành "bikin", "Python" thành "pi thần", "desktop" thành "de sờ top"); câu nào còn bị cờ thì viết lại bằng từ tiếng Việt như mục trên.
+- Mới chạy trọn quy trình trên một bài. 25 bài radar đang có chỉ được dựng khung và kiểm bố cục và cổng đối chiếu (25/25 qua), chưa tạo giọng và render.
+
 ## Kiểm thử
 
 ```bash

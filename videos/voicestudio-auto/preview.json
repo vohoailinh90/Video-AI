@@ -1,12 +1,12 @@
 {
-  "title": "Video thử VoiceStudio",
+  "title": "Video tự động VoiceStudio",
   "eyebrow": "Video-AI · từ bài GitHub Radar 2026-10-13",
-  "lede": "Video 71 giây tự động dựng từ một bài radar: lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền. Mọi số, tên và lệnh trên màn hình lấy từ các trường của bài, và một script đã kiểm tra điều đó.",
+  "lede": "Video 70 giây tự động dựng từ một bài radar: lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền. Mọi số, tên và lệnh trên màn hình lấy từ các trường của bài, và một script đã kiểm tra điều đó.",
   "lines": "voiceover.json",
   "facts": [
     [
       "Độ dài",
-      "71,2 giây"
+      "70,4 giây"
     ],
     [
       "Hình ảnh",
@@ -29,7 +29,7 @@
     }
   ],
   "notes": [
-    "Mức dễ hiểu đã được kiểm tra bằng máy: PhoWhisper-small nghe lại âm thanh cắt từ chính file video này, sai 29 trên 226 từ (13%). Lỗi chủ yếu ở từ tiếng Anh và tên riêng, vì giọng đọc chúng theo kiểu Việt hóa.",
+    "Mức dễ hiểu đã được kiểm tra bằng máy: PhoWhisper-small nghe lại âm thanh cắt từ chính file video này, sai 27 trên 226 từ (12%). Lỗi chủ yếu ở từ tiếng Anh và tên riêng, vì giọng đọc chúng theo kiểu Việt hóa.",
     "Chưa có người nghe đánh giá độ tự nhiên và độ dễ hiểu của giọng. Script kiểm tra chỉ bắt số, tên và lệnh bịa; câu tiếng Việt viết lại cần người đối chiếu với bài."
   ]
 }

@@ -390,7 +390,7 @@ def write_preview_json(project: Path, plan, report):
                 f"({100 * final['edits'] / max(final['ref_words'], 1):.0f}%). Lỗi chủ yếu ở từ tiếng Anh và tên riêng, vì giọng đọc chúng theo kiểu Việt hóa."
                 if final else "Mức dễ hiểu chưa được đo (không có môi trường nhận dạng giọng nói khi dựng).")
     doc = {
-        "title": f"Video thử {plan['name']}",
+        "title": f"Video tự động {plan['name']}",
         "eyebrow": f"Video-AI · từ bài GitHub Radar {plan['scan']}".strip(),
         "lede": (f"Video {render.get('duration', 0):.0f} giây tự động dựng từ một bài radar: lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền. "
                  "Mọi số, tên và lệnh trên màn hình lấy từ các trường của bài, và một script đã kiểm tra điều đó."),
