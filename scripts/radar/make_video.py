@@ -280,6 +280,19 @@ def resolve_voice(requested, doc, report, redoing_some_lines) -> str:
     return requested or recorded or DEFAULT_VOICE
 
 
+def record_voice(report: dict, voice_name: str, takes: int, asr: bool, chosen: dict) -> dict:
+    """Write this run's voice, take count and chosen takes into the report, whatever the report already holds (a render may have
+    created `voice` with only the narrator's name)."""
+    voice = report.setdefault("voice", {})
+    voice.setdefault("chosen", {})
+    voice["voice"], voice["takes"], voice["asr"] = voice_name, takes, asr
+    for line_id, best in chosen.items():
+        share = (best["edits"] / best["ref_words"]) if best["edits"] is not None and best["ref_words"] else None
+        voice["chosen"][line_id] = {**best, "wer": None if share is None else round(share, 3),
+                                    "flagged": bool(share is not None and share > TAKE_WORRY)}
+    return voice
+
+
 def tool_env(base_env, hf_home):
     env = dict(base_env)
     if hf_home:
@@ -342,11 +355,7 @@ def cmd_voice(args, project=None) -> dict:
     make_pad(project / "assets" / "pad.wav", tl["duration"])
 
     report = load_report(project)
-    voice = report.setdefault("voice", {"voice": voice_name, "chosen": {}})
-    voice["voice"], voice["takes"], voice["asr"] = voice_name, args.takes, bool(args.asr_python)
-    for line_id, best in chosen.items():
-        share = (best["edits"] / best["ref_words"]) if best["edits"] is not None and best["ref_words"] else None
-        voice["chosen"][line_id] = {**best, "wer": None if share is None else round(share, 3), "flagged": bool(share is not None and share > TAKE_WORRY)}
+    voice = record_voice(report, voice_name, args.takes, bool(args.asr_python), chosen)
     ok, output = gate(project)
     report["gate"] = {"ok": ok, "output": output}
     report["duration"] = tl["duration"]

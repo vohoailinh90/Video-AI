@@ -34,37 +34,63 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
 from numbers_vi import speak_text  # noqa: E402
 
+# The video template's own words. An element marked data-label is skipped by the trace only when its text is exactly one of these;
+# any other text in such an element is read like the rest of the page. scripts/radar/compose.py takes its labels from here.
+FIXED_LABELS = {
+    "problem": "Vấn đề nó giải quyết",
+    "how": "Nó chạy như thế nào",
+    "parts": "Các mảnh ghép",
+    "learn": "Học được gì từ thiết kế này",
+    "caveats": "Lưu ý trước khi dùng",
+    "try": "Tự thử",
+    "scan": "Số liệu theo ngày quét",
+    "stars": "sao",
+    "forks": "fork",
+}
 MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; scripts/radar/plan.py takes its cap from here
 NUMBER = re.compile(r"\d[\d.,]*")
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
 class Visible(HTMLParser):
-    """Text a viewer can read: everything in <body> except script, style and template, and except elements marked data-label
-    (fixed labels of the video template, which are not facts about the digest)."""
+    """Text a viewer can read: everything in <body> except script, style and template, and except elements marked data-label whose
+    text is exactly one of FIXED_LABELS (the template's own words, not facts about the digest). A data-label element with any other
+    text counts as visible text, so the attribute cannot hide anything."""
     SKIP = {"script", "style", "template", "title", "head"}
     VOID = {"br", "img", "meta", "link", "input", "hr", "source", "wbr"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.stack = []      # (tag, skipped) for every open element
+        self.stack = []      # [tag, skipped, label buffer or None] for every open element
         self.parts = []
 
     def handle_starttag(self, tag, attrs):
         if tag in self.VOID:
             return
-        skipped = tag in self.SKIP or any(name == "data-label" for name, _ in attrs)
-        self.stack.append((tag, skipped))
+        is_label = any(name == "data-label" for name, _ in attrs)
+        self.stack.append([tag, tag in self.SKIP, [] if is_label else None])
 
     def handle_endtag(self, tag):
         for index in range(len(self.stack) - 1, -1, -1):
             if self.stack[index][0] == tag:
+                for _, _, buffer in self.stack[index:][::-1]:
+                    if buffer is not None:
+                        text = " ".join(buffer).strip()
+                        if text and text not in FIXED_LABELS.values():
+                            self.parts.append(text)
                 del self.stack[index:]
                 return
 
     def handle_data(self, data):
-        if data.strip() and not any(skipped for _, skipped in self.stack):
-            self.parts.append(data.strip())
+        text = data.strip()
+        if not text:
+            return
+        for entry in reversed(self.stack):
+            if entry[2] is not None:          # inside a data-label element: held back until we know it is a fixed label
+                entry[2].append(text)
+                return
+        if not any(entry[1] for entry in self.stack):
+            self.parts.append(text)
 
 
 def resolve(root, path):
@@ -89,8 +115,17 @@ def blob(value) -> str:
     return json.dumps(value, ensure_ascii=False).lower()
 
 
+def canonical(number: str) -> str:
+    """A number as a value: 62.958 and 62,958 (thousands, groups of exactly three digits) are 62958; 3.14 and 3,14 stay one decimal
+    number, 3.14, and never become 314."""
+    number = number.rstrip(".,")
+    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", number):
+        return re.sub(r"[.,]", "", number)
+    return number.replace(",", ".")
+
+
 def numbers(text: str) -> set:
-    return {re.sub(r"[.,]", "", n.rstrip(".,")) for n in NUMBER.findall(text)} - {""}
+    return {canonical(n) for n in NUMBER.findall(text)} - {""}
 
 
 def latin_tokens(text: str, allow: set) -> list:

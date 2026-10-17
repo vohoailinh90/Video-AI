@@ -414,6 +414,47 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(bad.replace("\\|", "").count("|"), 6, "five cells, whatever the text says")
 
 
+    def test_a_data_label_element_hides_nothing_but_the_fixed_labels(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html = compose.render(plan, tl)
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        # an invented number or name placed in a data-label element is read like any other text
+        for sneaky in ("Nhanh gấp 99999 lần", "Dùng ElevenLabs"):
+            status, output = run_gate(digest, doc, html.replace('data-label>Tự thử<', f'data-label>{sneaky}<', 1))
+            self.assertEqual(status, 1, sneaky)
+        # the real label text may be replaced by another real label, and nothing else passes
+        self.assertEqual(run_gate(digest, doc, html.replace('data-label>Tự thử<', 'data-label>Nó chạy như thế nào<', 1))[0], 0)
+        # a label that wraps other elements cannot hide them either
+        wrapped = html.replace('<div class="scan"', '<div data-label><b>Dùng ElevenLabs</b></div><div class="scan"', 1)
+        self.assertEqual(run_gate(digest, doc, wrapped)[0], 1)
+
+    def test_a_decimal_point_is_not_a_thousands_separator(self):
+        self.assertEqual(check_facts.numbers("62.958 và 62,958"), {"62958"})
+        self.assertEqual(check_facts.numbers("7.006"), {"7006"})
+        self.assertEqual(check_facts.numbers("3.14 và 3,14"), {"3.14"})
+        self.assertEqual(check_facts.numbers("2026-10-13"), {"2026", "10", "13"})
+        source = check_facts.blob({"field": "pi là 3.14 và có 62958 sao"})
+        self.assertEqual(check_facts.untraced("pi là 3.14, 62.958 sao", source, set()), [])
+        self.assertEqual(check_facts.untraced("pi là 314", source, set()), ["number 314"])
+        self.assertEqual(check_facts.untraced("có 6.2958 sao", source, set()), ["number 6.2958"])
+
+    def test_the_report_that_a_standalone_render_created_accepts_a_later_voice_run(self):
+        report = {"voice": {"voice": "Mai Anh"}}                       # what `render` writes when there is no report yet
+        best = {"take": 2, "edits": 1, "ref_words": 10, "heard": "x"}
+        voice = make_video.record_voice(report, "Mai Anh", 3, True, {"vo-1": best, "vo-2": {**best, "edits": 5}})
+        self.assertEqual(voice["chosen"]["vo-1"]["wer"], 0.1)
+        self.assertFalse(voice["chosen"]["vo-1"]["flagged"])
+        self.assertTrue(voice["chosen"]["vo-2"]["flagged"])
+        self.assertEqual((voice["voice"], voice["takes"], voice["asr"]), ("Mai Anh", 3, True))
+        make_video.record_voice(report, "Mai Anh", 3, True, {"vo-3": best})   # a later partial run adds to what is there
+        self.assertEqual(sorted(report["voice"]["chosen"]), ["vo-1", "vo-2", "vo-3"])
+        unmeasured = make_video.record_voice({}, "Hải Đăng", 1, False, {"vo-1": {"take": 1, "edits": None, "ref_words": None, "heard": None}})
+        self.assertIsNone(unmeasured["chosen"]["vo-1"]["wer"])
+
+
 class Narration(unittest.TestCase):
     def test_reworded_lines_are_kept_and_judged_by_the_gate(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")

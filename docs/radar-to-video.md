@@ -41,7 +41,7 @@ Lời đọc đi vào bộ tổng hợp giọng có chữ số được đọc t
 | Học được gì | `learn` | từng mục (tối đa 3) | thẻ chứa nguyên văn |
 | Lưu ý và thử | `caveats`, `try_it` | từng lưu ý (tối đa 2), rồi `note` của `try_it` | thẻ lưu ý; cửa sổ terminal gõ các lệnh của `try_it.commands` (tối đa 6; nhiều hơn thì chỉ hiện 6 lệnh đầu, `plan` và `scaffold` in cảnh báo và `voiceover.json` ghi `commands_shown`); địa chỉ `facts.url` ở chân |
 
-Cảnh nào bài không có dữ liệu thì bị bỏ. Mỗi hàng chữ cố định (tiêu đề cảnh, "Số liệu theo ngày quét", "sao", "fork") nằm trong phần tử `data-label` của mẫu và không bị đối chiếu; mọi chữ khác phải đến từ bài.
+Cảnh nào bài không có dữ liệu thì bị bỏ. Mỗi hàng chữ cố định (tiêu đề cảnh, "Số liệu theo ngày quét", "sao", "fork") nằm trong phần tử `data-label` của mẫu và không bị đối chiếu, nhưng chỉ khi nội dung đúng bằng một nhãn trong danh sách `FIXED_LABELS` của `scripts/vo/check_facts.py`; phần tử `data-label` chứa chữ nào khác vẫn bị đối chiếu như chữ thường. Mọi chữ khác phải đến từ bài.
 
 **Ngân sách lời đọc** (`--speech-seconds`, mặc định 60 giây, ước lượng 19 ký tự mỗi giây). Bắt đầu từ: tên + hook, hai câu của vấn đề, 4 bước, 3 mục học, 2 lưu ý, ghi chú thử. Nếu vượt ngân sách thì cắt theo thứ tự cố định:
 lưu ý còn 1, mục học còn 2, bỏ ghi chú thử (các lệnh vẫn hiện), bước còn 3. Hook, vấn đề, 3 bước và 1 lưu ý không bao giờ bị cắt; nếu vẫn dài hơn thì `plan` và `scaffold` in cảnh báo "over the speech budget".

@@ -10,20 +10,11 @@ import html as htmllib
 import json
 
 import plan as planlib
+from check_facts import FIXED_LABELS
 
 E = htmllib.escape
 
-LABELS = {
-    "problem": "Vấn đề nó giải quyết",
-    "how": "Nó chạy như thế nào",
-    "parts": "Các mảnh ghép",
-    "learn": "Học được gì từ thiết kế này",
-    "caveats": "Lưu ý trước khi dùng",
-    "try": "Tự thử",
-    "scan": "Số liệu theo ngày quét",
-    "stars": "sao",
-    "forks": "fork",
-}
+LABELS = FIXED_LABELS   # the gate owns the list of fixed words it lets through
 
 CSS = """
       * { margin: 0; padding: 0; box-sizing: border-box; }
