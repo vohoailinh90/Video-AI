@@ -45,7 +45,11 @@ def items_from_video(video: Path, lines_path: Path, label: str, work: Path) -> l
     items = []
     for line in lines:
         start = max(0.0, line["start"] - 0.2)
-        length = max(1.0, line["scene_end"] - 0.3 - start)
+        end = line["scene_end"] - 0.3
+        later = [l["start"] - 0.1 for l in lines if l["start"] > line["start"]]  # lines that share a scene stop at the next line
+        if later:
+            end = min(end, min(later))
+        length = max(1.0, end - start)
         wav = work / f"{line['id']}.wav"
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", str(video),
@@ -53,7 +57,7 @@ def items_from_video(video: Path, lines_path: Path, label: str, work: Path) -> l
             check=True,
         )
         items.append({"engine": label, "voice": "mix", "id": line["id"], "group": "narration",
-                      "text": line["text"], "path": str(wav)})
+                      "text": line.get("speak", line["text"]), "path": str(wav)})
     return items
 
 

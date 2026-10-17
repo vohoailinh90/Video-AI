@@ -1,0 +1,19 @@
+{
+  "title": "Video thử VoiceStudio",
+  "eyebrow": "Video-AI · từ bài GitHub Radar 2026-10-13",
+  "lede": "Bản thử biến một bài radar thành video 54 giây: lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền. Mọi số, tên và lệnh trên màn hình lấy từ các trường của bài, và một script đã kiểm tra điều đó.",
+  "lines": "voiceover.json",
+  "facts": [
+    ["Độ dài", "53,6 giây"],
+    ["Hình ảnh", "1920×1080, 30 khung hình/giây"],
+    ["Lời đọc", "VieNeu-TTS v3 Turbo, giọng Hải Đăng"],
+    ["Nguồn", "debpalash/VoiceStudio, bài quét ngày 2026-10-13"]
+  ],
+  "voices": [
+    { "key": "hai-dang", "label": "Giọng nam · Hải Đăng", "mp4": "renders/voicestudio.mp4" }
+  ],
+  "notes": [
+    "Mức dễ hiểu đã được kiểm tra bằng máy: PhoWhisper-small nghe lại âm thanh cắt từ file video này, sai 19 trên 179 từ (11%). Lỗi nằm ở từ tiếng Anh và tên riêng (VoiceStudio, backend, Python, desktop, AGPL, Local API), cộng hai chữ tiếng Việt bị nghe lệch.",
+    "Chưa có người nghe đánh giá độ tự nhiên và độ dễ hiểu của giọng. Script kiểm tra chỉ bắt số, tên và lệnh bịa; câu tiếng Việt diễn đạt lại cần người đọc đối chiếu với bài."
+  ]
+}

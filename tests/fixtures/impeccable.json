@@ -1,0 +1,514 @@
+{
+  "draft": {
+    "analogy": "Giống một tổ biên tập có sẵn bảng từ vựng chung: bạn nói polish hay quieter, hai bên dùng cùng một từ cho cùng một việc, còn một máy soát lỗi (detector) kiểm lại theo luật cố định.",
+    "caveats": [
+      "Có telemetry ẩn danh khi bắt đầu thiết kế mới: yêu cầu roll luôn xảy ra, còn bản ghi gửi đi tắt được bằng `npx impeccable telemetry off` hoặc `DO_NOT_TRACK=1`.",
+      "Hook trên Claude Code chạy độc lập với việc duyệt công cụ, nên lần sửa file đầu có thể tải engine về. README khuyên xem hook trước khi chạy không giám sát.",
+      "Chế độ live chỉ sửa checkout cục bộ. Áp dụng chỉnh sửa chữ có thể chạy `impeccable:manual-edit-validate` trong package.json dưới quyền của bạn: hãy xem script đó.",
+      "Lần quét sạch của detector chỉ là bằng chứng, không chứng minh chất lượng thị giác hay khả năng truy cập; vẫn phải xem giao diện thật ở các màn hình liên quan."
+    ],
+    "facebook": {
+      "caption": "AI vẽ giao diện dễ lặp vài kiểu quen thuộc? Impeccable dạy nó thiết kế có chủ đích\n\nMột skill, 24 lệnh: lập kế hoạch, đánh giá, chỉnh lần cuối, kèm 59 quy tắc dò lỗi thiết kế chạy không cần LLM.\nBài hướng dẫn từng bước đi kèm chỉ cách cài, khởi tạo và rà soát giao diện.\nLưu ý: có telemetry ẩn danh và có thể tắt.",
+      "hashtags": [
+        "AI",
+        "Design",
+        "OpenSource"
+      ]
+    },
+    "glossary": [
+      {
+        "meaning": "Gói hướng dẫn để AI làm theo trong một công cụ như Claude Code hay Cursor.",
+        "term": "Skill"
+      },
+      {
+        "meaning": "Từ README dùng cho công cụ bao quanh mô hình AI, ví dụ Cursor hay Claude Code.",
+        "term": "Harness"
+      },
+      {
+        "meaning": "Bộ quy tắc xác định dò lỗi thiết kế, chạy không cần LLM.",
+        "term": "Detector"
+      },
+      {
+        "meaning": "Đoạn tự chạy khi agent sửa file hoặc kết thúc lượt, dùng để đưa phát hiện về cho agent.",
+        "term": "Hook"
+      }
+    ],
+    "guide": {
+      "next": [
+        "Thử `/impeccable craft`, luồng đầy đủ lập kế hoạch rồi dựng có lặp lại bằng hình ảnh.",
+        "Khi `/impeccable init` hỏi đường dựng (chỉ hỏi nếu có tạo ảnh), chọn `comp` hay `code`; ghi đè riêng một máy ở `.impeccable/config.local.json`.",
+        "Quét một trang thật bằng `npx impeccable detect` kèm địa chỉ web của bạn; cần Chrome, Chromium hoặc Edge."
+      ],
+      "outcome": "Skill Impeccable cài trong công cụ AI của bạn: gõ /impeccable init để ghi PRODUCT.md, rồi dùng /impeccable audit và npx impeccable detect để rà soát giao diện.",
+      "requirements": [
+        {
+          "detail": "Cursor, Claude Code, GitHub Copilot, Gemini CLI, Codex CLI, Grok Build, Hermes Agent... README có danh sách đầy đủ.",
+          "evidence": "README",
+          "item": "Một công cụ AI được hỗ trợ",
+          "link_ref": null
+        },
+        {
+          "detail": "README bảo chạy lệnh cài từ thư mục gốc của dự án.",
+          "evidence": "README",
+          "item": "Thư mục gốc của dự án giao diện",
+          "link_ref": null
+        },
+        {
+          "detail": "README nói Node chỉ cần cho trình cài `npx`, còn cách Git cũng chạy `npx impeccable link`, nên cứ chuẩn bị Node.",
+          "evidence": "README",
+          "item": "Node.js (chỉ để dùng npx)",
+          "link_ref": null
+        },
+        {
+          "detail": "Engine là một binary tự chứa; nếu chưa nằm cạnh launcher, nó được tải một lần vào `~/.impeccable/bin/`.",
+          "evidence": "README",
+          "item": "Mạng cho lần chạy đầu",
+          "link_ref": null
+        },
+        {
+          "detail": "Lệnh quét URL dùng trình duyệt đã cài trên máy.",
+          "evidence": "README",
+          "item": "Chrome, Chromium hoặc Edge (chỉ khi quét một địa chỉ web)",
+          "link_ref": null
+        }
+      ],
+      "steps": [
+        {
+          "commands": [],
+          "do": [
+            "Chọn công cụ AI bạn dùng trong danh sách README hỗ trợ.",
+            "Mở terminal tại thư mục gốc của dự án giao diện."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Chuẩn bị công cụ AI và thư mục dự án",
+          "why": "Skill sẽ được cài vào đúng công cụ AI và đúng dự án của bạn."
+        },
+        {
+          "commands": [
+            "npx impeccable install"
+          ],
+          "do": [
+            "Chạy lệnh dưới đây từ thư mục gốc của dự án.",
+            "Trình cài hiện các thư mục hay CLI nó phát hiện, cho bạn giữ hoặc đổi nhà cung cấp, rồi hỏi cài cho dự án hay toàn cục.",
+            "Tải lại công cụ AI sau khi cài; README ghi: Reload your harness afterward.",
+            "Codex: mở `/hooks` rồi duyệt hook của dự án. Grok Build: tin cậy thư mục bằng `/hooks-trust` hoặc chạy với `--trust`. Gõ các lệnh này trong phiên của công cụ đó."
+          ],
+          "evidence": "README",
+          "expect": "Danh sách thư mục hoặc CLI của công cụ AI mà trình cài phát hiện được, để bạn giữ hoặc tùy chỉnh.",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Cài skill bằng trình cài đặt",
+          "why": "Đặt skill (và hook thiết kế nếu công cụ hỗ trợ) vào thư mục của từng công cụ AI."
+        },
+        {
+          "commands": [
+            "/impeccable init"
+          ],
+          "do": [
+            "Gõ lệnh dưới đây ngay trong công cụ AI, không gõ trong terminal.",
+            "`init` xem dự án, chỉ hỏi những chỗ thiếu về sự thật bền của sản phẩm rồi ghi PRODUCT.md.",
+            "Codex: README ghi Codex dùng skill, không dùng lệnh /prompts:, và gọi bằng `$impeccable` hoặc mở `/skills`. README không nêu cú pháp từng lệnh con; hãy đặt tên lệnh con sau `$impeccable`, như init."
+          ],
+          "evidence": "README",
+          "expect": "File PRODUCT.md ghi đối tượng, mục đích, bối cảnh sử dụng, ràng buộc, giọng điệu và bằng chứng của sản phẩm.",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Khởi tạo bối cảnh sản phẩm",
+          "why": "Các lệnh sau biết đối tượng, mục đích và ràng buộc của sản phẩm."
+        },
+        {
+          "commands": [],
+          "do": [
+            "Thêm khối bên dưới vào .gitignore của dự án.",
+            "Giữ theo dõi các file dùng chung: `.impeccable/config.json`, `.impeccable/live/config.json`, `.impeccable/design.json`, `.impeccable/surfaces/*.md`, `.impeccable/critique/*.md`."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "File tạm đã lỡ commit trước khi thêm khối này: chạy `git rm --cached <path>` để ngừng theo dõi mà vẫn giữ bản trên máy.",
+          "link_ref": null,
+          "snippet_ref": 4,
+          "title": "Giữ file tạm của Impeccable ngoài git",
+          "why": "Ảnh chụp, trạng thái chạy và cấu hình riêng từng máy không nên bị commit."
+        },
+        {
+          "commands": [
+            "/impeccable audit"
+          ],
+          "do": [
+            "Gõ lệnh trong công cụ AI (Codex: dùng `$impeccable` thay cho `/impeccable`, xem bước 3). Thêm tên vùng cần xem để thu hẹp phạm vi, như mẫu bên dưới.",
+            "Gõ `/impeccable` một mình để xem toàn bộ danh sách lệnh."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": 3,
+          "title": "Rà soát một phần giao diện",
+          "why": "README mô tả audit là kiểm tra chất lượng kỹ thuật: truy cập, hiệu năng, responsive."
+        },
+        {
+          "commands": [
+            "/impeccable critique",
+            "/impeccable polish"
+          ],
+          "do": [
+            "Gõ hai lệnh dưới đây trong công cụ AI, lần lượt; Codex dùng `$impeccable` thay cho `/impeccable` (xem bước 3).",
+            "`critique` là bản đánh giá UX: thứ bậc, độ rõ ràng, cảm xúc.",
+            "`polish` là lượt chỉnh cuối, đồng bộ hệ thiết kế và sẵn sàng phát hành.",
+            "Lệnh hay dùng có thể ghim thành lệnh riêng, ví dụ `/impeccable pin audit` tạo lệnh `/audit`."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Đánh giá thiết kế rồi chỉnh lần cuối",
+          "why": "Tách đánh giá trải nghiệm khỏi bước hoàn thiện trước khi ra mắt."
+        },
+        {
+          "commands": [
+            "npx impeccable detect src/",
+            "npx impeccable detect --json ."
+          ],
+          "do": [
+            "Chạy lệnh đầu để quét thư mục mã nguồn; có thể quét một file HTML hoặc một địa chỉ web.",
+            "Chạy lệnh thứ hai để có kết quả JSON cho CI. Phát hiện dạng đọc được ghi ra stderr.",
+            "Mã thoát 0 là quét xong và không có phát hiện chính, 2 là có phát hiện chính, 1 là có đích không quét được."
+          ],
+          "evidence": "README",
+          "expect": "Mã thoát 0 khi quét xong mà không có phát hiện chính.",
+          "if_fails": "",
+          "link_ref": 6,
+          "snippet_ref": null,
+          "title": "Quét lỗi thiết kế bằng CLI, không cần AI",
+          "why": "Dò 59 quy tắc xác định ngay trên mã nguồn hoặc trong CI, không cần LLM và không cần khóa API."
+        },
+        {
+          "commands": [
+            "npx impeccable update",
+            "npx impeccable telemetry off"
+          ],
+          "do": [
+            "Chạy dòng đầu để làm mới bản cài đã có.",
+            "Chạy dòng thứ hai nếu bạn muốn tắt telemetry; cách khác là đặt `DO_NOT_TRACK=1`."
+          ],
+          "evidence": "README",
+          "expect": "",
+          "if_fails": "",
+          "link_ref": null,
+          "snippet_ref": null,
+          "title": "Cập nhật và quyết định về telemetry",
+          "why": "Giữ skill ở bản mới và tự chọn có gửi bản ghi ẩn danh hay không."
+        }
+      ],
+      "troubleshooting": [
+        {
+          "evidence": "README",
+          "fix": "Mở `/hooks` sau khi cài hoặc cập nhật và duyệt hook của dự án; cập nhật làm đổi `.codex/hooks.json` có thể cần duyệt lại.",
+          "problem": "Codex không chạy hook thiết kế"
+        },
+        {
+          "evidence": "README",
+          "fix": "Chạy lại với `--force`: README nói file hỏng được sao lưu thành `.bak` rồi thay bằng bản mới.",
+          "problem": "Cài hoặc cập nhật dừng vì file hook bị hỏng"
+        },
+        {
+          "evidence": "README",
+          "fix": "Khởi động lại công cụ. Cursor (cách sao chép thủ công) cần kênh Nightly và bật Agent Skills; Gemini CLI cần bản preview và bật Skills trong `/settings`.",
+          "problem": "Skill vừa cài chưa hiện trong công cụ"
+        },
+        {
+          "evidence": "README",
+          "fix": "Chạy `hermes skills trust` một lần tại thư mục gốc dự án; README nói cài toàn cục không cần bước này.",
+          "problem": "Hermes chưa nạp skill cài theo dự án"
+        }
+      ],
+      "verify": "Gõ `/impeccable` một mình trong công cụ AI: README nói nó hiện đủ danh sách lệnh; chưa thấy skill thì khởi động lại. Codex: mở `/skills` hoặc gõ `$impeccable`. CLI: xem mã thoát ở bước 7."
+    },
+    "hook": "24 lệnh giúp AI vẽ giao diện bớt giống nhau, từ lập kế hoạch đến kiểm tra và chỉnh lần cuối",
+    "how_it_works": {
+      "components": [
+        {
+          "evidence": "README",
+          "icon": "puzzle",
+          "name": "Skill impeccable",
+          "role": "Một skill cho mọi công cụ AI; 24 lệnh con đi qua /impeccable."
+        },
+        {
+          "evidence": "README",
+          "icon": "file-text",
+          "name": "PRODUCT.md và DESIGN.md",
+          "role": "PRODUCT.md giữ sự thật bền của sản phẩm; DESIGN.md ghi riêng hệ thống thị giác."
+        },
+        {
+          "evidence": "README",
+          "icon": "cpu",
+          "name": "Engine và launcher",
+          "role": "Binary tự chứa chạy cạnh launcher, hoặc được tải một lần vào ~/.impeccable/bin/."
+        },
+        {
+          "evidence": "README",
+          "icon": "stethoscope",
+          "name": "Bộ dò (detector)",
+          "role": "59 quy tắc xác định, chạy bằng CLI hoặc tiện ích trình duyệt, không cần LLM hay khóa API."
+        },
+        {
+          "evidence": "README",
+          "icon": "zap",
+          "name": "Hook thiết kế",
+          "role": "Chạy detector khi agent sửa file giao diện và đưa phát hiện về luồng của agent."
+        },
+        {
+          "evidence": "README",
+          "icon": "globe",
+          "name": "Chế độ live",
+          "role": "Lặp biến thể của một phần tử ngay trên trình duyệt, trên checkout cục bộ."
+        }
+      ],
+      "flow": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          0,
+          5
+        ]
+      ],
+      "steps": [
+        {
+          "evidence": "README",
+          "text": "npx impeccable install đặt skill, và hook cho Claude Code, Copilot, Codex, Cursor, Grok Build, vào thư mục của từng công cụ. Launcher trong scripts chạy engine.",
+          "title": "Cài skill vào công cụ AI"
+        },
+        {
+          "evidence": "README",
+          "text": "Mọi việc đi qua /impeccable <command> <target>. init ghi PRODUCT.md; các lệnh khác dùng từ vựng chung như shape, critique, audit, polish.",
+          "title": "Một lệnh, nhiều việc"
+        },
+        {
+          "evidence": "README",
+          "text": "Khi bắt đầu một thiết kế mới, skill hỏi roll API chia ra một bàn các thế giới thị giác từ danh mục; hướng được chọn ghi vào bản tóm tắt của màn hình đó.",
+          "title": "Chọn hướng thị giác"
+        },
+        {
+          "evidence": "README",
+          "text": "Comp-first tạo bản thiết kế đầy đủ rồi dựng theo; code-first dựng thẳng bằng mã. Lựa chọn áp dụng cho landing page và màn hình trình diễn; màn hình ứng dụng và tài liệu luôn dựng bằng mã. Lưu ở buildPath.",
+          "title": "Chọn đường dựng"
+        },
+        {
+          "evidence": "README",
+          "text": "59 quy tắc xác định chạy qua npx impeccable detect hoặc hook khi agent sửa file giao diện: Claude Code, Copilot, Codex báo sau khi sửa, Grok Build báo khi dừng, Cursor chặn trước khi ghi.",
+          "title": "Dò lỗi bằng luật cố định"
+        }
+      ]
+    },
+    "learn": [
+      "Đặt tên cho từng việc: 24 lệnh như polish, quieter, distill tạo từ vựng chung giữa người và AI, nên yêu cầu ngắn mà vẫn rõ.",
+      "Tách sự thật của sản phẩm (PRODUCT.md) khỏi hướng thị giác (DESIGN.md và bản tóm tắt từng màn hình), để lệnh sau không nhầm hai thứ.",
+      "Phần dò lỗi dùng luật xác định, không cần LLM: 59 quy tắc lặp lại được, có mã thoát cho CI, không cần khóa API. Phần đánh giá thiết kế vẫn có kiểm tra bằng LLM.",
+      "Nói rõ giới hạn của công cụ kiểm tra: README viết rằng lần quét sạch chỉ là bằng chứng, không thay việc xem giao diện thật.",
+      "Một trình cài, nhiều công cụ AI: cùng nội dung được đóng gói theo từng nhà cung cấp, nên chuyển công cụ không phải học lại."
+    ],
+    "one_liner": "Skill thiết kế cho AI coding agent: một lệnh /impeccable với 24 lệnh con, chế độ sửa trực tiếp trên trình duyệt và 59 quy tắc dò lỗi thiết kế chạy không cần LLM.",
+    "problem": "Mô hình AI đều học từ cùng các mẫu SaaS; thiếu chỉ dẫn thì dự án nào cũng lặp vài dấu hiệu: phông Inter, gradient tím sang xanh, thẻ lồng trong thẻ, chữ xám trên nền màu (README liệt kê). Impeccable thêm quy trình `init` ghi bối cảnh sản phẩm vào PRODUCT.md, 24 lệnh làm từ vựng chung với AI, và bộ dò 59 quy tắc chạy bằng CLI hoặc tiện ích trình duyệt. Phạm vi: thiết kế giao diện frontend do AI sinh ra.",
+    "title": "Impeccable: bộ lệnh thiết kế giao diện cho AI coding agent",
+    "who_for": [
+      "Dev hoặc designer dùng Claude Code, Cursor, Codex, Gemini CLI... muốn AI vẽ giao diện có chủ đích thay vì mẫu SaaS quen thuộc.",
+      "Người đã có giao diện và cần rà soát: `audit` cho truy cập, hiệu năng, responsive; `critique` cho UX; `polish` trước khi ra mắt.",
+      "Đội muốn dò lỗi thiết kế trong CI: `npx impeccable detect --json .` cho kết quả JSON và mã thoát để chặn.",
+      "Không hợp nếu cần sửa trực tiếp site đã triển khai: chế độ live chỉ sửa checkout cục bộ, README nói không hỗ trợ site production."
+    ]
+  },
+  "facts": {
+    "blocks": [
+      [
+        "",
+        "/impeccable audit blog           # Audit blog hub + post pages\n/impeccable critique landing     # UX design review\n/impeccable polish settings      # Final pass before shipping\n/impeccable harden checkout      # Add error handling + edge cases"
+      ],
+      [
+        "",
+        "/impeccable redo this hero section"
+      ],
+      [
+        "",
+        "/impeccable audit        # Find issues\n/impeccable polish       # Final cleanup\n/impeccable distill      # Remove complexity\n/impeccable critique     # Full design review"
+      ],
+      [
+        "",
+        "/impeccable audit the header\n/impeccable polish the checkout form"
+      ],
+      [
+        "gitignore",
+        "# impeccable-ignore-start\n# Ephemeral output, runtime state, and per-dev overrides.\n# The **/ prefix covers .impeccable at the repo root or in a nested workspace.\n# Shared artifacts stay tracked: config.json, live/config.json,\n# design.json, surfaces/*.md, critique/*.md.\n**/.impeccable/config.local.json\n**/.impeccable/hook.cache.json\n**/.impeccable/hook.pending.json\n**/.impeccable/*.png\n**/.impeccable/review/\n**/.impeccable/questions/\n**/.impeccable/live/server.json\n**/.impeccable/live/sessions/\n**/.impeccable/live/previews/\n**/.impeccable/live/annotations/\n**/.impeccable/live/cache/\n**/.impeccable/live/manual-edit-apply-transaction.json\n**/.impeccable/live/manual-edit-events.jsonl\n**/.impeccable/live/manual-edit-evidence/\n**/.impeccable/live/pending-manual-edits.json\n**/.impeccable/live/deferred-svelte-component-accepts.json\n**/.impeccable/live/*.png\n# impeccable-ignore-end"
+      ],
+      [
+        "json",
+        "{ \"buildPath\": \"comp\" }"
+      ]
+    ],
+    "bucket": "software",
+    "forks": 4900,
+    "full_name": "pbakaus/impeccable",
+    "language": "",
+    "license": "Apache-2.0",
+    "links": [
+      [
+        "Allow the hook in your harness",
+        "https://impeccable.style/docs/hooks#allow-the-hook-in-your-harness"
+      ],
+      [
+        "github.com",
+        "https://github.com/pbakaus/impeccable"
+      ],
+      [
+        "Impeccable from the Visual Studio Marketplace",
+        "https://marketplace.visualstudio.com/items?itemName=renaissance-geek.impeccable"
+      ],
+      [
+        "Learn more about Cursor skills",
+        "https://cursor.com/docs/context/skills"
+      ],
+      [
+        "Learn more about Hermes skills",
+        "https://hermes-agent.nousresearch.com/docs/user-guide/features/skills"
+      ],
+      [
+        "Learn more about Gemini CLI skills",
+        "https://geminicli.com/docs/cli/skills/"
+      ],
+      [
+        "impeccable.style/docs/detector",
+        "https://impeccable.style/docs/detector"
+      ],
+      [
+        "Cursor",
+        "https://cursor.com"
+      ],
+      [
+        "Claude Code",
+        "https://claude.ai/code"
+      ],
+      [
+        "GitHub Copilot",
+        "https://github.com/features/copilot"
+      ],
+      [
+        "DeepSeek Harness",
+        "https://github.com/deepseek-ai/deepseek-harness"
+      ],
+      [
+        "Gemini CLI",
+        "https://github.com/google-gemini/gemini-cli"
+      ],
+      [
+        "Codex CLI",
+        "https://github.com/openai/codex"
+      ],
+      [
+        "Grok Build",
+        "https://x.ai/cli"
+      ],
+      [
+        "Hermes Agent",
+        "https://hermes-agent.nousresearch.com"
+      ],
+      [
+        "OpenCode",
+        "https://opencode.ai"
+      ],
+      [
+        "Pi",
+        "https://pi.dev"
+      ],
+      [
+        "Kiro",
+        "https://kiro.dev"
+      ],
+      [
+        "Trae",
+        "https://trae.ai"
+      ],
+      [
+        "Rovo Dev",
+        "https://www.atlassian.com/software/rovo"
+      ],
+      [
+        "Qoder",
+        "https://qoder.com"
+      ],
+      [
+        "Mistral Vibe",
+        "https://docs.mistral.ai/vibe/code/overview"
+      ],
+      [
+        "Veto",
+        "https://github.com/oleg-koval/veto"
+      ],
+      [
+        "Google Antigravity",
+        "https://antigravity.google"
+      ],
+      [
+        "frontend-design",
+        "https://github.com/anthropics/skills/tree/main/skills/frontend-design"
+      ],
+      [
+        "impeccable.style",
+        "https://impeccable.style"
+      ],
+      [
+        "the Neo Mirai case study",
+        "https://impeccable.style/cases/neo-mirai"
+      ],
+      [
+        "impeccable.style",
+        "https://impeccable.style/privacy"
+      ],
+      [
+        "Claude Code's hook security guidance",
+        "https://code.claude.com/docs/en/hooks#security-considerations"
+      ],
+      [
+        "impeccable.style/docs/hooks",
+        "https://impeccable.style/docs/hooks"
+      ],
+      [
+        "example.com",
+        "https://example.com"
+      ],
+      [
+        "Impeccable on npm",
+        "https://www.npmjs.com/package/impeccable"
+      ],
+      [
+        "Paul Bakaus",
+        "https://www.paulbakaus.com"
+      ]
+    ],
+    "scanned": "2026-10-16",
+    "stars": 82000,
+    "url": "https://github.com/pbakaus/impeccable"
+  },
+  "lang": "vi",
+  "note": "WRITTEN IN AN INTERACTIVE SESSION by Claude, not by the pipeline's free models, and not checked by a model of another family (a read-only fact-check of the draft against the README was done by a separate Claude sub-agent of the same family; the findings that held up were applied, the rest rejected). Facts: README.md at commit 6af45ac of a shallow checkout, the whole cleaned README (29516 characters); the repository file tree at that commit (top-level entries plus the children of src, docs and similar directories, at most 120), which the draft's evidence paths may cite; stars and forks read from the repository page on 2026-10-16 and rounded to its precision; 'pushed' is the commit date; what the page did not show (language, topics, creation date) was left empty, not guessed. The draft passed radar/gates.py with require_guide=True.",
+  "position": 2
+}
