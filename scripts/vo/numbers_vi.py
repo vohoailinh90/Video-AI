@@ -4,9 +4,38 @@ speak_text() rewrites the standalone numbers of a sentence and the version of a 
 không), not MP4 or Qwen3, whose digits belong to the name, and leaves everything else alone. The result goes to the synthesizer only; the displayed text keeps its digits.
 """
 import re
+import unicodedata
 
 DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
 GROUPS = ["", " nghìn", " triệu", " tỷ"]
+
+
+def plain_char(c: str) -> str:
+    """The plain ASCII character that a compatibility form stands for, or c itself. A viewer reads Ｏ (full-width), 𝐎 (mathematical), K
+    (Kelvin), ﬁ (ligature) and ⓞ (circled) as letters, ¹⁹ (superscript), ⑲ (circled) and ١٩ (Arabic-Indic) as digits, ／ ： － ． as the
+    punctuation they imitate: the gate and the voice have to read them that way too, or a name, a number or an address made of them
+    goes by unseen. Folding is one character at a time and only to ASCII, not NFKC of the text: NFKC turns ™ into the letters TM and
+    … into three dots, which are not what is on the screen. Vietnamese letters, symbols and other alphabets are left alone."""
+    if ord(c) < 128:
+        return c
+    category, folded = unicodedata.category(c), unicodedata.normalize("NFKC", c)
+    if category[0] == "L":
+        return folded if folded.isascii() and folded.isalpha() else c
+    if category in ("Nd", "No"):
+        if folded.isascii() and folded.isdigit():
+            return folded
+        digit = unicodedata.digit(c, None)
+        return str(digit) if digit is not None else c
+    if category == "So" and len(folded) == 1 and folded.isascii() and folded.isalpha():
+        return folded                                       # circled and squared Latin letters
+    if category[0] in "PS" and len(folded) == 1 and folded.isascii() and not folded.isalnum() and not folded.isspace():
+        return folded
+    return c
+
+
+def plain_text(text: str) -> str:
+    return "".join(plain_char(c) for c in text)
+
 
 # The signs of a number. Each has the look-alikes a page can show for it (full-width, small, heavy, superscript, a true hyphen); the facts
 # gate reads the same ones (scripts/vo/check_facts.py imports these), so a sign cannot be swapped for a twin that is neither traced nor read.
@@ -78,6 +107,7 @@ def _token_words(token: str):
 
 
 def speak_text(text: str) -> str:
+    text = plain_text(text)         # what is read is what the viewer sees: ¹⁹% is 19%
     def replace(match):
         words = _token_words(match.group(2))
         if words is None:

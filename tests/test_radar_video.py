@@ -841,6 +841,27 @@ class ReviewFindings(unittest.TestCase):
         # a symbol is not a letter: ™ is not "TM"
         self.assertEqual(check_facts.untraced("npm™", check_facts.blob({"field": "npm"}), set()), [])
 
+    def test_digits_and_punctuation_in_a_compatibility_form_are_the_plain_ones(self):
+        plain = check_facts.blob({"fact": "VoiceStudio chạy cục bộ"})
+        for text, value in (("¹⁹%", "19%"), ("⑲%", "19%"), ("١٩", "19"), ("１９", "19"), ("₁₉", "19"), ("⁻³", "-3"), ("＋⁷", "+7")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+            self.assertEqual(check_facts.untraced(text, plain, set()), [f"number {value}"], text)
+        self.assertEqual(check_facts.untraced("¹⁹%", check_facts.blob({"fact": "tăng 19%"}), set()), [])        # the number the source has
+        self.assertEqual(check_facts.untraced("19%", check_facts.blob({"fact": "tăng ¹⁹%"}), set()), [])
+        # the voice says what the gate traced
+        self.assertEqual(numbers_vi.speak_text("tăng ¹⁹% và ⑤"), "tăng mười chín phần trăm và năm")
+        self.assertEqual(numbers_vi.speak_text("tăng ١٩"), "tăng mười chín")
+        # a separator in the full-width form still joins the parts of a compound name, so the compound has to be written in the source
+        source = check_facts.blob({"fact": "Open và AI"})
+        for text, name in (("Open／AI", "Open/AI"), ("Open：AI", "Open:AI"), ("Open－AI", "Open-AI"), ("Open．AI", "Open.AI")):
+            self.assertEqual(check_facts.untraced(text, source, set()), [f"token '{name}'"], text)
+            self.assertEqual(check_facts.untraced(text, check_facts.blob({"fact": name}), set()), [], text)
+        self.assertEqual(check_facts.untraced("Open/AI", check_facts.blob({"fact": "Open／AI"}), set()), [])      # nor can the source's own be missed
+        # what is not a compatibility form of one ASCII character is left alone
+        for symbol in ("™", "…", "½", "®", "°", "×", " "):
+            self.assertEqual(numbers_vi.plain_text(symbol), symbol, repr(symbol))
+        self.assertEqual(check_facts.untraced("npm™ …", check_facts.blob({"fact": "npm"}), set()), [])
+
     def test_a_word_is_vietnamese_only_in_the_casing_of_a_word(self):
         source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
         untraced = lambda text, source=source: check_facts.untraced(text, source, set())

@@ -44,7 +44,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
-from numbers_vi import MINUS, PERCENT_CLASS, PERCENT_SIGNS, PLUS, SIGNS, speak_text  # noqa: E402
+from numbers_vi import MINUS, PERCENT_CLASS, PERCENT_SIGNS, PLUS, SIGNS, plain_char, speak_text  # noqa: E402
 
 # The video template's own words. An element marked data-label is skipped by the trace only when its text is exactly one of these;
 # any other text in such an element is read like the rest of the page. scripts/radar/compose.py takes its labels from here.
@@ -377,24 +377,12 @@ def canonical(number: str) -> str:
     return sign + number.replace(",", ".") + percent
 
 
-def plain_letter(c: str) -> str:
-    """A letter that is only another form of a Latin one (full-width Ｏ, mathematical 𝐎, Kelvin K, ligature ﬁ, circled ⓞ) is that
-    letter; the same name would otherwise vanish as a word of another alphabet. ™ (TM) and the like are symbols, not letters: they stay."""
-    if ord(c) >= 128:
-        category = unicodedata.category(c)
-        if category[0] == "L" or category == "So":
-            folded = unicodedata.normalize("NFKC", c)
-            if folded.isascii() and folded.isalpha() and (category[0] == "L" or len(folded) == 1):
-                return folded
-    return c
-
-
 def shown(text: str) -> str:
     """What a viewer reads of a text. A format character (zero-width space or joiner, soft hyphen, a direction mark), a control character
     and a combining mark that has no letter to join draw nothing, so they are dropped and do not break a word: G<zero-width>P<zero-width>T
     is GPT. A symbol (a trademark sign, an emoji) is drawn and a space of any width is a gap, so those stay and break one. A letter in a
-    compatibility form is the plain letter (see plain_letter)."""
-    return "".join(plain_letter(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
+    compatibility form is the plain letter (see numbers_vi.plain_char)."""
+    return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
 def numbers(text: str) -> set:
@@ -472,6 +460,7 @@ def latin_tokens(text: str, allow: set) -> list:
 
 def untraced(text: str, source_blob: str, allow: set) -> list:
     problems = []
+    source_blob = shown(source_blob).lower()        # the source as a viewer would read it, like the text: a compound name is searched in this
     known = numbers(source_blob)
     for number in sorted(numbers(text)):
         if number not in known:
