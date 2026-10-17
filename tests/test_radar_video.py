@@ -690,6 +690,56 @@ class ReviewFindings(unittest.TestCase):
             self.assertTrue(check_facts.css_problems(css), what)
         self.assertTrue(check_facts.css_problems("list-style-type: '9'", inline=True))
 
+    def test_a_style_may_not_load_an_image_or_hide_what_the_gate_counts(self):
+        for what, css in (("image-set", ".a { background: image-set('evil.svg' 1x) }"), ("prefixed", ".a { background: -webkit-image-set('e.svg' 1x) }"),
+                          ("cross-fade", ".a { background: cross-fade(a, b, 50%) }"), ("element", ".a { background: element(#x) }"),
+                          ("custom property", ":root { --x: image-set('evil.svg' 1x) } .a { background: var(--x) }")):
+            self.assertTrue(check_facts.css_problems(css), what)
+        self.assertEqual(check_facts.css_problems(".a { background: radial-gradient(ellipse at 50% 38%, rgba(255, 157, 46, 0.16), transparent 70%), "
+                                                  "linear-gradient(var(--line) 1px, transparent 1px); color: var(--ink) }"), [])
+        # an inline style may only set the font size: display:none, opacity, offsets are how a required row could be hidden
+        self.assertEqual(check_facts.css_problems("font-size: 38px", inline=True), [])
+        for hide in ("display:none", "opacity:0", "position:absolute;left:-9999px", "font-size:38px;visibility:hidden", "color:transparent"):
+            self.assertTrue(check_facts.css_problems(hide, inline=True), hide)
+        digest = digest_with(lambda d: d["draft"]["try_it"].update(commands=["bun run dev", "bun run build"]))
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        hidden = html.replace(">bun run dev<", "><", 1).replace("</body>", '<div style="display:none">bun run dev</div></body>', 1)
+        status, output = run_gate(digest, doc, hidden)
+        self.assertEqual(status, 1)
+        self.assertIn("an inline style that sets the property `display`", output)
+
+    def test_a_name_glued_to_a_vietnamese_letter_is_still_checked(self):
+        source = check_facts.blob({"x": "VoiceStudio, tiếng Việt, ông Nguyễn Văn An ở Hà Nội"})
+        untraced = lambda text: check_facts.untraced(text, source, set())
+        self.assertEqual(untraced("ElevenLabsé"), ["token 'ElevenLabs'"])
+        self.assertEqual(untraced("ElevenLabsế và VoiceStudioé"), ["token 'ElevenLabs'"])      # a name the source has, with a letter glued on, is that name
+        # Vietnamese words are not names: no syllable has five ASCII letters in a row
+        self.assertEqual(untraced("tiếng Việt thương nghiêng khuyến chuyển nghĩa quyền thuyết Nguyễn trường Hồ-Chí-Minh"), [])
+        self.assertTrue(all(len(run) <= 4 for word in "nghiêng khuyến chuyển nghĩa quyền thuyết Nguyễn trường thương khuỷu".split()
+                            for run in re.findall(r"[A-Za-z]+", word)))
+
+    def test_a_render_without_audible_sound_is_not_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def make(name, audio):
+                path = Path(tmp) / name
+                cmd = ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1"] + audio + ["-t", "1", str(path)]
+                subprocess.run(cmd, check=True)
+                return path
+            tone = make("tone.mp4", ["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "aac"])
+            silent = make("silent.mp4", ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-c:a", "aac"])
+            video_only = make("video-only.mp4", [])
+            levels = {name: make_video.whole_file_levels(path) for name, path in (("tone", tone), ("silent", silent), ("none", video_only))}
+        self.assertIsNone(levels["none"][0])
+        make_video.require_audible(*levels["tone"])                                  # a voice-level sound is accepted
+        for name in ("silent", "none"):
+            with self.assertRaises(SystemExit, msg=name):
+                make_video.require_audible(*levels[name])
+        with self.assertRaises(SystemExit):
+            make_video.require_audible(float("-inf"), float("-inf"))
+
     def rendered_plan(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
         return plan, planlib.timeline(plan, estimated_durations(plan))

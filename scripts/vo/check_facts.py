@@ -79,6 +79,8 @@ CSS_PROPERTIES = {
     "font-weight", "gap", "height", "inset", "justify-content", "left", "letter-spacing", "line-height", "margin", "margin-right",
     "margin-top", "max-width", "min-height", "min-width", "opacity", "overflow", "overflow-wrap", "padding", "padding-bottom",
     "padding-top", "position", "right", "top", "transform-origin", "vertical-align", "white-space", "width"}    # and custom properties --x
+CSS_FUNCTIONS = {"linear-gradient", "radial-gradient", "rgba", "var"}      # image-set(), url(), element() ... can load or draw a picture
+INLINE_PROPERTIES = {"font-size"}                                        # what the template sets inline; display, opacity, left ... could hide a row
 # The only file a page may load: the template's GSAP, named exactly so and identical to the copy vendored in scripts/radar/assets.
 # Any other file next to the page (a script, a stylesheet) is code this check does not read, so it is refused.
 TRUSTED_SCRIPT = "gsap.min.js"
@@ -218,12 +220,16 @@ def css_problems(css: str, inline: bool = False) -> list:
     if re.search(r"url\s*\(|expression\s*\(|\\", css, re.I):
         problems.append("url(), expression() or an escape")
     body = css if inline else ";".join(re.findall(r"\{([^{}]*)\}", css))
+    for function in sorted({f.lower() for f in re.findall(r"([A-Za-z_-][\w-]*)\s*\(", body)} - CSS_FUNCTIONS):
+        problems.append(f"the function `{function}()`")
     for declaration in body.split(";"):
         if ":" not in declaration:
             continue
         prop, value = (part.strip() for part in declaration.split(":", 1))
         prop = prop.lower()
-        if not (prop in CSS_PROPERTIES or prop.startswith("--")):
+        if inline and prop not in INLINE_PROPERTIES:
+            problems.append(f"the property `{prop}`")
+        elif not (prop in CSS_PROPERTIES or prop.startswith("--")):
             problems.append(f"the property `{prop}`")
         elif prop == "content" and value not in ('""', "''", "none", "normal"):
             problems.append(f"content: {value}")
@@ -309,11 +315,15 @@ def numbers(text: str) -> set:
 def ascii_chunks(text: str, need_letter: bool = True):
     """The chunks of a text made only of ASCII (names, acronyms, commands, addresses; a chunk ends at a space or at one of SPLIT).
     A character outside ASCII that is not a letter (a symbol like (tm) or an emoji, a zero-width or combining mark) ends a word and
-    hides nothing; a non-ASCII letter makes the chunk a Vietnamese word, which is left out, so nothing is cut out of it."""
+    hides nothing; a non-ASCII letter makes the chunk a Vietnamese word (only its runs of five or more ASCII letters are kept)."""
     text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in unicodedata.normalize("NFC", text))
     for chunk in SPLIT.split(text):
         chunk = chunk.strip(".:,;")
-        if chunk and (not need_letter or re.search(r"[A-Za-z]", chunk)) and not re.search(r"[^\x00-\x7f]", chunk):
+        if re.search(r"[^\x00-\x7f]", chunk):
+            # A Vietnamese word, or a name with a letter glued on (ElevenLabsé). No Vietnamese syllable has five ASCII letters in a
+            # row, so a run of that length in such a chunk is a name; shorter runs are pieces of a word and are not compared.
+            yield from re.findall(r"[A-Za-z]{5,}", chunk)
+        elif chunk and (not need_letter or re.search(r"[A-Za-z]", chunk)):
             yield chunk
 
 
