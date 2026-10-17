@@ -862,6 +862,35 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(numbers_vi.plain_text(symbol), symbol, repr(symbol))
         self.assertEqual(check_facts.untraced("npm™ …", check_facts.blob({"fact": "npm"}), set()), [])
 
+    def test_a_sign_written_as_a_word_is_the_sign(self):
+        for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        positive = check_facts.blob({"fact": "tăng 19%"})
+        self.assertEqual(check_facts.untraced("âm 19%", positive, set()), ["number -19%"])             # the voice would say a negative value
+        self.assertEqual(check_facts.untraced("cộng 19%", positive, set()), ["number +19%"])
+        self.assertEqual(check_facts.untraced("âm 19%", check_facts.blob({"fact": "giảm -19%"}), set()), [])
+        self.assertEqual(check_facts.untraced("-19%", check_facts.blob({"fact": "giảm âm 19%"}), set()), [])      # nor can the source's be missed
+        # the same words not before a number are only words
+        self.assertEqual(check_facts.numbers("âm thanh 19 và cộng đồng 5 người, âm, cộng"), {"19", "5"})
+        # the word the voice says for a sign is the sign the gate reads: "-19%" is said "âm mười chín phần trăm"
+        self.assertEqual(numbers_vi.speak_text("-19%"), "âm mười chín phần trăm")
+        self.assertEqual(check_facts.numbers("âm 19%"), check_facts.numbers("-19%"))
+
+    def test_letters_apart_by_a_new_line_inside_a_value_are_a_row_but_not_across_values(self):
+        source = check_facts.blob({"fact": "VoiceStudio chạy cục bộ"})
+        for text in ("G\nP\nT", "G\r\nP\r\nT", "G \n P\t\tT"):
+            self.assertEqual(check_facts.untraced(text, source, set()), ["token 'GPT'"], repr(text))
+        # a letter that ends one value of the source and one that starts the next are not one name
+        letters = check_facts.blob({"a": "G", "b": "P", "c": "T"})
+        self.assertIn("\x1e", letters)
+        self.assertEqual(check_facts.untraced("GPT", letters, set()), ["token 'GPT'"])
+        self.assertEqual(check_facts.untraced("G P T", check_facts.blob({"a": "dùng G\nP\nT"}), set()), [])            # one value: spelled the same
+        # nor are two text nodes of a page
+        parser = check_facts.Visible()
+        parser.feed("<body><div>G</div><div>P</div><div>T</div></body>")
+        parser.close()
+        self.assertEqual(check_facts.untraced(check_facts.VALUE_BREAK.join(parser.parts + parser.glued), source, set()), [])
+
     def test_a_word_is_vietnamese_only_in_the_casing_of_a_word(self):
         source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
         untraced = lambda text, source=source: check_facts.untraced(text, source, set())
@@ -899,10 +928,10 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("G  P T"), ["token 'GPT'"])                           # any spaces within the line
         self.assertEqual(untraced("G P T", check_facts.blob({"fact": "dùng GPT"})), [])        # the name the source has
         self.assertEqual(untraced("G P T", check_facts.blob({"fact": "dùng G P T"})), [])      # or spelled the same way
-        # not a row: a comma, a line break or a longer word between them
+        # not a row: a comma, a bracket, a longer word, or another value of the source between them
         self.assertEqual(untraced("A và B, C"), [])
         self.assertEqual(untraced("G, P, T"), [])
-        self.assertEqual(untraced("G\nP\nT"), [])
+        self.assertEqual(untraced("G\nP\nT"), ["token 'GPT'"])                                      # a new line inside one value is only a space
         self.assertEqual(untraced("G (P) T"), [])
 
     def test_the_narration_has_to_be_in_the_render_not_just_the_music(self):

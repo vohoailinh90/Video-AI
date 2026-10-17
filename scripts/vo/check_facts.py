@@ -314,9 +314,13 @@ def normalize(text) -> str:
     return str(text or "").strip()
 
 
+VALUE_BREAK = "\x1e"      # between two values of the source, or two text nodes of the page: a new line inside one value is only a space
+
+
 def blob(value) -> str:
-    """The text a source holds, lowercased, one value per line: every string and number in it, not its keys (`license` or `commands`
-    as a key is structure, not a fact the video may state)."""
+    """The text a source holds, lowercased, one value after another: every string and number in it, not its keys (`license` or
+    `commands` as a key is structure, not a fact the video may state). Values are told apart by VALUE_BREAK, not by a new line, because
+    a new line inside a value is whitespace like any other."""
     parts = []
 
     def walk(node):
@@ -330,7 +334,7 @@ def blob(value) -> str:
             parts.append(str(node))
 
     walk(value)
-    return "\n".join(parts).lower()
+    return VALUE_BREAK.join(parts).lower()
 
 
 NAME = re.compile(r"[a-z0-9_]+(?:[-.][a-z0-9_]+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
@@ -385,8 +389,13 @@ def shown(text: str) -> str:
     return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
+SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)\s+(?=\d)", re.I)    # the words speak_text says for a sign, and their kin
+
+
 def numbers(text: str) -> set:
-    return {canonical(n) for n in NUMBER.findall(shown(text))} - {""}
+    """The values of the numbers in a text. A sign written as a word (âm 19%, trừ 5, cộng 3) is the sign: the voice says it either way."""
+    text = SIGN_WORDS.sub(lambda m: "-" if m.group(1) else "+", shown(text))
+    return {canonical(n) for n in NUMBER.findall(text)} - {""}
 
 
 VIETNAMESE_SYLLABLE = re.compile(r"(?:ngh|ng|gh|nh|ph|th|tr|ch|kh|gi|qu|[bcdghklmnprstvx])?[aeiouy]{1,3}(?:ng|nh|ch|[cmnpt])?")
@@ -422,7 +431,7 @@ def glued_names(chunk: str):
 
 
 SPLIT_KEEP = re.compile(f"({SPLIT.pattern})")      # the same, keeping what it split on
-GAP = re.compile(r"[^\S\n\r]+")                         # spaces within a line: letters apart by these are still a row of letters
+GAP = re.compile(rf"[^\S{VALUE_BREAK}]+")               # any whitespace inside a value: letters apart by it are still a row of letters
 
 
 def ascii_chunks(text: str, need_letter: bool = True):
@@ -533,7 +542,7 @@ def main() -> int:
         print(f"{args.html}: code that could put words on the screen or load code, which this check cannot trace: "
               f"{'; '.join(sorted(set(parser.code)))}")
         failures += 1
-    screen = "\n".join(parser.parts + parser.glued)
+    screen = VALUE_BREAK.join(parser.parts + parser.glued)
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)
     if problems:
