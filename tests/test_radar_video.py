@@ -563,6 +563,23 @@ class ReviewFindings(unittest.TestCase):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
         self.assertEqual(plan["url_text"], "github.com/debpalash/VoiceStudio")                      # the address of the digest itself
 
+    def test_a_name_with_more_after_it_is_not_the_shorter_name(self):
+        source = check_facts.blob({"stack": "faster-whisper-large-v3 và Python-based, repo debpalash/VoiceStudio, chạy bun run setup:api",
+                                   "license": "AGPL-3.0 hoặc Apache-2.0", "model": "gpt-4o và v2.1.3"})
+        untraced = lambda text, allow=(): check_facts.untraced(text, source, set(allow))
+        self.assertEqual(untraced("faster-whisper-large-v3"), [])
+        self.assertEqual(untraced("faster-whisper"), ["token 'faster-whisper'"])         # another model, not the one the source names
+        self.assertEqual(untraced("whisper large"), ["token 'whisper'", "token 'large'"])
+        self.assertEqual(untraced("gpt"), ["token 'gpt'"])                                # gpt-4o is not gpt
+        self.assertEqual(untraced("Python"), ["token 'Python'"])
+        self.assertEqual(untraced("Python", allow=["python"]), [])                         # the explicit way out, per word
+        # a name followed only by a version is still that name; so is each path segment of owner/repo
+        self.assertEqual(untraced("AGPL và Apache, giấy phép AGPL-3.0"), [])
+        self.assertEqual(untraced("VoiceStudio, debpalash/VoiceStudio, github.com/debpalash/VoiceStudio"), ["token 'github.com/debpalash/VoiceStudio'"])
+        self.assertEqual(untraced("bun run setup:api, setup, api"), [])
+        self.assertEqual(untraced("v2.1.3"), [])
+        self.assertEqual(untraced("v2.1"), ["number 2.1", "token 'v2.1'"])
+
     def test_a_digest_whose_url_carries_credentials_is_refused_before_anything_is_written(self):
         for url in ("https://user:ghp_SECRET@example.com/o/r", "https://ghp_SECRET@github.com/o/r", "http://u:p@example.com/o/r"):
             with self.assertRaises(ValueError) as caught:

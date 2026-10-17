@@ -6,8 +6,8 @@ A script decides, not a model, the way github-radar's gates do:
   * every line of voiceover.json cites the draft fields it comes from (`source`: ["draft.hook", "draft.steps[0]", ...]); each
     path must exist;
   * every number and every Latin-letter token (a name, an acronym, a command) in a line's text must occur in the values of the
-    fields that line cites (a number as a value, a token as a whole name: npm is not found in pnpm, and a key such as `license` is
-    not a value); Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
+    fields that line cites (a number as a value, a token as a whole name: npm is not found in pnpm, faster-whisper is not found in
+    faster-whisper-large-v3, and a key such as `license` is not a value; a name before a version, AGPL for AGPL-3.0, is found); Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
   * the page's code is not read, but the plain ways it has of putting words on the screen or bringing in more code are refused
@@ -196,10 +196,25 @@ def blob(value) -> str:
     return "\n".join(parts).lower()
 
 
-def has_word(token: str, source_blob: str) -> bool:
-    """The token occurs in the source as a whole name: not inside a longer one (npm is not in pnpm), though it may sit next to
-    punctuation (AGPL in AGPL-3.0, bun.sh in https://bun.sh/install)."""
-    return re.search(rf"(?<![a-z0-9_]){re.escape(token.lower())}(?![a-z0-9_])", source_blob) is not None
+NAME = re.compile(r"[a-z0-9_]+(?:[-.][a-z0-9_]+)*")           # faster-whisper-large-v3, bun.sh, AGPL-3.0: a name ends at / : space ...
+VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
+
+
+def names_in(source_blob: str) -> set:
+    """Every name the source writes, whole: letters, digits and _ joined by - or . (a / or : or space ends it), and the name before
+    a trailing version (AGPL for AGPL-3.0). faster-whisper-large-v3 is one name: faster-whisper and whisper are not in it."""
+    names = set()
+    for name in NAME.findall(source_blob):
+        names.add(name)
+        names.add(VERSION_TAIL.sub("", name))
+    names.discard("")
+    return names
+
+
+def has_name(token: str, names: set) -> bool:
+    """The token is made of names the source writes; github.com/debpalash/VoiceStudio is three of them."""
+    parts = NAME.findall(token.lower())
+    return bool(parts) and all(part in names for part in parts)
 
 
 def canonical(number: str) -> str:
@@ -237,8 +252,9 @@ def untraced(text: str, source_blob: str, allow: set) -> list:
     for number in sorted(numbers(text)):
         if number not in known:
             problems.append(f"number {number}")
+    names = names_in(source_blob)
     for token in latin_tokens(text, allow):
-        if not has_word(token, source_blob):
+        if not has_name(token, names):
             problems.append(f"token {token!r}")
     return problems
 
