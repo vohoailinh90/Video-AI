@@ -114,7 +114,7 @@ def run_cli(*args: str) -> tuple[int, str]:
 
 
 def git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+    return subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
                           check=True, capture_output=True, text=True).stdout
 
 
@@ -696,6 +696,70 @@ class PipelineTests(Sandbox):
         self.assertFalse(f.file("audit-pack.md").exists())
         self.assertEqual(run_cli("pack", "F1", "--force")[0], 0)
         self.assertTrue(f.file("audit-pack.md").exists())
+
+    def test_a_one_line_diff_cannot_slip_past_the_pack_limit(self):
+        # Codex's sixth review: the limit counted newlines only, so a minified or generated file of one huge line cost one line.
+        f = self.new_feature()
+        self.write_env({**MODELS, "TEAM_PACK_MAX_BYTES": "6000"})
+        big = 'with open(work + "/bundle.min.js", "w") as fh:\n    fh.write("x" * 20000)\n'
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE + big, reviewer=NO_BLOCKERS)
+        code, _ = self.run_pipeline()
+        self.assertEqual(code, 2)
+        self.assertFalse(f.file("audit-pack.md").exists())
+        self.assertEqual(run_cli("pack", "F1", "--force")[0], 0)
+        self.assertGreater(len(f.file("audit-pack.md").read_text()), 20000)
+
+    def test_a_pack_is_refused_when_the_gates_ran_on_other_code(self):
+        # Codex's sixth review: `pack` embedded whatever gates.log said, so after a new commit it showed PASS for older code.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        (f.repo / "later.py").write_text("x = 1\n")
+        git(f.repo, "add", "-A")
+        git(f.repo, "commit", "-q", "-m", "a commit the gates never saw")
+        code, out = run_cli("pack", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("gates", out)
+        self.assertIn("run `team gates F1` first", out)
+        self.assertFalse(f.file("audit-pack.md").exists(), "an old pack must not stay behind looking current")
+        self.assertEqual(run_cli("gates", "F1")[0], 0)
+        self.assertEqual(run_cli("pack", "F1")[0], 0)
+        self.assertIn("later.py", f.file("audit-pack.md").read_text())
+
+    def test_a_pack_is_refused_when_there_is_no_gates_log(self):
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        f.file("gates.log").unlink()
+        code, out = run_cli("pack", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("no run", out)
+
+    def test_a_renamed_tester_file_is_still_shown_to_the_auditor(self):
+        # Codex's sixth review: with rename detection only the new name came back, which is in neither `written` nor a test
+        # path, so moving a tester file out of sight hid the change.
+        f = self.new_feature()
+        tester = WRITE_TEST + 'os.makedirs(work + "/validation", exist_ok=True)\nwith open(work + "/validation/cases.py", "w") as fh:\n    fh.write("CASES = 1\\n")\n'
+        mover = 'os.rename(work + "/validation/cases.py", work + "/validation/cases_old.py")\n'
+        self.scenario(tester=tester, coder=WRITE_FEATURE + mover, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        pack = f.file("audit-pack.md").read_text()
+        section = pack.split("## Test files changed after the tester commit\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("validation/cases.py", section)
+
+    def test_a_renamed_sensitive_file_is_still_listed(self):
+        (self.origin / ".github" / "workflows").mkdir(parents=True)
+        (self.origin / ".github" / "workflows" / "ci.yml").write_text("name: ci\n")
+        git(self.origin, "add", "-A")
+        git(self.origin, "commit", "-q", "-m", "ci")
+        f = self.new_feature()
+        mover = ('os.makedirs(work + "/docs", exist_ok=True)\n'
+                 'os.rename(work + "/.github/workflows/ci.yml", work + "/docs/ci.txt")\n')
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE + mover, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        pack = f.file("audit-pack.md").read_text()
+        section = pack.split("BLOCK unless the spec asks for it\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn(".github/workflows/ci.yml", section)
 
     def test_verdict_round_is_limited_to_one(self):
         f = self.new_feature()

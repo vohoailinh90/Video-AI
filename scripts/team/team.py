@@ -121,6 +121,7 @@ DEFAULTS = {
     "TEAM_GATES_SETUP": "",
     "TEAM_GATE_TIMEOUT": "900",
     "TEAM_PACK_MAX_LINES": "1500",
+    "TEAM_PACK_MAX_BYTES": "250000",
     "TEAM_MAP_MAX_LINES": "600",
     "TEAM_GIT_NAME": "team-bot",
     "TEAM_GIT_EMAIL": "team-bot@localhost",
@@ -794,12 +795,26 @@ def binary_paths(repo: Path, revs: str) -> list[str]:
 def test_paths_changed(f: Feature, tester_commit: str) -> list[str]:
     """Test files touched after the tester stage: where a weak model 'fixes' a
     failing test by weakening it."""
-    written = set(git_paths(f.repo, "show", "-z", "--name-only", "--format=", tester_commit))
-    changed = git_paths(f.repo, "diff", "-z", "--name-only", f"{tester_commit}..HEAD")
+    # --no-renames: with rename detection git reports only the new name, so moving a tester file to a path that is
+    # neither in `written` nor a test path would hide the change from the auditor.
+    written = set(git_paths(f.repo, "show", "-z", "--name-only", "--no-renames", "--format=", tester_commit))
+    changed = git_paths(f.repo, "diff", "-z", "--name-only", "--no-renames", f"{tester_commit}..HEAD")
     return [path for path in changed if path in written or TEST_PATH_RE.search(path)]
 
 
+GATES_HEAD_RE = re.compile(r"# gates \S+ @ ([0-9a-f]{12})")
+
+
 def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
+    pack = f.file("audit-pack.md")
+    # The pack quotes gates.log as the verdict on this code. It is one only if the gates ran on this HEAD; --force
+    # lifts the size limit, never this.
+    ran = GATES_HEAD_RE.match(read(f.file("gates.log")))
+    if not ran or ran[1] != head(f.repo)[:12]:
+        pack.unlink(missing_ok=True)
+        print(f"gates.log is for {ran[1] if ran else 'no run'}, HEAD is {head(f.repo)[:12]}: "
+              f"run `{team_lead().command} gates {f.id}` first", file=sys.stderr)
+        return 1
     base = merge_base(f, state)
     sections = [f"# Audit pack {f.id}",
                 f"Branch {f.branch} @ {head(f.repo)[:12]} vs {state.get('base', 'main')} ({base[:12]})", ""]
@@ -819,7 +834,7 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
         add("Test files changed after the tester commit", body)
     else:
         add("Test files changed after the tester commit", "UNKNOWN: no tester commit recorded")
-    touched = [p for p in git(f.repo, "diff", "-z", "--name-only", f"{base}..HEAD").split("\0") if p]
+    touched = [p for p in git(f.repo, "diff", "-z", "--name-only", "--no-renames", f"{base}..HEAD").split("\0") if p]
     add("Sensitive paths changed (CI on this VPS, agent instructions): BLOCK unless the spec asks for it",
         "\n".join(p for p in touched if SENSITIVE_PATH_RE.search(p)))
     add("Lockfiles changed (their diff is in Diff below: check every new, swapped or re-resolved package, URL "
@@ -831,12 +846,13 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     add("Diff", "```diff\n" + git(f.repo, *readable_diff(f.repo), f"{base}..HEAD").rstrip() + "\n```")
     text = "\n".join(sections)
     lines = text.count("\n")
-    limit = int(cfg["TEAM_PACK_MAX_LINES"])
-    pack = f.file("audit-pack.md")
-    if lines > limit and not force:
+    size = len(text.encode("utf-8"))
+    limit, max_bytes = int(cfg["TEAM_PACK_MAX_LINES"]), int(cfg["TEAM_PACK_MAX_BYTES"])
+    # Bytes as well as lines: a minified or generated file is one line however large it is.
+    if (lines > limit or size > max_bytes) and not force:
         pack.unlink(missing_ok=True)
-        print(f"audit pack would be {lines} lines (limit {limit}): split the feature, "
-              f"or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)
+        print(f"audit pack would be {lines} lines and {size} bytes (limits {limit} lines, {max_bytes} bytes): "
+              f"split the feature, or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)
         return 1
     pack.write_text(text, encoding="utf-8")
     state["pack_head"] = head(f.repo)
@@ -925,7 +941,7 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
                                 "the gates and was reverted", review=True)
         elif stage == "pack":
             if build_pack(f, cfg, state):
-                return blocked(f, state, "audit pack over the line limit")
+                return blocked(f, state, "audit pack not built: over the size limit, or the gates did not run on this commit")
         state["next"] = STAGES[index + 1] if index + 1 < len(STAGES) else "done"
         f.save_state(state)
     state["stage"] = "ready for audit"
@@ -1281,7 +1297,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="provider/model, overrides team.env for this run")
     command("gates", cmd_gates, "run the acceptance commands on a clean checkout")
     p = command("pack", cmd_pack, "build audit-pack.md")
-    p.add_argument("--force", action="store_true", help="ignore TEAM_PACK_MAX_LINES")
+    p.add_argument("--force", action="store_true", help="ignore TEAM_PACK_MAX_LINES and TEAM_PACK_MAX_BYTES (never stale gates)")
     p = command("push", cmd_push, f"push {team_lead().command}/<id> after an APPROVE verdict")
     p.add_argument("--force", action="store_true")
     p = command("status", cmd_status, "show every feature's stage", with_id=False)

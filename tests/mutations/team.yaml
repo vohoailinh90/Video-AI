@@ -35,7 +35,7 @@ mutations:
   replace: "    return []\n"
   test: tests.test_team.PipelineTests.test_a_weakened_test_is_shown_to_the_auditor
 - label: the audit pack ignores its line limit
-  find: "    if lines > limit and not force:\n"
+  find: "    if (lines > limit or size > max_bytes) and not force:\n"
   replace: "    if False:\n"
   test: tests.test_team.PipelineTests.test_an_oversized_pack_is_refused
 - label: a world-readable workers.env passes doctor
@@ -187,8 +187,8 @@ mutations:
   replace: '"codex": Lead("codex", "team-codex", "team-codex", "Codex", "codex-lead"),'
   test: tests.test_team.CodexTeamTests.test_two_teams_never_name_the_same_container
 - label: the oversized-pack hint names the Claude team's command again
-  find: 'f"or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)'
-  replace: 'f"or `team pack {f.id} --force`", file=sys.stderr)'
+  find: 'f"split the feature, or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)'
+  replace: 'f"split the feature, or `team pack {f.id} --force`", file=sys.stderr)'
   test: tests.test_team.CodexTeamTests.test_recovery_commands_name_the_selected_team
 - label: the doctor hint to re-pick a model names the Claude team's command again
   find: 'f"worker cannot start it; pick another ({team_lead().command} models {provider})")'
@@ -222,3 +222,23 @@ mutations:
   find: "    state[\"warnings\"] = [w for w in state.get(\"warnings\", []) if w not in stale]\n"
   replace: "    state[\"warnings\"] = []\n"
   test: tests.test_team.PipelineTests.test_a_new_review_round_drops_the_previous_rounds_review_warnings
+- label: the audit pack ignores its byte ceiling
+  find: "    if (lines > limit or size > max_bytes) and not force:\n"
+  replace: "    if lines > limit and not force:\n"
+  test: tests.test_team.PipelineTests.test_a_one_line_diff_cannot_slip_past_the_pack_limit
+- label: the audit pack quotes gates that ran on other code
+  find: "    if not ran or ran[1] != head(f.repo)[:12]:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_the_gates_ran_on_other_code
+- label: the audit pack is built without any gates.log
+  find: "    if not ran or ran[1] != head(f.repo)[:12]:\n"
+  replace: "    if ran and ran[1] != head(f.repo)[:12]:\n"
+  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_there_is_no_gates_log
+- label: a renamed tester file is hidden from the weakened-test section
+  find: "    changed = git_paths(f.repo, \"diff\", \"-z\", \"--name-only\", \"--no-renames\", f\"{tester_commit}..HEAD\")\n"
+  replace: "    changed = git_paths(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{tester_commit}..HEAD\")\n"
+  test: tests.test_team.PipelineTests.test_a_renamed_tester_file_is_still_shown_to_the_auditor
+- label: a renamed sensitive file is hidden from the sensitive-paths section
+  find: "    touched = [p for p in git(f.repo, \"diff\", \"-z\", \"--name-only\", \"--no-renames\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
+  replace: "    touched = [p for p in git(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
+  test: tests.test_team.PipelineTests.test_a_renamed_sensitive_file_is_still_listed
