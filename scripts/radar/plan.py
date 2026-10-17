@@ -19,6 +19,7 @@ When the narration would run past the speech budget, groups are cut in a fixed o
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from check_facts import MAX_COMMANDS_SHOWN
 from numbers_vi import speak_text
@@ -74,8 +75,13 @@ def load_digest(path) -> dict:
             raise ValueError(f"the digest has no `{key}`")
     if not digest["facts"].get("full_name") or "/" not in digest["facts"]["full_name"]:
         raise ValueError("facts.full_name (owner/repo) is missing")
-    if not re.match(r"https?://\S+$", clean(digest["facts"].get("url"))):
+    url = clean(digest["facts"].get("url"))
+    if not re.match(r"https?://\S+$", url):
         raise ValueError("facts.url (the repository address, set by github-radar) is missing; the video shows it and does not make one up")
+    parts = urlsplit(url)
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        # the digest is copied into the project and its address is put on screen: a secret in it would be committed. Not repeated here.
+        raise ValueError("facts.url has a user name or password in it; github-radar's html_url never does, so this digest is not used")
     return digest
 
 

@@ -557,6 +557,24 @@ class ReviewFindings(unittest.TestCase):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
         self.assertEqual(plan["url_text"], "github.com/debpalash/VoiceStudio")                      # the address of the digest itself
 
+    def test_a_digest_whose_url_carries_credentials_is_refused_before_anything_is_written(self):
+        for url in ("https://user:ghp_SECRET@example.com/o/r", "https://ghp_SECRET@github.com/o/r", "http://u:p@example.com/o/r"):
+            with self.assertRaises(ValueError) as caught:
+                digest_with(lambda d: d["facts"].update(url=url))
+            self.assertIn("facts.url", str(caught.exception))
+            self.assertNotIn("SECRET", str(caught.exception))                       # the message does not repeat the secret
+        planlib.load_digest(FIXTURES / "voicestudio.json")                           # an ordinary address is fine
+        digest = fixture("voicestudio")
+        digest["facts"]["url"] = "https://user:ghp_SECRET@example.com/o/r"
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "draft-vi.json"
+            source.write_text(json.dumps(digest), encoding="utf-8")
+            result = subprocess.run([sys.executable, "-I", str(REPO / "scripts" / "radar" / "make_video.py"), "scaffold", str(source),
+                                     "--name", "leak", "--videos-dir", str(Path(tmp) / "videos")], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("SECRET", result.stdout + result.stderr)
+            self.assertFalse((Path(tmp) / "videos").exists(), "no project, and no copy of the digest, is created")
+
     def test_a_percent_sign_after_a_space_is_read_like_one_without(self):
         self.assertEqual(numbers_vi.speak_text("giảm 19% và 19 % và -3 %"), "giảm mười chín phần trăm và mười chín phần trăm và âm ba phần trăm")
         self.assertEqual(numbers_vi.speak_text("tăng 2,5\u00a0%"), "tăng hai phẩy năm phần trăm")
