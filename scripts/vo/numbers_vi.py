@@ -43,12 +43,16 @@ PLUS = "+＋﹢➕⁺"
 MINUS = "-−－﹣➖⁻‐‑"
 PERCENT_SIGNS = "%％﹪٪"
 SIGNS, PERCENT_CLASS = re.escape(PLUS + MINUS), re.escape(PERCENT_SIGNS)
+# A sign stands right before its digits (-19), or one space before them (- 19, as a table or a bullet shows a change) when what comes
+# before it is neither a word nor a number: "Stars - 62.958", "tăng + 19%" and "5 - 10" have a dash, an addition and a range, not a sign.
+SIGN_BEFORE = (rf"(?<![\w.,{SIGNS}%])[{SIGNS}](?=\d)"
+               rf"|(?<![\w.,{SIGNS}%])(?<![\w.,{SIGNS}%]\s)[{SIGNS}]\s(?=\d)")
 
 # a number that stands alone: not glued to letters, a hyphen or another number; an optional minus (read "âm") or plus (read "cộng") sign in front and an
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
 VERSION = re.compile(rf"(?<=[A-Za-z])[{re.escape(MINUS)}](\d+(?:[.,]\d+)*)(?![\w])")
-NUMBER = re.compile(rf"(?:(?<![\w.,{SIGNS}])([{SIGNS}])|(?<![\w.,{re.escape(MINUS)}]))(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(?![\w\-]|[.,]\d)")
+NUMBER = re.compile(rf"(?:({SIGN_BEFORE})|(?<![\w.,{re.escape(MINUS)}]))(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -112,7 +116,8 @@ def speak_text(text: str) -> str:
         words = _token_words(match.group(2))
         if words is None:
             return match.group(0)
-        sign = "cộng " if match.group(1) and match.group(1) in PLUS else "âm " if match.group(1) else ""
+        sign = (match.group(1) or "")[:1]                        # the sign is group 1, with the space after it when it has one
+        sign = "cộng " if sign and sign in PLUS else "âm " if sign else ""
         return sign + words + (" phần trăm" if match.group(3) else "")
 
     def version(match):
