@@ -50,10 +50,6 @@ mutations:
   find: "    match = VERDICT_RE.search(text)\n    return match.group(1) if match else None\n"
   replace: "    return \"APPROVE\" if \"APPROVE\" in text else (\"BLOCK\" if \"BLOCK\" in text else None)\n"
   test: tests.test_team.PipelineTests.test_a_block_that_mentions_approve_is_not_an_approval
-- label: push accepts an APPROVE for a HEAD that moved after the pack
-  find: "            if state.get(\"pack_head\") != source:\n"
-  replace: "            if False:\n"
-  test: tests.test_team.PipelineTests.test_push_refuses_a_head_that_moved_after_the_audit
 - label: the auditor's feedback is dropped when a verdict round is resumed
   find: "            text for text in (state.get(\"pending_feedback\"), state.get(\"gate_feedback\")) if text) or None\n"
   replace: "            text for text in (state.get(\"gate_feedback\"),) if text) or None\n"
@@ -374,14 +370,6 @@ mutations:
   find: "                    git(f.repo, \"reset\", \"-q\", \"--hard\", before)\n"
   replace: ""
   test: tests.test_team.PipelineTests.test_a_fix_attempt_that_breaks_the_gates_is_reverted_and_reported
-- label: "push ignores a spec or acceptance change made after the pack"
-  find: "            if state.get(\"pack_handoff\") != handoff_digest(f):\n"
-  replace: "            if False:\n"
-  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
-- label: "the pack does not record the handoff digest"
-  find: "    state[\"pack_handoff\"] = handoff_digest(f)\n"
-  replace: ""
-  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
 - label: "the handoff digest ignores the spec"
   find: "    for name in (\"spec.md\", \"acceptance.md\"):\n        digest.update("
   replace: "    for name in (\"acceptance.md\",):\n        digest.update("
@@ -426,15 +414,87 @@ mutations:
   find: "            if len(chunk) > room and not truncated:\n"
   replace: "            if False:\n"
   test: tests.test_team.PipelineTests.test_container_output_is_capped_while_it_is_written
+- label: "push accepts an APPROVE for a HEAD that moved after the pack"
+  find: "    if seal.get(\"pack_head\") != head(f.repo):\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_push_refuses_a_head_that_moved_after_the_audit
+- label: "push believes a head the lead could have rewritten in state.json"
+  find: "    if seal.get(\"pack_head\") != head(f.repo):\n"
+  replace: "    if f.load_state().get(\"pack_head\") != head(f.repo):\n"
+  test: tests.test_team.PipelineTests.test_push_trusts_the_seal_not_the_files_a_lead_can_rewrite
+- label: "push ignores a spec or acceptance change made after the pack"
+  find: "    if seal.get(\"handoff\") != handoff_digest(f):\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
+- label: "the seal does not record the handoff digest"
+  find: "\"handoff\": handoff_digest(f), "
+  replace: "\"handoff\": \"\", "
+  test: tests.test_team.PipelineTests.test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack
+- label: "push ignores a pack that changed after it was sealed"
+  find: "    if seal.get(\"pack_sha256\") != hashlib.sha256(pack).hexdigest():\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_push_refuses_a_pack_that_changed_after_it_was_sealed_or_has_no_seal
+- label: "push goes ahead without a seal"
+  find: "        return None, f\"no seal for the audit pack"
+  replace: "        return {\"pack_head\": head(f.repo)}, None  # f\"no seal for the audit pack"
+  test: tests.test_team.PipelineTests.test_push_refuses_a_pack_that_changed_after_it_was_sealed_or_has_no_seal
+- label: "the seal is written inside the lead's workspace"
+  find: "    seals = f.home / \"seals\"\n"
+  replace: "    seals = f.dir / \"seals\"\n"
+  test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
+- label: "the seals directory is writable by the group"
+  find: "    seals.chmod(0o750)\n"
+  replace: "    seals.chmod(0o770)\n"
+  test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
+- label: "the seal file is writable by everyone"
+  find: "    tmp.chmod(0o640)\n"
+  replace: "    tmp.chmod(0o666)\n"
+  test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
+- label: "a refused pack leaves its old seal behind"
+  find: "        seal_path(f).unlink(missing_ok=True)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_pack_or_push_needs_gates_that_passed
 - label: "a worker's output is not held to the cap"
-  find: "worker_env(cfg, keys, model), log, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))"
-  replace: "worker_env(cfg, keys, model), log)"
+  find: "worker_env(cfg, keys, model), log, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n"
+  replace: "worker_env(cfg, keys, model), log,\n"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "a gate command's output is not held to the cap"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            passed += rc == 0"
-  replace: "name, timeout, base_env(), raw)\n            passed += rc == 0"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
+  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "the gates setup output is not held to the cap"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            lines += [f\"## SETUP"
-  replace: "name, timeout, base_env(), raw)\n            lines += [f\"## SETUP"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
+  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
+- label: "each gate command gets a fresh output allowance"
+  find: "        written = sink.tell()\n"
+  replace: "        written = 0\n"
+  test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
+- label: "a container's workspace is not watched"
+  find: "        if workspace and workspace_growth > 0:\n            threading.Thread(target=guard"
+  replace: "        if False:\n            threading.Thread(target=guard"
+  test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
+- label: "workspace growth is measured from an empty directory"
+  find: "    baseline = disk_usage(workspace) if workspace and workspace_growth > 0 else 0\n"
+  replace: "    baseline = 0\n"
+  test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
+- label: "a container over the workspace limit keeps running"
+  find: "                proc.kill()\n                return\n"
+  replace: "                return\n"
+  test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
+- label: "a container stopped for its workspace does not fail"
+  find: "            rc, note = 125, stopped[0].encode()\n"
+  replace: "            rc, note = 0, stopped[0].encode()\n"
+  test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
+- label: "a worker's workspace is not passed to the watchdog"
+  find: "workspace=None if role == \"reviewer\" else f.repo,"
+  replace: "workspace=None,"
+  test: tests.test_team.PipelineTests.test_a_worker_that_fills_the_checkout_fails_and_its_files_are_discarded
+- label: "a gate command's workspace is not watched"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
+  replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            passed += rc == 0"
+  test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too
+- label: "the gates setup workspace is not watched"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
+  replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            lines += [f\"## SETUP"
+  test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too

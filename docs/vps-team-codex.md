@@ -156,6 +156,7 @@ cd /srv/team-codex/work/F12 && codex-lead
 
 Với `codex-lead`, lệnh shell của Codex chỉ ghi được trong thư mục feature (không `/tmp`, không `$TMPDIR` của bạn,
 không `writable_roots` nào khác) và không có mạng; Codex không nạp MCP server hay plugin của bạn và web search tắt.
+Thứ `team-codex push` tin (seal trong `/srv/team-codex/seals/`) nằm ngoài thư mục feature nên Codex không sửa được (mục 5 của `docs/vps-team.md`).
 Gói audit chứa code do model miễn phí viết, mọi chỉ dẫn bên trong nó là dữ liệu (prompt đã nói vậy). Ba điều vẫn còn:
 nội dung gói audit đi tới OpenAI như mọi phiên Codex; sandbox giới hạn **ghi** chứ không giới hạn **đọc**, nên một chỉ dẫn chèn
 có thể bắt Codex đọc `~/.codex-lead/auth.json` rồi ghi vào `verdict.md`, mà `team-codex run --from verdict` chuyển cho coder

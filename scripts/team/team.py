@@ -125,6 +125,7 @@ DEFAULTS = {
     "TEAM_PACK_MAX_LINES": "1500",
     "TEAM_PACK_MAX_BYTES": "250000",
     "TEAM_LOG_MAX_BYTES": "20000000",
+    "TEAM_WORKSPACE_GROWTH_BYTES": "3000000000",
     "TEAM_MAP_MAX_LINES": "600",
     "TEAM_GIT_NAME": "team-bot",
     "TEAM_GIT_EMAIL": "team-bot@localhost",
@@ -353,6 +354,7 @@ class Feature:
             raise SystemExit(f"invalid feature id {fid!r}: letters, digits, '.', '_' and '-' only "
                              "(no '..', not ending in '.' or '.lock')")
         self.id = fid
+        self.home = home
         self.dir = home / "work" / fid
         self.repo = self.dir / "repo"
         self.out = self.dir / "out"
@@ -664,11 +666,38 @@ def network_of(argv: list[str]) -> str | None:
     return argv[argv.index("--network") + 1] if "--network" in argv else None
 
 
+WORKSPACE_POLL_S = 2.0
+
+
+def disk_usage(path: Path) -> int:
+    """Bytes the files under `path` really occupy (a sparse file counts what it uses); symlinks are not followed."""
+    total, pending = 0, [str(path)]
+    while pending:
+        try:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    try:
+                        total += entry.stat(follow_symlinks=False).st_blocks * 512
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total
+
+
 def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path,
-               max_bytes: int = 20_000_000) -> tuple[int, str]:
-    """Run a container; return the exit code and the last OUTPUT_TAIL_BYTES of its output. The output goes to `log` only
-    until `max_bytes` (a looping model or test can print gigabytes for the whole timeout); the rest is read and dropped so
-    the container never blocks on a full pipe, and the tail is kept in memory."""
+               max_bytes: int = 20_000_000, workspace: Path | None = None, workspace_growth: int = 0) -> tuple[int, str]:
+    """Run a container; return the exit code and the last OUTPUT_TAIL_BYTES of its output.
+
+    The output goes to `log` only until the file is `max_bytes` long (a looping model or test can print gigabytes for the
+    whole timeout, and several containers of one gate run share a file: the allowance is the file's, not each call's); the
+    rest is read and dropped so the container never blocks on a full pipe, and the tail is kept in memory.
+
+    `workspace` is the host directory bind-mounted into the container as /work: neither the tmpfs nor the memory limit
+    bounds what is written there, so the container is stopped (exit 125) once the directory has grown by more than
+    `workspace_growth` bytes since it started."""
     network = network_of(argv)
     if network != "none":
         # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
@@ -676,6 +705,7 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
         if problem:
             raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    baseline = disk_usage(workspace) if workspace and workspace_growth > 0 else 0
     tail = bytearray()
     written = 0
 
@@ -695,10 +725,26 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
                 sink.write(f"\n[team] output truncated at {max_bytes} bytes; the end of it is kept in memory\n".encode())
         sink.flush()
 
+    stopped: list[str] = []
+    finished = threading.Event()
+
+    def guard(proc) -> None:
+        while not finished.wait(WORKSPACE_POLL_S):
+            grown = disk_usage(workspace) - baseline
+            if grown > workspace_growth:
+                stopped.append(f"\n[team] workspace grew by {grown} bytes (limit {workspace_growth}): container stopped\n")
+                subprocess.run(["docker", "kill", name], capture_output=True)
+                proc.kill()
+                return
+
     with open(log, "ab") as sink:
+        written = sink.tell()
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         reader = threading.Thread(target=pump, args=(proc.stdout, sink), daemon=True)
         reader.start()
+        if workspace and workspace_growth > 0:
+            threading.Thread(target=guard, args=(proc,), daemon=True).start()
+        note = b""
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -707,10 +753,14 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)
             rc = 124
             note = f"\n[team] timed out after {timeout}s\n".encode()
-            tail.extend(note)
+        finally:
+            finished.set()
         reader.join(timeout=30)
-        if rc == 124:
+        if stopped:
+            rc, note = 125, stopped[0].encode()
+        if note:
             sink.write(note)
+            tail.extend(note)
     return rc, ANSI_RE.sub("", bytes(tail[-OUTPUT_TAIL_BYTES:]).decode("utf-8", "replace"))
 
 
@@ -721,7 +771,9 @@ def run_worker(cfg, f: Feature, role: str, model: str, mounts: dict[str, Path], 
     log = f.out / f"{role}-{time.strftime('%Y%m%d-%H%M%S')}.log"
     log.write_text(f"# {role} {model} {now()}\n", encoding="utf-8")
     return run_docker(argv, container_name(f, role), int(cfg["TEAM_WORKER_TIMEOUT"]),
-                      worker_env(cfg, keys, model), log, int(cfg["TEAM_LOG_MAX_BYTES"]))
+                      worker_env(cfg, keys, model), log, int(cfg["TEAM_LOG_MAX_BYTES"]),
+                      workspace=None if role == "reviewer" else f.repo,  # the reviewer's checkout is mounted read-only
+                      workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
 
 
 def handoff_mounts(f: Feature, extra: dict[str, Path] | None = None) -> dict[str, Path]:
@@ -743,6 +795,41 @@ def handoff_digest(f: Feature) -> str:
     for name in ("spec.md", "acceptance.md"):
         digest.update(f"{name}\0".encode() + read(f.file(name)).encode("utf-8") + b"\0")
     return digest.hexdigest()[:16]
+
+
+def seal_path(f: Feature) -> Path:
+    return f.home / "seals" / f"{f.id}.json"
+
+
+def write_seal(f: Feature, pack: Path) -> None:
+    """Record, outside the feature directory, what the audit was shown. A lead that obeys an instruction hidden in the pack
+    can rewrite everything inside its own workspace (the repository, state.json, gates.log); the directory it cannot write
+    to is the only thing `team push` believes. The conductor creates it 0750: the group (the lead's login) can read, not write."""
+    seals = f.home / "seals"
+    seals.mkdir(exist_ok=True)
+    seals.chmod(0o750)
+    seal = {"pack_head": head(f.repo), "pack_sha256": hashlib.sha256(pack.read_bytes()).hexdigest(),
+            "handoff": handoff_digest(f), "sealed": now()}
+    tmp = seals / f".{f.id}.tmp"
+    tmp.write_text(json.dumps(seal, indent=2) + "\n", encoding="utf-8")
+    tmp.chmod(0o640)
+    tmp.replace(seal_path(f))
+
+
+def seal_problem(f: Feature) -> tuple[dict | None, str | None]:
+    """(the seal, None) when push may rely on it, else (None, why not)."""
+    try:
+        seal = json.loads(seal_path(f).read_text(encoding="utf-8"))
+        pack = f.file("audit-pack.md").read_bytes()
+    except (OSError, ValueError):
+        return None, f"no seal for the audit pack: rebuild it with `{team_lead().command} pack {f.id}` and audit again"
+    if seal.get("pack_head") != head(f.repo):
+        return None, "HEAD changed after the audit pack was sealed: rebuild the pack and audit again"
+    if seal.get("pack_sha256") != hashlib.sha256(pack).hexdigest():
+        return None, "audit-pack.md changed after it was sealed: rebuild the pack and audit again"
+    if seal.get("handoff") != handoff_digest(f):
+        return None, "spec.md or acceptance.md changed after the audit pack was sealed: rebuild the pack and audit again"
+    return seal, None
 
 
 def commands_digest(commands: list[str]) -> str:
@@ -769,14 +856,16 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
             # Setup installs what the (possibly model-edited) dependency files name,
             # so it gets the workers' egress-limited network, never the host's.
             rc, output = run_docker(gate_argv(cfg, work, setup, cfg["TEAM_WORKER_NETWORK"], name),
-                                    name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]))
+                                    name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]),
+                                    workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
             lines += [f"## SETUP exit {rc}: {setup}", tail_text(output, 20)]
             if rc:
                 commands = []
         for command in commands:
             started = time.monotonic()
             rc, output = run_docker(gate_argv(cfg, work, command, cfg["TEAM_GATES_NETWORK"], name),
-                                    name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]))
+                                    name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]),
+                                    workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
             passed += rc == 0
             lines += [f"## {'PASS' if rc == 0 else 'FAIL'} exit {rc} ({time.monotonic() - started:.1f}s): {command}",
                       tail_text(output, 40)]
@@ -952,6 +1041,7 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     problem = gates_problem(f)
     if problem:
         pack.unlink(missing_ok=True)
+        seal_path(f).unlink(missing_ok=True)
         print(problem, file=sys.stderr)
         return 1
     base = merge_base(f, state)
@@ -998,8 +1088,8 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
               f"split the feature, or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)
         return 1
     pack.write_text(text, encoding="utf-8")
+    write_seal(f, pack)
     state["pack_head"] = head(f.repo)
-    state["pack_handoff"] = handoff_digest(f)
     f.save_state(state)
     say(f"audit pack: {pack} ({lines} lines)")
     return 0
@@ -1227,17 +1317,15 @@ def cmd_push(args, home, cfg) -> int:
         if not args.force:
             if verdict_of(read(f.file("verdict.md"))) != "APPROVE":
                 raise SystemExit("verdict.md has no 'VERDICT: APPROVE' line: audit first")
-            if state.get("pack_head") != source:
-                raise SystemExit("HEAD changed after the audit pack was built: rebuild the pack and audit again")
-            if state.get("pack_handoff") != handoff_digest(f):
-                raise SystemExit("spec.md or acceptance.md changed after the audit pack was built: "
-                                 "rebuild the pack and audit again")
+            seal, why = seal_problem(f)  # what push believes lives outside the lead's workspace, not in state.json
+            if why:
+                raise SystemExit(why)
             problem = gates_problem(f)  # a later gate run at this HEAD may have failed
             if problem:
                 raise SystemExit(problem)
             if f.file("verdict.md").stat().st_mtime < f.file("audit-pack.md").stat().st_mtime:
                 raise SystemExit("verdict.md is older than audit-pack.md: audit the current pack")
-            source = state["pack_head"]
+            source = seal["pack_head"]
         # An object id, never the branch name: the commit that was audited is
         # the one that is published, whatever the branch points at by now.
         git(f.repo, "push", "origin", f"{source}:refs/heads/{f.branch}")
@@ -1308,7 +1396,8 @@ def smoke(cfg) -> tuple[list[str], list[str]]:
             name = f"{team_lead().container}-doctor-{label}"
             rc, output = run_docker(gate_argv(cfg, work, command, "none", name), name,
                                     int(cfg["TEAM_GATE_TIMEOUT"]), base_env(), work / f"{label}.log",
-                                    int(cfg["TEAM_LOG_MAX_BYTES"]))
+                                    int(cfg["TEAM_LOG_MAX_BYTES"]), workspace=work,
+                                    workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
             if rc:
                 found.append(f"smoke {label} failed in {cfg['TEAM_IMAGE']} (exit {rc}): {last_line(output)}"
                              + ("" if label == "render" else
