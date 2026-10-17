@@ -127,6 +127,7 @@ DEFAULTS = {
     "TEAM_LOG_MAX_BYTES": "20000000",
     "TEAM_WORKSPACE_GROWTH_BYTES": "3000000000",
     "TEAM_MIN_FREE_BYTES": "1000000000",
+    "TEAM_WORKSPACE_GROWTH_FILES": "500000",
     "TEAM_MAP_MAX_LINES": "600",
     "TEAM_GIT_NAME": "team-bot",
     "TEAM_GIT_EMAIL": "team-bot@localhost",
@@ -154,6 +155,7 @@ PATHS_MAX_BYTES = 8_000_000
 TREE_PATHS_MAX_BYTES = 64_000_000
 # One handoff file is copied for a worker only up to this size (gates.log is capped at TEAM_LOG_MAX_BYTES, 20 MB by default).
 HANDOFF_FILE_MAX_BYTES = 64_000_000
+READ_MAX_BYTES = 64_000_000  # the most `read` takes from one file of the feature directory
 CUT_NOTE = "\n[team] diff cut at {limit} bytes: the rest of it was not read\n"
 SENSITIVE_PATH_RE = re.compile(
     r"(^|/)(\.github|\.claude|\.gitlab-ci\.yml|\.gitattributes|\.codex|\.agents|CLAUDE\.md|AGENTS(?:\.override)?\.md|\.cursorrules|\.hermes\.md"
@@ -184,7 +186,42 @@ def say(message: str) -> None:
 
 
 def read(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    """The text of a plain file, "" when there is none.
+
+    The feature directory is group-writable, so whatever the lead left at `path` is not trusted: a link (to workers.env, say)
+    is refused instead of followed, a named pipe cannot block the read, and a file past READ_MAX_BYTES is not slurped."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except (FileNotFoundError, NotADirectoryError):
+        return ""
+    except OSError as exc:
+        raise SystemExit(f"{path} is a link or cannot be read ({exc.strerror}): refusing to use it") from None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise SystemExit(f"{path} is not a plain file: refusing to use it")
+        data = bytearray()
+        while len(data) <= READ_MAX_BYTES:  # in chunks: one read(READ_MAX_BYTES + 1) allocates all of it, even for a short file
+            chunk = handle.read(min(1 << 20, READ_MAX_BYTES + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
+    if len(data) > READ_MAX_BYTES:
+        raise SystemExit(f"{path} is larger than {READ_MAX_BYTES} bytes: refusing to use it")
+    return bytes(data).decode("utf-8")
+
+
+def write_file(path: Path, text: str) -> None:
+    """Put `text` at `path` by writing a new file beside it and renaming it over. A link the lead left at `path` is replaced,
+    never written through (gates.log -> workers.env would have had the gate log written over the keys)."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(tmp, 0o664)  # the lead's login reads what the conductor writes here
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def tail(path: Path, lines: int) -> str:
@@ -376,16 +413,18 @@ class Feature:
     def require(self) -> None:
         if not self.repo.is_dir():
             raise SystemExit(f"no feature {self.id}: run `{team_lead().command} new {self.id} --repo ...` first")
+        # Docker resolves a link in a bind source as root: `repo` pointing at the team home would hand every key to a worker.
+        for path in (self.dir, self.repo, self.out):
+            if path.is_symlink():
+                raise SystemExit(f"{path} is a link: refusing to use feature {self.id}")
 
     def load_state(self) -> dict:
-        path = self.out / "state.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        text = read(self.out / "state.json")
+        return json.loads(text) if text else {}
 
     def save_state(self, state: dict) -> None:
         state["updated"] = now()
-        tmp = self.out / "state.json.tmp"
-        tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(self.out / "state.json")
+        write_file(self.out / "state.json", json.dumps(state, indent=2) + "\n")
 
 
 def verdict_of(text: str) -> str | None:
@@ -525,7 +564,7 @@ def ensure_excludes(repo: Path) -> None:
     if missing:
         exclude.parent.mkdir(parents=True, exist_ok=True)
         separator = "" if not current or current.endswith("\n") else "\n"
-        exclude.write_text(current + separator + "\n".join(missing) + "\n", encoding="utf-8")
+        write_file(exclude, current + separator + "\n".join(missing) + "\n")
 
 
 def untrack_caches(repo: Path, base: str) -> None:
@@ -793,13 +832,23 @@ def network_of(argv: list[str]) -> str | None:
 WORKSPACE_POLL_S = 2.0
 
 
-def disk_usage(path: Path) -> int:
-    """Bytes the files under `path` really occupy (a sparse file counts what it uses); symlinks are not followed."""
-    total, pending = 0, [str(path)]
+def workspace_usage(path: Path, max_entries: int | None = None) -> tuple[int, int, bool]:
+    """(bytes the files under `path` really occupy, number of entries under it, whether the scan stopped for passing
+    `max_entries`). A sparse file counts what it uses and symlinks are not followed. Every file, link and directory is an
+    entry: empty ones occupy no blocks, yet each costs an inode, so bytes alone never see them. The scan stops at the first
+    entry past `max_entries`, which keeps its time bounded however many a container makes."""
+    try:
+        total = os.lstat(path).st_blocks * 512
+    except OSError:
+        total = 0
+    count, pending = 0, [str(path)]
     while pending:
         try:
             with os.scandir(pending.pop()) as entries:
                 for entry in entries:
+                    count += 1
+                    if max_entries is not None and count > max_entries:
+                        return total, count, True
                     try:
                         total += entry.stat(follow_symlinks=False).st_blocks * 512
                         if entry.is_dir(follow_symlinks=False):
@@ -808,12 +857,17 @@ def disk_usage(path: Path) -> int:
                         continue
         except OSError:
             continue
-    return total
+    return total, count, False
+
+
+def disk_usage(path: Path) -> int:
+    """Bytes the files under `path` really occupy."""
+    return workspace_usage(path)[0]
 
 
 def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path,
                max_bytes: int = 20_000_000, workspace: Path | None = None, workspace_growth: int = 0,
-               workspace_baseline: int | None = None) -> tuple[int, str]:
+               workspace_baseline: tuple[int, int] | None = None, workspace_files: int = 0) -> tuple[int, str]:
     """Run a container; return the exit code and the last OUTPUT_TAIL_BYTES of its output.
 
     The output goes to `log` only until the file is `max_bytes` long (a looping model or test can print gigabytes for the
@@ -822,8 +876,9 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
 
     `workspace` is the host directory bind-mounted into the container as /work: neither the tmpfs nor the memory limit
     bounds what is written there, so the container is stopped (exit 125) once the directory has grown by more than
-    `workspace_growth` bytes since it started, or since `workspace_baseline` when the caller gives one: containers that reuse
-    one workspace one after another (the gate commands) share a single allowance instead of getting a fresh one each."""
+    `workspace_growth` bytes, or by more than `workspace_files` files, links and directories (an inode costs even when the
+    bytes are none), since it started, or since `workspace_baseline` (bytes, entries) when the caller gives one: containers
+    that reuse one workspace one after another (the gate commands) share a single allowance instead of a fresh one each."""
     network = network_of(argv)
     if network != "none":
         # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
@@ -831,8 +886,10 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
         if problem:
             raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-    tracked = bool(workspace and workspace_growth > 0)
-    baseline = (disk_usage(workspace) if workspace_baseline is None else workspace_baseline) if tracked else 0
+    tracked = bool(workspace and (workspace_growth > 0 or workspace_files > 0))
+    base_bytes, base_entries = 0, 0
+    if tracked:
+        base_bytes, base_entries = workspace_baseline if workspace_baseline is not None else workspace_usage(workspace)[:2]
     tail = bytearray()
     written = 0
 
@@ -855,25 +912,35 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
     stopped: list[str] = []
     finished = threading.Event()
 
-    def too_big(grown: int) -> str:
-        return f"\n[team] workspace grew by {grown} bytes (limit {workspace_growth}): container stopped\n"
+    def over_allowance() -> str | None:
+        """Why the workspace is past its allowance, or None."""
+        used, entries, over = workspace_usage(workspace, base_entries + workspace_files if workspace_files > 0 else None)
+        if workspace_files > 0 and (over or entries - base_entries > workspace_files):
+            return f"\n[team] workspace grew by more than {workspace_files} files (limit {workspace_files}): container stopped\n"
+        if workspace_growth > 0 and used - base_bytes > workspace_growth:
+            return f"\n[team] workspace grew by {used - base_bytes} bytes (limit {workspace_growth}): container stopped\n"
+        return None
 
     def guard(proc) -> None:
         while not finished.wait(WORKSPACE_POLL_S):
-            grown = disk_usage(workspace) - baseline
-            if grown > workspace_growth:
-                stopped.append(too_big(grown))
+            why = over_allowance()
+            if why:
+                stopped.append(why)
                 subprocess.run(["docker", "kill", name], capture_output=True)
                 proc.kill()
                 return
 
-    with open(log, "ab") as sink:
+    try:  # appending to a link the lead left at this name would write the container's output into whatever it points to
+        sink = os.fdopen(os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o664), "ab")
+    except OSError as exc:
+        raise SystemExit(f"{log} is a link or cannot be opened ({exc.strerror}): refusing to write the output of {name} there") from None
+    with sink:
         written = sink.tell()
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         reader = threading.Thread(target=pump, args=(proc.stdout, sink), daemon=True)
         reader.start()
         watcher = None
-        if workspace and workspace_growth > 0:
+        if tracked:
             watcher = threading.Thread(target=guard, args=(proc,), daemon=True)
             watcher.start()
         note = b""
@@ -892,9 +959,9 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
             watcher.join()
             # The guard looks every WORKSPACE_POLL_S: a container can write past the limit and exit between two looks, and
             # finishing wakes the guard only to leave. So the last measurement is taken here, before the exit is accepted.
-            grown = 0 if stopped else disk_usage(workspace) - baseline
-            if grown > workspace_growth:
-                stopped.append(too_big(grown))
+            why = None if stopped else over_allowance()
+            if why:
+                stopped.append(why)
         if stopped:
             rc, note = 125, stopped[0].encode()
         if note:
@@ -949,13 +1016,14 @@ def run_worker(cfg, f: Feature, role: str, model: str, mounts: dict[str, Path], 
                keys: dict[str, str]) -> tuple[int, str]:
     say(f"{role}: {model}")
     log = f.out / f"{role}-{time.strftime('%Y%m%d-%H%M%S')}.log"
-    log.write_text(f"# {role} {model} {now()}\n", encoding="utf-8")
+    write_file(log, f"# {role} {model} {now()}\n")
     with staged_mounts(f, mounts) as staged:
         argv = worker_argv(cfg, f, role, model, staged, prompt)
         return run_docker(argv, container_name(f, role), int(cfg["TEAM_WORKER_TIMEOUT"]),
                           worker_env(cfg, keys, model), log, int(cfg["TEAM_LOG_MAX_BYTES"]),
                           workspace=None if role == "reviewer" else f.repo,  # the reviewer's checkout is mounted read-only
-                          workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
+                          workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]),
+                          workspace_files=int(cfg["TEAM_WORKSPACE_GROWTH_FILES"]))
 
 
 def handoff_mounts(f: Feature, extra: dict[str, Path] | None = None) -> dict[str, Path]:
@@ -1115,7 +1183,7 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
     lines = [f"# gates {f.id} @ {head(f.repo)[:12]} acceptance:{commands_digest(commands)} {now()}"]
     if broken:  # the suite is not the one that was written: it cannot pass, and nothing is started
         lines += [f"## FAIL acceptance.md: {broken}", f"RESULT: FAIL (0/{len(commands)} passed)"]
-        f.file("gates.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        write_file(f.file("gates.log"), "\n".join(lines) + "\n")
         say(f"gates: {lines[-1]}")
         return False
     timeout = int(cfg["TEAM_GATE_TIMEOUT"])
@@ -1123,11 +1191,11 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
     passed = 0
     tmp = Path(tempfile.mkdtemp(prefix="gates-", dir=f.out))
     raw = f.out / "gates-raw.log"
-    raw.write_text("", encoding="utf-8")
+    write_file(raw, "")
     try:
         work = tmp / "work"
         export_head(f.repo, work)
-        budget_from = disk_usage(work)  # the setup and every command spend one allowance, measured from here
+        budget_from = workspace_usage(work)[:2]  # the setup and every command spend one allowance, measured from here
         setup = cfg["TEAM_GATES_SETUP"]
         if setup:
             # Setup installs what the (possibly model-edited) dependency files name,
@@ -1135,7 +1203,7 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
             rc, output = run_docker(gate_argv(cfg, work, setup, cfg["TEAM_WORKER_NETWORK"], name),
                                     name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]),
                                     workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]),
-                                    workspace_baseline=budget_from)
+                                    workspace_baseline=budget_from, workspace_files=int(cfg["TEAM_WORKSPACE_GROWTH_FILES"]))
             lines += [f"## SETUP exit {rc}: {setup}", tail_text(output, 20)]
             if rc:
                 commands = []
@@ -1144,7 +1212,7 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
             rc, output = run_docker(gate_argv(cfg, work, command, cfg["TEAM_GATES_NETWORK"], name),
                                     name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]),
                                     workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]),
-                                    workspace_baseline=budget_from)
+                                    workspace_baseline=budget_from, workspace_files=int(cfg["TEAM_WORKSPACE_GROWTH_FILES"]))
             passed += rc == 0
             lines += [f"## {'PASS' if rc == 0 else 'FAIL'} exit {rc} ({time.monotonic() - started:.1f}s): {command}",
                       tail_text(output, 40)]
@@ -1156,7 +1224,7 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
     total = len(acceptance_commands(read(f.file("acceptance.md"))))
     ok = total > 0 and passed == total
     lines.append(f"RESULT: {'PASS' if ok else 'FAIL'} ({passed}/{total} passed)")
-    f.file("gates.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_file(f.file("gates.log"), "\n".join(lines) + "\n")
     say(f"gates: {lines[-1]}")
     return ok
 
@@ -1190,7 +1258,7 @@ def run_coder(f: Feature, cfg, keys, state: dict, feedback: str | None, attempts
         model = models[attempt % len(models)]
         if feedback:
             note = f.out / "feedback.md"
-            note.write_text(feedback, encoding="utf-8")
+            write_file(note, feedback)
             prompt, mounts = render(shipped(PROMPTS, "fix.md"), id=f.id), handoff_mounts(f, {"feedback.md": note})
         else:
             prompt, mounts = render(shipped(PROMPTS, "coder.md"), id=f.id), handoff_mounts(f)
@@ -1251,7 +1319,7 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
     if cut:
         text += CUT_NOTE.format(limit=limit)
         warn(state, f"the reviewer read only the first {limit} bytes of the diff", round="review")
-    diff.write_text(text, encoding="utf-8")
+    write_file(diff, text)
     mounts = handoff_mounts(f, {"diff.patch": diff, "gates.log": f.file("gates.log")})
     prompt = render(shipped(PROMPTS, "reviewer.md"), id=f.id)
     # A review belongs to the HEAD it read. If every reviewer fails on a rerun, the pack must say "none", not carry
@@ -1262,7 +1330,7 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
         rc, output = run_worker(cfg, f, "reviewer", model, mounts, prompt, keys)
         review = extract_review(output) if rc == 0 else None
         if review:
-            f.file("prereview.md").write_text(f"<!-- reviewer: {model} -->\n{review}\n", encoding="utf-8")
+            write_file(f.file("prereview.md"), f"<!-- reviewer: {model} -->\n{review}\n")
             state["reviewer_model"] = model
             state["reviewed_head"] = head(f.repo)
             return review
@@ -1394,6 +1462,14 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     text = "\n".join(sections)
     lines = text.count("\n")
     size = len(text.encode("utf-8"))
+    if cut_anywhere and force:
+        # --force lifts the size limit, not the completeness of what the auditor reads: an approval of this pack would cover
+        # changes the auditor never saw.
+        pack.unlink(missing_ok=True)
+        seal_path(f).unlink(missing_ok=True)
+        print(f"the diff is longer than {diff_limit} bytes, the most a pack can quote even with --force: it would be cut and "
+              f"sealed incomplete. Split the feature", file=sys.stderr)
+        return 1
     # Bytes as well as lines: a minified or generated file is one line however large it is.
     if (lines > limit or size > max_bytes) and not force:
         pack.unlink(missing_ok=True)
@@ -1401,7 +1477,7 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
               f"(limits {limit} lines, {max_bytes} bytes): "
               f"split the feature, or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)
         return 1
-    pack.write_text(text, encoding="utf-8")
+    write_file(pack, text)
     write_seal(f, pack)
     state["pack_head"] = head(f.repo)
     f.save_state(state)
@@ -1517,7 +1593,7 @@ def cmd_new(args, home: Path, cfg) -> int:
     for name in HANDOFF:
         f.file(name).write_text(render(shipped(TEMPLATES, name), id=f.id, repo=args.repo, base=base, lead=lead.name,
                                        title=lead.title, team=lead.command), encoding="utf-8")
-    f.file("repo-map.txt").write_text(repo_map(f.repo, int(cfg["TEAM_MAP_MAX_LINES"])), encoding="utf-8")
+    write_file(f.file("repo-map.txt"), repo_map(f.repo, int(cfg["TEAM_MAP_MAX_LINES"])))
     f.save_state({"base": base, "repo": args.repo, "stage": "spec", "next": "tester"})
     print(f"created {f.dir}\n"
           f"1. write {f.file('request.md')}\n"
@@ -1529,7 +1605,7 @@ def cmd_new(args, home: Path, cfg) -> int:
 def cmd_map(args, home, cfg) -> int:
     f = Feature(home, args.id)
     f.require()
-    f.file("repo-map.txt").write_text(repo_map(f.repo, int(cfg["TEAM_MAP_MAX_LINES"])), encoding="utf-8")
+    write_file(f.file("repo-map.txt"), repo_map(f.repo, int(cfg["TEAM_MAP_MAX_LINES"])))
     print(f.file("repo-map.txt"))
     return 0
 
@@ -1736,7 +1812,8 @@ def smoke(cfg) -> tuple[list[str], list[str]]:
             rc, output = run_docker(gate_argv(cfg, work, command, "none", name), name,
                                     int(cfg["TEAM_GATE_TIMEOUT"]), base_env(), work / f"{label}.log",
                                     int(cfg["TEAM_LOG_MAX_BYTES"]), workspace=work,
-                                    workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
+                                    workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]),
+                                    workspace_files=int(cfg["TEAM_WORKSPACE_GROWTH_FILES"]))
             if rc:
                 found.append(f"smoke {label} failed in {cfg['TEAM_IMAGE']} (exit {rc}): {last_line(output)}"
                              + ("" if label == "render" else

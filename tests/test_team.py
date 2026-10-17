@@ -1517,14 +1517,205 @@ class PipelineTests(Sandbox):
             self.assertLess(peak, 8_000_000)
             self.assertFalse(f.file("audit-pack.md").exists())
             self.assertIn("at least", errors.getvalue(), "the diff was cut, so its size is a lower bound")
-            with mock.patch.object(team, "PACK_FORCE_DIFF_BYTES", 300_000):
-                self.assertEqual(team.build_pack(f, cfg, state, force=True), 0)
-        pack = f.file("audit-pack.md").read_text()
-        self.assertLess(len(pack), 700_000, "two diff sections, each cut at 300 KB")
-        self.assertIn("diff cut at 300000 bytes", pack)
-        section = pack.split("## Test files changed after the tester commit", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("diff cut at 300000 bytes", section, "the test files' own diff is capped too")
-        self.assertLess(len(section), 301_000)
+            # Codex's twenty-sixth review: --force lifts the size limit, never the completeness of what is audited
+            errors.truncate(0)
+            errors.seek(0)
+            with mock.patch.object(team, "PACK_FORCE_DIFF_BYTES", 300_000), contextlib.redirect_stderr(errors):
+                self.assertEqual(team.build_pack(f, cfg, state, force=True), 1)
+            self.assertIn("split the feature", errors.getvalue().lower())
+            self.assertFalse(f.file("audit-pack.md").exists(), "a truncated diff is not packed")
+            self.assertFalse((self.home / "seals" / "F1.json").exists(), "and never sealed")
+
+    def test_pack_force_seals_a_diff_that_is_over_the_size_limit_but_whole(self):
+        f = self.new_feature()
+        state = f.load_state()
+        self.commit_big_files(f, files=2, megabytes=1)
+        cfg = {**team.DEFAULTS, **MODELS, "TEAM_PACK_MAX_BYTES": "100000"}
+        with mock.patch.object(team, "gates_problem", lambda feature: None), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(team.build_pack(f, cfg, state), 1, "over the size limit")
+            self.assertEqual(team.build_pack(f, cfg, state, force=True), 0)
+        self.assertGreater(len(f.file("audit-pack.md").read_text()), 2_000_000)
+        self.assertNotIn("diff cut at", f.file("audit-pack.md").read_text())
+        self.assertTrue((self.home / "seals" / "F1.json").is_file())
+
+    def test_workspace_usage_counts_every_entry_and_stops_scanning_past_the_limit(self):
+        work = self.tmp / "count-me"
+        (work / "sub").mkdir(parents=True)
+        for i in range(50):
+            (work / f"empty{i}").write_text("")
+        for i in range(10):
+            (work / "sub" / f"link{i}").symlink_to("/nonexistent")
+        used, entries, over = team.workspace_usage(work)
+        self.assertEqual((entries, over), (61, False), "files, links and the directory itself are all entries")
+        self.assertGreaterEqual(used, 0)
+        _, entries, over = team.workspace_usage(work, max_entries=20)
+        self.assertEqual((entries, over), (21, True), "the scan stops at the first entry past the limit")
+
+    def test_a_container_that_makes_endless_empty_files_is_stopped(self):
+        # Codex's twenty-sixth review: empty files and links occupy no blocks, so a byte allowance never sees them, yet each
+        # costs an inode.
+        work = self.tmp / "inode-workspace"
+        work.mkdir()
+        code = ("import os, time\n"
+                f"d = {str(work)!r}\n"
+                "for i in range(5000):\n"
+                "    open(os.path.join(d, 'e%d' % i), 'w').close()\n"
+                "    os.symlink('/nonexistent', os.path.join(d, 'l%d' % i))\n"
+                "    if i % 500 == 0:\n"
+                "        time.sleep(0.1)\n")
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 0.05):
+            rc, output = team.run_docker([sys.executable, "-c", code], "t-inodes", 120, team.base_env(), self.tmp / "inodes.log",
+                                         workspace=work, workspace_growth=10**12, workspace_files=1000)
+        self.assertEqual(rc, 125)
+        self.assertIn("files", output)
+        self.assertLess(len(list(work.iterdir())), 9000, "stopped before it finished")
+        # the same, but it is gone before the first look
+        quick = self.tmp / "inode-quick"
+        quick.mkdir()
+        fast = f"import os\nfor i in range(3000):\n    open(os.path.join({str(quick)!r}, 'e%d' % i), 'w').close()\n"
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 60):
+            rc, output = team.run_docker([sys.executable, "-c", fast], "t-inodes-quick", 120, team.base_env(),
+                                         self.tmp / "inodes-quick.log", workspace=quick, workspace_growth=10**12,
+                                         workspace_files=1000)
+        self.assertEqual(rc, 125)
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 60):
+            ok = team.run_docker([sys.executable, "-c", "print('few')"], "t-inodes-few", 60, team.base_env(),
+                                 self.tmp / "inodes-few.log", workspace=quick, workspace_growth=10**12, workspace_files=1000)
+        self.assertEqual(ok[0], 0, "3000 files already there are not growth")
+
+    def test_a_worker_that_makes_thousands_of_files_fails_and_they_are_discarded(self):
+        f = self.new_feature()
+        self.write_env({**MODELS, "TEAM_WORKSPACE_GROWTH_FILES": "500"})
+        many = ('import os\nfor i in range(3000):\n    open(work + "/e%d" % i, "w").close()\n'
+                'import time\ntime.sleep(1)\n' + WRITE_FEATURE)
+        self.scenario(tester=WRITE_TEST, coder=many, reviewer=NO_BLOCKERS)
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 0.05):
+            code, out = self.run_pipeline()
+        self.assertEqual(code, 2, out)
+        self.assertIn("every coder model run failed", f.load_state()["stage"])
+        self.assertFalse((f.repo / "e0").exists(), "discarded with the failed attempt")
+
+    def test_gate_containers_are_held_to_the_file_count_too(self):
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        self.write_env({**MODELS, "TEAM_WORKSPACE_GROWTH_FILES": "500"})
+        many = "python3 -c \"[open('e%d' % i, 'w').close() for i in range(3000)]\" && sleep 1"
+        f.file("acceptance.md").write_text(f"# Acceptance\n\n```bash\n{many}\n```\n")
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 0.05):
+            self.assertEqual(run_cli("gates", "F1")[0], 1)
+        self.assertIn("## FAIL exit 125", f.file("gates.log").read_text())
+
+    def test_a_feature_file_that_is_a_link_is_never_read(self):
+        # Codex's twenty-sixth review: spec.md replaced by a link to workers.env was read by `team pack` and copied into the
+        # group-readable audit pack.
+        f = self.approved_feature()
+        secret = (self.home / "workers.env").read_text()
+        self.assertIn("or-secret", secret)
+        spec = f.file("spec.md")
+        spec.unlink()
+        spec.symlink_to(self.home / "workers.env")
+        with self.assertRaises(SystemExit) as raised:
+            team.read(spec)
+        self.assertIn("link", str(raised.exception))
+        code, out = run_cli("pack", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("spec.md", out)
+        self.assertNotIn("or-secret", f.file("audit-pack.md").read_text(), "the pack made earlier is untouched")
+        code, out = run_cli("check-spec", "F1")
+        self.assertNotEqual(code, 0)
+        spec.unlink()
+        spec.write_text(SPEC)
+        acceptance = f.file("acceptance.md")
+        acceptance.unlink()
+        acceptance.symlink_to(self.home / "workers.env")
+        before = len(self.docker_runs())
+        self.assertNotEqual(run_cli("gates", "F1")[0], 0, "no command is taken from a linked acceptance.md")
+        self.assertEqual(len(self.docker_runs()), before, "and no container was started for it")
+
+    def test_a_feature_file_that_is_a_pipe_or_far_too_big_is_refused_by_read(self):
+        import signal
+        fifo = self.tmp / "pipe.md"
+        os.mkfifo(fifo)
+
+        def alarm(signum, frame):
+            raise AssertionError("reading a named pipe blocked")
+        previous = signal.signal(signal.SIGALRM, alarm)
+        signal.alarm(20)
+        try:
+            with self.assertRaises(SystemExit) as raised:
+                team.read(fifo)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
+        self.assertIn("not a plain file", str(raised.exception))
+        big = self.tmp / "big.md"
+        big.write_text("x" * 100)
+        with mock.patch.object(team, "READ_MAX_BYTES", 10):
+            with self.assertRaises(SystemExit) as raised:
+                team.read(big)
+        self.assertIn("larger than", str(raised.exception))
+        self.assertEqual(team.read(self.tmp / "missing.md"), "", "a missing file still reads as empty")
+        self.assertEqual(team.read(big), "x" * 100)
+
+    def test_the_conductor_replaces_a_link_it_would_have_written_through(self):
+        # the same hole the other way round: gates.log as a link to workers.env would have had the gate log written over the keys
+        f = self.new_feature()
+        sentinels = {}
+        planted = [f.dir / "gates.log", f.out / "gates-raw.log", f.out / "diff.patch", f.dir / "prereview.md",
+                   f.dir / "audit-pack.md", f.out / "feedback.md"]
+        for path in planted:
+            path.unlink(missing_ok=True)
+            sentinel = self.tmp / f"sentinel-{path.name}"
+            sentinel.write_text("keep me")
+            path.symlink_to(sentinel)
+            sentinels[path] = sentinel
+        coder = textwrap.dedent("""
+            body = "a + b" if "/handoff/feedback.md" in handoff else "a - b"
+            with open(work + "/feature.py", "w") as fh:
+                fh.write("def add(a, b):\\n    return " + body + "\\n")
+        """)
+        self.scenario(tester=WRITE_TEST, coder=coder, reviewer=NO_BLOCKERS)
+        code, out = run_cli("run", "F1")
+        self.assertEqual(code, 0, out)
+        # repo-map.txt is also mounted into workers, which refuse a link there; `map` alone writes it
+        repo_map = f.dir / "repo-map.txt"
+        repo_map.unlink()
+        map_sentinel = self.tmp / "sentinel-repo-map.txt"
+        map_sentinel.write_text("keep me")
+        repo_map.symlink_to(map_sentinel)
+        sentinels[repo_map] = map_sentinel
+        self.assertEqual(run_cli("map", "F1")[0], 0)
+        for path, sentinel in sentinels.items():
+            self.assertEqual(sentinel.read_text(), "keep me", f"{path.name}: written through the link")
+            self.assertFalse(path.is_symlink(), f"{path.name}: the link was replaced")
+            self.assertTrue(path.is_file(), f"{path.name} is a file of the conductor's again")
+            if path.name != "gates-raw.log":  # the raw log is empty when the commands print nothing
+                self.assertTrue(path.read_text(), f"{path.name} holds the conductor's output")
+
+    def test_a_worker_log_is_never_opened_through_a_link(self):
+        sentinel = self.tmp / "log-sentinel"
+        sentinel.write_text("keep me")
+        log = self.tmp / "worker.log"
+        log.symlink_to(sentinel)
+        with self.assertRaises(SystemExit) as raised:
+            team.run_docker([sys.executable, "-c", "print('hi')"], "t-log", 60, team.base_env(), log)
+        self.assertIn("link", str(raised.exception))
+        self.assertEqual(sentinel.read_text(), "keep me")
+
+    def test_a_feature_whose_directories_are_links_is_refused(self):
+        # `-v repo:/work` makes Docker resolve a link as root: repo -> the team home would hand every key to a networked worker
+        f = self.new_feature()
+        for name in ("repo", "out"):
+            real = self.tmp / f"moved-{name}"
+            (f.dir / name).rename(real)
+            (f.dir / name).symlink_to(self.home)
+            code, out = run_cli("work", "tester", "F1")
+            self.assertNotEqual(code, 0, name)
+            self.assertIn("link", out, name)
+            (f.dir / name).unlink()
+            real.rename(f.dir / name)
+        self.assertEqual([r for r in self.docker_runs() if r["name"].endswith("-tester")], [])
 
     def test_a_handoff_file_that_is_a_link_is_never_mounted_into_a_worker(self):
         # Codex's twenty-fourth review: the feature directory is group-writable and the conductor owns workers.env. A link
@@ -1724,8 +1915,9 @@ class PipelineTests(Sandbox):
         self.assertEqual(int(team.DEFAULTS["TEAM_LOG_MAX_BYTES"]), 20_000_000)
         self.assertEqual(int(team.DEFAULTS["TEAM_WORKSPACE_GROWTH_BYTES"]), 3_000_000_000)
         self.assertEqual(int(team.DEFAULTS["TEAM_MIN_FREE_BYTES"]), 1_000_000_000)
+        self.assertEqual(int(team.DEFAULTS["TEAM_WORKSPACE_GROWTH_FILES"]), 500_000)
         for name in ("team.env.example", "team.env.video.example"):
-            for key in ("TEAM_LOG_MAX_BYTES", "TEAM_WORKSPACE_GROWTH_BYTES", "TEAM_MIN_FREE_BYTES"):
+            for key in ("TEAM_LOG_MAX_BYTES", "TEAM_WORKSPACE_GROWTH_BYTES", "TEAM_MIN_FREE_BYTES", "TEAM_WORKSPACE_GROWTH_FILES"):
                 self.assertIn(key, (ROOT / "scripts" / "team" / name).read_text(), (name, key))
 
     def test_a_pack_is_refused_when_the_gates_ran_on_other_code(self):
@@ -3093,7 +3285,7 @@ class VideoTeamTests(Sandbox):
         """team.smoke() with a docker that exits `results[label]` for the render and narration containers."""
         calls = []
 
-        def fake(argv, name, timeout, env, log, max_bytes=None, workspace=None, workspace_growth=0):
+        def fake(argv, name, timeout, env, log, max_bytes=None, workspace=None, workspace_growth=0, **limits):
             calls.append((argv, name))
             label = name.rsplit("-", 1)[1]
             return results[label], "" if results[label] == 0 else "Chrome exited\nsegfault"

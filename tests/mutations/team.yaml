@@ -451,32 +451,32 @@ mutations:
   replace: "    tmp.write_text(json.dumps(seal, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o666)\n"
   test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
 - label: "a refused pack leaves its old seal behind"
-  find: "        seal_path(f).unlink(missing_ok=True)\n"
-  replace: ""
+  find: "        seal_path(f).unlink(missing_ok=True)\n        print(problem, file=sys.stderr)\n"
+  replace: "        print(problem, file=sys.stderr)\n"
   test: tests.test_team.PipelineTests.test_a_pack_or_push_needs_gates_that_passed
 - label: "a worker's output is not held to the cap"
   find: "worker_env(cfg, keys, model), log, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n"
   replace: "worker_env(cfg, keys, model), log,\n"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "a gate command's output is not held to the cap"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
-  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            passed += rc == 0"
+  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            passed += rc == 0"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "the gates setup output is not held to the cap"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            lines += [f\"## SETUP"
-  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            lines += [f\"## SETUP"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            lines += [f\"## SETUP"
+  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            lines += [f\"## SETUP"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "each gate command gets a fresh output allowance"
   find: "        written = sink.tell()\n"
   replace: "        written = 0\n"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "a container's workspace is not watched"
-  find: "        if workspace and workspace_growth > 0:\n            watcher = threading.Thread(target=guard"
+  find: "        if tracked:\n            watcher = threading.Thread(target=guard"
   replace: "        if False:\n            watcher = threading.Thread(target=guard"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
 - label: "workspace growth is measured from an empty directory"
-  find: "    baseline = (disk_usage(workspace) if workspace_baseline is None else workspace_baseline) if tracked else 0\n"
-  replace: "    baseline = 0\n"
+  find: "        base_bytes, base_entries = workspace_baseline if workspace_baseline is not None else workspace_usage(workspace)[:2]\n"
+  replace: "        base_bytes, base_entries = 0, 0\n"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
 - label: "a container over the workspace limit keeps running"
   find: "                proc.kill()\n                return\n"
@@ -491,11 +491,11 @@ mutations:
   replace: "workspace=None,"
   test: tests.test_team.PipelineTests.test_a_worker_that_fills_the_checkout_fails_and_its_files_are_discarded
 - label: "a gate command's workspace is not watched"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            passed += rc == 0"
   replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            passed += rc == 0"
   test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too
 - label: "the gates setup workspace is not watched"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            lines += [f\"## SETUP"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            lines += [f\"## SETUP"
   replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            lines += [f\"## SETUP"
   test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too
 - label: "a builder can overwrite the operator's supplied files"
@@ -575,8 +575,8 @@ mutations:
   replace: "    why = None\n    if why:\n        return None, f\"{why}: run setup"
   test: tests.test_team.PipelineTests.test_a_seals_symlink_left_by_an_older_install_is_neither_written_nor_believed
 - label: "a container that exits between two polls is accepted without a last look at its workspace"
-  find: "            grown = 0 if stopped else disk_usage(workspace) - baseline\n"
-  replace: "            grown = 0\n"
+  find: "            why = None if stopped else over_allowance()\n"
+  replace: "            why = None\n"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_and_exits_before_the_first_poll_is_still_caught
 - label: "containers log into Docker's unrotated json-file log again"
   find: "        \"--log-driver\", \"none\",\n"
@@ -609,22 +609,22 @@ mutations:
 - label: "pack --force reads the diff only up to the ordinary limit"
   find: "    diff_limit = PACK_FORCE_DIFF_BYTES if force else max_bytes\n"
   replace: "    diff_limit = max_bytes\n"
-  test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
+  test: tests.test_team.PipelineTests.test_pack_force_seals_a_diff_that_is_over_the_size_limit_but_whole
 - label: "a pack refused for a cut diff claims an exact size"
   find: "{'at least ' if cut_anywhere else ''}"
   replace: "{''}"
   test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
 - label: "a link as a handoff file is followed when it is copied"
-  find: "os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC"
-  replace: "os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC"
+  find: "os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)  # NONBLOCK: a named pipe"
+  replace: "os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)  # NONBLOCK: a named pipe"
   test: tests.test_team.PipelineTests.test_a_handoff_file_that_is_a_link_is_never_mounted_into_a_worker
 - label: "a handoff file that is a named pipe is read"
   find: "        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):\n"
   replace: "        if False:\n"
   test: tests.test_team.PipelineTests.test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read
 - label: "opening a named pipe as a handoff file waits for a writer"
-  find: "os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC"
-  replace: "os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC"
+  find: "os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)  # NONBLOCK: a named pipe"
+  replace: "os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)  # NONBLOCK: a named pipe"
   test: tests.test_team.PipelineTests.test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read
 - label: "a handoff file of any size is copied"
   find: "                if copied > HANDOFF_FILE_MAX_BYTES:\n"
@@ -687,8 +687,8 @@ mutations:
   replace: "\"--name-only\", base)"
   test: tests.test_team.PipelineTests.test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed
 - label: "each gate command gets a fresh workspace allowance again"
-  find: "workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
-  replace: "workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
+  find: "workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from, workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            passed += rc == 0"
+  replace: "workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]), workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n            passed += rc == 0"
   test: tests.test_team.PipelineTests.test_gate_commands_share_one_workspace_budget
 - label: "push reads the destination and options from the clone's own configuration"
   find: "        push_sealed(f, sealed_origin(f), source)\n"
@@ -722,3 +722,83 @@ mutations:
   find: "write_origin(f, str(local.resolve()) if local.exists() else args.repo)"
   replace: "write_origin(f, args.repo)"
   test: tests.test_team.PipelineTests.test_a_relative_repository_path_is_sealed_as_an_absolute_one
+- label: "a feature file that is a link is read through"
+  find: "    except (FileNotFoundError, NotADirectoryError):"
+  replace: "    except (FileNotFoundError, NotADirectoryError, OSError):"
+  test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_link_is_never_read
+- label: "read follows a link at the path it is given"
+  find: "        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)\n"
+  replace: "        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)\n"
+  test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_link_is_never_read
+- label: "read waits for a writer on a named pipe"
+  find: "        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)\n"
+  replace: "        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)\n"
+  test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_pipe_or_far_too_big_is_refused_by_read
+- label: "read takes anything that is not a plain file"
+  find: "        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):\n            raise SystemExit(f\"{path} is not a plain file"
+  replace: "        if False:\n            raise SystemExit(f\"{path} is not a plain file"
+  test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_pipe_or_far_too_big_is_refused_by_read
+- label: "read takes a file of any size"
+  find: "    if len(data) > READ_MAX_BYTES:\n        raise SystemExit(f\"{path} is larger than"
+  replace: "    if False:\n        raise SystemExit(f\"{path} is larger than"
+  test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_pipe_or_far_too_big_is_refused_by_read
+- label: "write_file writes through a link at its path"
+  find: "        os.replace(tmp, path)\n"
+  replace: "        shutil.copyfile(tmp, path)\n        os.unlink(tmp)\n"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "gates.log is written through a link"
+  find: "    write_file(f.file(\"gates.log\"), \"\\n\".join(lines) + \"\\n\")\n    say(f\"gates: {lines[-1]}\")\n    return ok"
+  replace: "    f.file(\"gates.log\").write_text(\"\\n\".join(lines) + \"\\n\", encoding=\"utf-8\")\n    say(f\"gates: {lines[-1]}\")\n    return ok"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "the raw gate log is written through a link"
+  find: "    write_file(raw, \"\")\n"
+  replace: "    raw.write_text(\"\", encoding=\"utf-8\")\n"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "the retry feedback is written through a link"
+  find: "            write_file(note, feedback)\n"
+  replace: "            note.write_text(feedback, encoding=\"utf-8\")\n"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "the reviewer's diff is written through a link"
+  find: "    write_file(diff, text)\n"
+  replace: "    diff.write_text(text, encoding=\"utf-8\")\n"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "the audit pack is written through a link"
+  find: "    write_file(pack, text)\n"
+  replace: "    pack.write_text(text, encoding=\"utf-8\")\n"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "the repo map is written through a link"
+  find: "    write_file(f.file(\"repo-map.txt\"), repo_map(f.repo, int(cfg[\"TEAM_MAP_MAX_LINES\"])))\n    print(f.file(\"repo-map.txt\"))"
+  replace: "    f.file(\"repo-map.txt\").write_text(repo_map(f.repo, int(cfg[\"TEAM_MAP_MAX_LINES\"])), encoding=\"utf-8\")\n    print(f.file(\"repo-map.txt\"))"
+  test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
+- label: "a worker log is opened through a link"
+  find: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC"
+  replace: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC"
+  test: tests.test_team.PipelineTests.test_a_worker_log_is_never_opened_through_a_link
+- label: "a feature whose repository directory is a link is used"
+  find: "            if path.is_symlink():\n                raise SystemExit(f\"{path} is a link: refusing to use feature"
+  replace: "            if False:\n                raise SystemExit(f\"{path} is a link: refusing to use feature"
+  test: tests.test_team.PipelineTests.test_a_feature_whose_directories_are_links_is_refused
+- label: "a container may make any number of files"
+  find: "        if workspace_files > 0 and (over or entries - base_entries > workspace_files):\n"
+  replace: "        if False:\n"
+  test: tests.test_team.PipelineTests.test_a_container_that_makes_endless_empty_files_is_stopped
+- label: "the file count is not part of the baseline"
+  find: "        base_bytes, base_entries = workspace_baseline if workspace_baseline is not None else workspace_usage(workspace)[:2]\n"
+  replace: "        base_bytes, base_entries = workspace_baseline if workspace_baseline is not None else (workspace_usage(workspace)[0], 0)\n"
+  test: tests.test_team.PipelineTests.test_a_container_that_makes_endless_empty_files_is_stopped
+- label: "empty files are not counted as entries"
+  find: "                    count += 1\n"
+  replace: "                    count += 0\n"
+  test: tests.test_team.PipelineTests.test_workspace_usage_counts_every_entry_and_stops_scanning_past_the_limit
+- label: "the scan does not stop at the entry limit"
+  find: "                    if max_entries is not None and count > max_entries:\n                        return total, count, True\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_workspace_usage_counts_every_entry_and_stops_scanning_past_the_limit
+- label: "a worker's files are not counted against the file allowance"
+  find: "  # the reviewer's checkout is mounted read-only\n                          workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                          workspace_files=int(cfg[\"TEAM_WORKSPACE_GROWTH_FILES\"]))\n"
+  replace: "  # the reviewer's checkout is mounted read-only\n                          workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n"
+  test: tests.test_team.PipelineTests.test_a_worker_that_makes_thousands_of_files_fails_and_they_are_discarded
+- label: "a force-truncated diff is sealed"
+  find: "    if cut_anywhere and force:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack

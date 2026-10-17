@@ -251,7 +251,13 @@ Có test và mutation check canh giữ (`tests/test_team.py`, `tests/mutations/t
   Trước khi `git add -A` (ghi thêm một bản mỗi file đổi dưới dạng object của git), conductor kiểm tra file đổi cộng `TEAM_MIN_FREE_BYTES`
   có vừa với dung lượng trống không; không vừa thì bỏ lần thử và dừng. Danh sách đường dẫn đổi chỉ được đọc tới vài MB (quá thì dừng với
   "too many paths"), và file bàn giao cho worker (`spec.md`, `repo-map.txt`, ...) được mở không theo symlink rồi sao chép vào thư mục
-  tạm trong team home để mount, nên một symlink trỏ tới `workers.env` không bao giờ được gắn vào container. Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS. Container chạy với `--log-driver none`
+  tạm trong team home để mount, nên một symlink trỏ tới `workers.env` không bao giờ được gắn vào container.
+  Cùng nguyên tắc cho mọi file trong thư mục feature (lead ghi được): conductor đọc chúng không theo symlink, không đọc named pipe, có
+  trần kích thước (một `spec.md` là symlink tới `workers.env` bị từ chối chứ không bị chép vào gói audit); khi ghi `gates.log`,
+  `audit-pack.md`, `diff.patch`... nó ghi file mới rồi đổi tên đè lên, nên symlink bị thay chứ không bị ghi xuyên qua; `repo/`, `out/`
+  hay chính thư mục feature mà là symlink thì lệnh bị từ chối. Ngoài số byte, container còn bị dừng khi thư mục làm việc tăng quá
+  `TEAM_WORKSPACE_GROWTH_FILES` mục (file rỗng và symlink không tốn byte nhưng tốn inode). `pack --force` chỉ bỏ giới hạn kích thước,
+  không bao giờ niêm phong một diff đã bị cắt (quá 20 MB thì từ chối). Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS. Container chạy với `--log-driver none`
   (Docker không giữ thêm một bản log `json-file` không xoay vòng của output), và diff đưa cho reviewer hay vào gói audit chỉ được đọc
   tới `TEAM_PACK_MAX_BYTES` (hoặc 20 MB với `pack --force`) rồi dừng `git`, nên vài file lớn không bị nạp nguyên vào bộ nhớ.
 - **Thay đổi nhạy cảm:** gói audit liệt kê riêng các thay đổi ở `.github/` (CI chạy ngay trên
