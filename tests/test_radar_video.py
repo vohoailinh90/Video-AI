@@ -78,8 +78,12 @@ class NumberWords(unittest.TestCase):
         self.assertEqual(numbers_vi.speak_text("3,5 và 3.14"), "ba phẩy năm và ba chấm một bốn")
 
     def test_digits_that_belong_to_a_name_stay(self):
-        for text in ("AGPL-3.0", "MP4", "Qwen3", "v1.2.3", "ngày 2026-10-13", "gpt-4o"):
+        for text in ("MP4", "Qwen3", "v1.2.3", "ngày 2026-10-13", "gpt-4o", "1.5x", "H.264"):
             self.assertEqual(numbers_vi.speak_text(text), text)
+
+    def test_the_version_of_a_license_name_is_read(self):
+        self.assertEqual(numbers_vi.speak_text("giấy phép AGPL-3.0, nhưng"), "giấy phép AGPL ba chấm không, nhưng")
+        self.assertEqual(numbers_vi.speak_text("Apache-2.0"), "Apache hai chấm không")
 
 
 class Sentences(unittest.TestCase):

@@ -1,7 +1,7 @@
 """Vietnamese number words, so the synthesizer reads 62.958 as a number and not as a string of digits.
 
-speak_text() rewrites the standalone numbers of a sentence (not MP4, Qwen3 or AGPL-3.0, whose digits belong to a name) and leaves
-everything else alone. The result goes to the synthesizer only; the displayed text keeps its digits.
+speak_text() rewrites the standalone numbers of a sentence and the version of a license-like name (AGPL-3.0 becomes AGPL ba chấm
+không), not MP4 or Qwen3, whose digits belong to the name, and leaves everything else alone. The result goes to the synthesizer only; the displayed text keeps its digits.
 """
 import re
 
@@ -9,7 +9,9 @@ DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tá
 GROUPS = ["", " nghìn", " triệu", " tỷ"]
 
 # a number that stands alone: not glued to letters, a hyphen or another number; an optional percent sign
-NUMBER = re.compile(r"(?<![\w.,\-])(\d+(?:[.,]\d+)*)(%?)(?![\w\-])")
+# a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
+VERSION = re.compile(r"(?<=[A-Za-z])-(\d+(?:[.,]\d+)*)(?![\w])")
+NUMBER = re.compile(r"(?<![\w.,\-])(\d+(?:[.,]\d+)*)(%?)(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -74,4 +76,8 @@ def speak_text(text: str) -> str:
             return match.group(0)
         return words + (" phần trăm" if match.group(2) else "")
 
-    return NUMBER.sub(replace, text)
+    def version(match):
+        words = _token_words(match.group(1))
+        return match.group(0) if words is None else " " + words
+
+    return NUMBER.sub(replace, VERSION.sub(version, text))
