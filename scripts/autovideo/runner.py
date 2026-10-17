@@ -135,6 +135,15 @@ def rendered_fingerprint(dest: Path) -> str | None:
         return None
 
 
+def failed_checks(dest: Path) -> list[str]:
+    """Names of the error checks that failed, from the folder's report.json."""
+    try:
+        report = json.loads((dest / "report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [c["name"] for c in report.get("checks", []) if c.get("level") == "error" and not c.get("ok")]
+
+
 def qa_basis(job: Job) -> list[float]:
     """What QA measured the video against and the fingerprint leaves out (a QA limit does not change the render)."""
     return [job.min_seconds, job.max_seconds]
@@ -196,17 +205,18 @@ def _run(
         status = "pending" if force else job_status(entry, job, dest, inputs)
         if status == "unchecked":
             # Only the QA limits changed since the last check: look at the video that is there again, do not render it again.
-            checked = requalify_job(job, dest, state, inputs)
+            requalify_job(job, dest, state, inputs)
             write_json(batch_dir / "state.json", state)
-            status = checked["status"]
+            status = state["jobs"][job.id]["status"]
             log(f"{label}: QA limits changed, checked again: {status}")
-            if status == "qa_failed":
-                # Nothing that goes into the render changed, so rendering again would give the same video: report it and go on.
-                # Changing the pack renders it again, and so does `run --force --only {id}`.
-                failures = [c["name"] for c in checked["checks"] if c["level"] == "error" and not c["ok"]]
-                log(f"{label}: still fails QA ({', '.join(failures)}); edit the pack or the limits, or run --force --only {job.id} to render again")
-                rows.append({"id": job.id, "status": "qa_failed", "seconds": entry.get("seconds"), "qa_failures": failures})
-                continue
+        if status == "qa_failed":
+            # It already used its 1 + retries attempts on this job as it is now, and nothing that goes into the render has changed, so
+            # another render would most likely give the same video. Report it and go on. The ways to try again: edit the pack, give
+            # `run` more --retries, or `run --force --only <id>`. (A `failed` job, one the engine could not render, is tried again.)
+            failures = failed_checks(dest)
+            log(f"{label}: failed QA before ({', '.join(failures) or 'see report.json'}); not rendered again: edit the pack, or use --force --only {job.id}")
+            rows.append({"id": job.id, "status": "qa_failed", "seconds": entry.get("seconds"), "qa_failures": failures})
+            continue
         if status == "done":
             log(f"{label}: done already, skipped")
             rows.append({"id": job.id, "status": "skipped", "seconds": entry.get("seconds"), "qa_failures": []})

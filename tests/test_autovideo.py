@@ -441,6 +441,24 @@ class RunnerTests(FakeMptCase):
         self.assertEqual(self.renders(), 1)  # nothing that goes into the render changed, so it was not rendered again
         self.assertEqual(self.state()["01-first"]["status"], "qa_failed")
 
+    def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
+        summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
+        self.assertEqual((summary["qa_failed"], self.renders()), (1, 2))
+        summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # nothing that goes into the render changed
+        self.assertEqual((summary["qa_failed"], summary["done"], summary["skipped"]), (1, 0, 0))  # still reported, and still a failure
+        self.assertIn("audible", summary["videos"][0]["qa_failures"])  # with the reason it failed
+        self.assertEqual(self.renders(), 2)  # but not rendered again
+        summary, _ = self.run_pack([video(title="SILENT")], retries=0, force=True)  # --force is the way to try again
+        self.assertEqual(self.renders(), 3)
+        summary, _ = self.run_pack([video(title="SILENT", scenes=[{"narration": "Lời đã đổi hoàn toàn.", "terms": ["x"]}])], retries=0)
+        self.assertEqual(self.renders(), 4)  # and so is a change to the job
+
+    def test_a_job_that_failed_in_the_engine_is_tried_again_by_the_next_run(self):
+        self.run_pack([video(title="FAIL once")], retries=0)
+        self.assertEqual(self.state()["01-first"]["attempts"], 1)
+        self.run_pack([video(title="FAIL once")], retries=0)
+        self.assertEqual(self.state()["01-first"]["attempts"], 2)  # `failed` is retried, unlike `qa_failed`
+
     def test_widened_target_seconds_checks_a_qa_failed_video_again_without_rendering(self):
         self.run_pack([video()], {"target_seconds": [1, 2]}, retries=0)  # 3 s video: fails QA on duration
         self.assertEqual(self.state()["01-first"]["status"], "qa_failed")
