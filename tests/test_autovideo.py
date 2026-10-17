@@ -1,0 +1,352 @@
+"""Tests of scripts/autovideo against a fake MoneyPrinterTurbo checkout (a cli.py that writes real tiny media with ffmpeg).
+
+    python3 -m unittest discover -s tests -v
+"""
+import contextlib
+import io
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+from autovideo import cli, engine_mpt, pack as packmod, qa, runner, transcript  # noqa: E402
+
+SECRET = "PEXELS-SECRET-KEY-12345"
+
+# Same contract as MPT's cli.py: --batch-file <jsonl> --stop-at video; one JSON summary on stdout, logs on stderr.
+FAKE_CLI = textwrap.dedent('''
+    import json, pathlib, subprocess, sys, uuid
+    manifest = sys.argv[sys.argv.index("--batch-file") + 1]
+    p = json.loads(open(manifest, encoding="utf-8").readline())
+    subject, tid = p["video_subject"], str(uuid.uuid4())
+    print("log line with key " + "%(secret)s", file=sys.stderr)
+    entry = {"index": 1, "task_id": tid, "status": "succeeded", "result": None, "failed_stage": None, "error": None}
+    if "FAIL" in subject:
+        entry.update(status="failed", failed_stage="audio", error="TTS said no, key %(secret)s")
+        print(json.dumps({"total": 1, "succeeded": 0, "failed": 1, "tasks": [entry]})); sys.exit(1)
+    d = pathlib.Path("storage/tasks") / tid
+    d.mkdir(parents=True)
+    w, h = {"9:16": (108, 192), "16:9": (192, 108), "1:1": (128, 128)}[p["video_aspect"]]
+    if "WRONGSHAPE" in subject:
+        w, h = h, w
+    dur = 3
+    audio = "anullsrc=r=22050:cl=mono" if "SILENT" in subject else "sine=frequency=300:sample_rate=22050"
+    def ff(*a):
+        subprocess.run(["ffmpeg", "-v", "error", "-y", *a], check=True)
+    ff("-f", "lavfi", "-i", audio, "-t", str(dur), str(d / "audio.mp3"))
+    ff("-f", "lavfi", "-i", f"color=c=blue:s={w}x{h}:d={dur}:r=10", "-i", str(d / "audio.mp3"), "-shortest", "-pix_fmt", "yuv420p", str(d / "final-1.mp4"))
+    srt = ""
+    if "NOSUB" not in subject and p["subtitle_enabled"]:
+        words = p["video_script"].split()
+        lines = [" ".join(words[i:i + 4]) for i in range(0, len(words), 4)]
+        step = dur / len(lines)
+        for n, line in enumerate(lines):
+            a, b = n * step, (n + 1) * step
+            stamp = lambda s: "00:00:%%02d,%%03d" %% (int(s), round((s - int(s)) * 1000))
+            srt += f"{n + 1}\\n{stamp(a)} --> {stamp(b)}\\n{line}\\n\\n"
+        (d / "subtitle.srt").write_text(srt, encoding="utf-8")
+    entry["result"] = {"videos": [str(d / "final-1.mp4")], "audio_file": str(d / "audio.mp3"), "audio_duration": float(dur),
+                       "subtitle_path": str(d / "subtitle.srt") if srt else "", "warnings": None}
+    print(json.dumps({"total": 1, "succeeded": 1, "failed": 0, "tasks": [entry]}))
+''') % {"secret": SECRET}
+
+SCENES = [
+    {"narration": "Xin chào các bạn, hôm nay mình giới thiệu một công cụ làm video.", "terms": ["laptop", "coding"]},
+    {"narration": "Chỉ cần một chủ đề, máy sẽ viết lời đọc và dựng hình.", "terms": ["video editing"]},
+]
+
+
+def fake_mpt(root: Path, pexels_key: bool = True) -> engine_mpt.MptEnv:
+    home = root / "mpt"
+    (home / "app").mkdir(parents=True)
+    (home / "resource" / "fonts").mkdir(parents=True)
+    (home / "resource" / "fonts" / "BeVietnamPro-Bold.ttf").write_bytes(b"")
+    (home / "cli.py").write_text(FAKE_CLI, encoding="utf-8")
+    key = f'"{SECRET}"' if pexels_key else ""
+    (home / "config.toml").write_text(f'[app]\npexels_api_keys = [{key}]\nsubtitle_provider = "edge"\nllm_provider = "moonshot"\n', encoding="utf-8")
+    return engine_mpt.MptEnv(home.resolve(), (sys.executable,))
+
+
+def video(vid="01-first", title="Video", **extra):
+    return {"id": vid, "title": title, "scenes": SCENES, **extra}
+
+
+def write_pack(root: Path, videos, defaults=None, batch="test-batch") -> Path:
+    path = root / "pack.json"
+    path.write_text(json.dumps({"batch": batch, "defaults": {"target_seconds": [1, 30], **(defaults or {})}, "videos": videos}, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg and ffprobe")
+class FakeMptCase(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.env = fake_mpt(self.root)
+        self.out = self.root / "out"
+        self.logs: list[str] = []
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_pack(self, videos, defaults=None, env=None, **kw):
+        pack = packmod.load_pack(write_pack(self.root, videos, defaults))
+        return runner.run(pack, env or self.env, self.out, log=self.logs.append, **kw), pack
+
+    def state(self):
+        return json.loads((self.out / "test-batch" / "state.json").read_text())["jobs"]
+
+
+class PackTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def problems(self, videos, defaults=None):
+        with self.assertRaises(packmod.PackError) as ctx:
+            packmod.load_pack(write_pack(self.root, videos, defaults))
+        return "\n".join(ctx.exception.problems)
+
+    def test_single_file_gets_defaults_and_vietnamese_font(self):
+        job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]
+        self.assertEqual((job.language, job.aspect, job.voice, job.font), ("vi-VN", "9:16", "vi-VN-HoaiMyNeural", "BeVietnamPro-Bold.ttf"))
+        self.assertEqual(job.terms, ("laptop", "coding", "video editing"))
+        self.assertEqual(job.script.count("\n"), 1)
+
+    def test_directory_form_one_file_per_video(self):
+        (self.root / "videos").mkdir()
+        (self.root / "pack.json").write_text(json.dumps({"batch": "dir-batch", "defaults": {"target_seconds": [1, 30]}}))
+        for vid in ("02-b", "01-a"):
+            (self.root / "videos" / f"{vid}.json").write_text(json.dumps(video(vid)))
+        pack = packmod.load_pack(self.root)
+        self.assertEqual([j.id for j in pack.jobs], ["01-a", "02-b"])
+
+    def test_directory_file_name_must_match_id(self):
+        (self.root / "videos").mkdir()
+        (self.root / "pack.json").write_text(json.dumps({"batch": "b"}))
+        (self.root / "videos" / "x.json").write_text(json.dumps(video("01-a")))
+        with self.assertRaises(packmod.PackError) as ctx:
+            packmod.load_pack(self.root)
+        self.assertIn("file name must be <id>.json", str(ctx.exception))
+
+    def test_all_problems_are_reported_at_once(self):
+        text = self.problems([
+            {"id": "Bad Id", "title": "", "scenes": [{"narration": ""}], "colour": "red"},
+            video("02-ok", voice="en-US-AriaNeural"),
+            video("02-ok", aspect="4:3"),
+        ])
+        for expected in ("id: must be lowercase", "title:", "narration:", "unknown key 'colour'", "reads en, but the language is vi-VN", "aspect:", "used more than once"):
+            self.assertIn(expected, text)
+
+    def test_online_source_needs_search_terms_and_local_needs_files(self):
+        no_terms = {"id": "01-a", "title": "T", "scenes": [{"narration": "Xin chào."}]}
+        self.assertIn("give search terms", self.problems([no_terms]))
+        self.assertIn("list the video or image files", self.problems([video()], {"material_source": "local"}))
+        self.assertIn("no such file", self.problems([video()], {"material_source": "local", "materials": ["missing.mp4"]}))
+
+    def test_tts_unfriendly_text_is_a_warning_not_an_error(self):
+        scenes = [{"narration": "Xem tại https://example.com **ngay**", "terms": ["a"]}]
+        pack = packmod.load_pack(write_pack(self.root, [{"id": "01-a", "title": "T", "scenes": scenes}]))
+        self.assertEqual(len(pack.warnings), 2)
+
+    def test_fingerprint_follows_words_not_qa_limits(self):
+        base = packmod.load_pack(write_pack(self.root, [video()])).jobs[0].fingerprint()
+        same = packmod.load_pack(write_pack(self.root, [video()], {"target_seconds": [5, 50]})).jobs[0].fingerprint()
+        other = packmod.load_pack(write_pack(self.root, [video(title="Video", scenes=[{"narration": "Khác.", "terms": ["x"]}])])).jobs[0].fingerprint()
+        self.assertEqual(base, same)
+        self.assertNotEqual(base, other)
+
+    def test_mpt_params_for_each_kind_of_job(self):
+        job = packmod.load_pack(write_pack(self.root, [video(bgm="none")])).jobs[0]
+        params = engine_mpt.video_params(job)
+        self.assertEqual((params["video_source"], params["bgm_type"], params["voice_name"]), ("pexels", "", "vi-VN-HoaiMyNeural"))
+        self.assertEqual(params["video_terms"], ["laptop", "coding", "video editing"])
+        clip, audio = self.root / "c.mp4", self.root / "a.mp3"
+        clip.write_bytes(b"x"); audio.write_bytes(b"x")
+        local = packmod.load_pack(write_pack(self.root, [video()], {"material_source": "local", "materials": ["c.mp4"], "audio_file": "a.mp3", "subtitles": False})).jobs[0]
+        params = engine_mpt.video_params(local)
+        self.assertEqual(params["video_materials"], [{"provider": "local", "url": str(clip.resolve()), "duration": 0}])
+        self.assertEqual(params["custom_audio_file"], str(audio.resolve()))
+        self.assertNotIn("voice_name", params)
+        self.assertNotIn("video_terms", params)
+
+    def test_paid_sources_are_not_available(self):
+        self.assertIn("material_source", self.problems([video()], {"material_source": "wavespeed"}))
+
+
+class TranscriptTests(unittest.TestCase):
+    SRT = "1\n00:00:00,000 --> 00:00:01,500\nXin chào các bạn\n\n2\n00:00:01,500 --> 00:00:03,000\nhôm nay mình học\n\n3\n00:00:03,000 --> 00:00:04,000\nvề video\n"
+
+    def test_parse_and_coverage(self):
+        cues = transcript.parse_srt(self.SRT)
+        self.assertEqual([(c.start, c.end) for c in cues], [(0.0, 1.5), (1.5, 3.0), (3.0, 4.0)])
+        self.assertEqual(transcript.coverage("Xin chào các bạn, hôm nay mình học về video.", cues), 1.0)
+        self.assertLess(transcript.coverage("Xin chào các bạn, hôm nay mình học về video và âm thanh nữa nhé.", cues), 0.8)
+
+    def test_decomposed_diacritics_still_match(self):
+        import unicodedata
+        cues = transcript.parse_srt(unicodedata.normalize("NFD", self.SRT))
+        self.assertEqual(transcript.coverage("Xin chào các bạn", cues), 1.0)
+
+    def test_scene_times_follow_word_counts(self):
+        cues = transcript.parse_srt(self.SRT)
+        times = transcript.scene_times(["Xin chào các bạn", "hôm nay mình học về video"], cues)
+        self.assertEqual(times[0], (0.0, 1.5))
+        self.assertEqual(times[1], (1.5, 4.0))
+
+    def test_scene_times_refuse_when_lengths_disagree(self):
+        cues = transcript.parse_srt(self.SRT)
+        self.assertEqual(transcript.scene_times(["một hai ba bốn năm sáu bảy tám chín mười mười một mười hai"], cues), [None])
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg and ffprobe")
+class RunnerTests(FakeMptCase):
+    def test_renders_and_stores_video_audio_transcript_report(self):
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["failed"], summary["qa_failed"]), (1, 0, 0))
+        folder = self.out / "test-batch" / "01-first"
+        for name in ("video.mp4", "narration.mp3", "subtitles.srt", "transcript.txt", "transcript.json", "job.json", "report.json", "mpt.log"):
+            self.assertTrue((folder / name).is_file(), name)
+        report = json.loads((folder / "report.json").read_text())
+        self.assertEqual(report["status"], "done")
+        self.assertTrue(all(c["ok"] for c in report["checks"] if c["level"] == "error"))
+        doc = json.loads((folder / "transcript.json").read_text())
+        self.assertEqual(len(doc["scenes"]), 2)
+        self.assertIsNotNone(doc["scenes"][0]["start"])
+        self.assertTrue((self.out / "test-batch" / "summary.md").is_file())
+
+    def test_rerun_skips_done_jobs_and_rerenders_an_edited_one(self):
+        self.run_pack([video("01-a"), video("02-b")])
+        summary, _ = self.run_pack([video("01-a"), video("02-b")])
+        self.assertEqual((summary["done"], summary["skipped"]), (0, 2))
+        edited = video("02-b", scenes=[{"narration": "Lời mới hoàn toàn khác nhé các bạn ơi.", "terms": ["x"]}])
+        summary, _ = self.run_pack([video("01-a"), edited])
+        self.assertEqual((summary["done"], summary["skipped"]), (1, 1))
+
+    def test_force_and_only(self):
+        self.run_pack([video("01-a"), video("02-b")])
+        summary, _ = self.run_pack([video("01-a"), video("02-b")], only=["02-b"], force=True)
+        self.assertEqual([r["id"] for r in summary["videos"]], ["02-b"])
+        self.assertEqual(summary["done"], 1)
+        with self.assertRaises(ValueError):
+            self.run_pack([video()], only=["nope"])
+
+    def test_failed_job_does_not_stop_the_batch_and_secrets_are_removed(self):
+        summary, _ = self.run_pack([video("01-a", title="FAIL here"), video("02-b")], retries=1)
+        self.assertEqual((summary["failed"], summary["done"]), (1, 1))
+        folder = self.out / "test-batch" / "01-a"
+        report = json.loads((folder / "report.json").read_text())
+        self.assertEqual((report["status"], report["stage"], report["attempts"]), ("failed", "audio", 2))
+        for text in (json.dumps(report), (folder / "mpt.log").read_text(), json.dumps(self.state()), json.dumps(summary)):
+            self.assertNotIn(SECRET, text)
+        self.assertIn("***", report["error"])
+
+    def test_silent_audio_and_wrong_shape_fail_qa(self):
+        summary, _ = self.run_pack([video("01-a", title="SILENT"), video("02-b", title="WRONGSHAPE")], retries=0)
+        self.assertEqual(summary["qa_failed"], 2)
+        by_id = {r["id"]: r["qa_failures"] for r in summary["videos"]}
+        self.assertIn("audible", by_id["01-a"])
+        self.assertIn("aspect", by_id["02-b"])
+        self.assertEqual(self.state()["01-a"]["status"], "qa_failed")
+
+    def test_missing_subtitles_fail_qa_when_requested(self):
+        summary, _ = self.run_pack([video(title="NOSUB")], retries=0)
+        self.assertIn("subtitles_made", summary["videos"][0]["qa_failures"])
+
+    def test_preflight_stops_before_mpt_starts(self):
+        env = fake_mpt(self.root / "nokey", pexels_key=False) if (self.root / "nokey").mkdir() is None else None
+        summary, _ = self.run_pack([video()], env=env)
+        self.assertEqual(summary["videos"][0]["stage"], "preflight")
+        self.assertIn("pexels_api_keys", summary["videos"][0]["error"])
+        self.assertFalse(list((self.env.home / "storage").glob("*")) if (self.env.home / "storage").exists() else [])
+
+    def test_requalify_uses_new_limits_without_rendering(self):
+        self.run_pack([video()])
+        pack = packmod.load_pack(write_pack(self.root, [video()], {"target_seconds": [10, 30]}))
+        rows = runner.requalify(pack, self.out)
+        self.assertEqual(rows[0]["status"], "qa_failed")
+        self.assertEqual(self.state()["01-first"]["status"], "qa_failed")
+        pack = packmod.load_pack(write_pack(self.root, [video()], {"target_seconds": [1, 30]}))
+        self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "done")
+
+    def test_timeout_kills_the_engine(self):
+        (self.env.home / "cli.py").write_text("import time\ntime.sleep(60)\n")
+        summary, _ = self.run_pack([video()], timeout=1, retries=3)
+        self.assertEqual(summary["videos"][0]["stage"], "timeout")
+        self.assertEqual(self.state()["01-first"]["attempts"], 1)  # no retry after a timeout
+
+    def test_summary_without_task_means_startup_failure(self):
+        (self.env.home / "cli.py").write_text("import sys\nprint('usage error', file=sys.stderr)\nsys.exit(2)\n")
+        summary, _ = self.run_pack([video()], retries=2)
+        self.assertEqual(summary["videos"][0]["stage"], "startup")
+        self.assertEqual(self.state()["01-first"]["attempts"], 1)
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg and ffprobe")
+class CliTests(FakeMptCase):
+    def call(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = cli.main([*argv])
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_validate_bad_pack_exits_2_and_lists_problems(self):
+        path = write_pack(self.root, [{"id": "x", "title": "T", "scenes": []}])
+        code, _, err = self.call("validate", str(path))
+        self.assertEqual(code, 2)
+        self.assertIn("scenes: must be a list", err)
+
+    def test_plan_json_has_params_and_flags_setup_problem(self):
+        path = write_pack(self.root, [video()])
+        code, out, _ = self.call("plan", str(path), "--json", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)
+        plan = json.loads(out)["videos"][0]
+        self.assertEqual((code, plan["problem"], plan["mpt_params"]["video_aspect"]), (0, None, "9:16"))
+        nokey = fake_mpt(self.root / "nokey", pexels_key=False) if (self.root / "nokey").mkdir() is None else None
+        code, out, _ = self.call("plan", str(path), "--json", "--mpt-home", str(nokey.home), "--mpt-python", sys.executable)
+        self.assertIn("pexels_api_keys", json.loads(out)["videos"][0]["problem"])
+
+    def test_run_then_status_then_qa(self):
+        path = write_pack(self.root, [video("01-a"), video("02-b", title="SILENT")])
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        code, out, _ = self.call("run", str(path), "--retries", "0", "--json", *base)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["qa_failed"], 1)
+        code, out, _ = self.call("status", str(path), "--json", *base)
+        self.assertEqual({r["id"]: r["status"] for r in json.loads(out)}, {"01-a": "done", "02-b": "qa_failed"})
+        path = write_pack(self.root, [video("01-a", scenes=[{"narration": "Đổi lời.", "terms": ["x"]}]), video("02-b", title="SILENT")])
+        code, out, _ = self.call("status", str(path), "--json", *base)
+        self.assertEqual(json.loads(out)[0]["status"], "stale")
+
+    def test_doctor_never_prints_a_key(self):
+        code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)
+        self.assertEqual(code, 0)
+        self.assertIn("pexels_api_keys: set", out)
+        self.assertNotIn(SECRET, out + err)
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg and ffprobe")
+class QaTests(unittest.TestCase):
+    def test_unreadable_file_fails_first_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "video.mp4"
+            bad.write_bytes(b"not a video")
+            job = packmod.load_pack(write_pack(Path(tmp), [video()])).jobs[0]
+            checks = qa.check_video(job, bad, None, [])
+            self.assertEqual([c.name for c in checks], ["readable"])
+            self.assertFalse(qa.passed(checks))
+
+
+if __name__ == "__main__":
+    unittest.main()
