@@ -161,12 +161,14 @@ tts.save(audio, "vo-1.wav")
 
 ## 6. Việc nên làm tiếp
 
-Đã xong (2026-10-17): cho phép Hugging Face, chạy PhoWhisper-small, đo Kokoro và VieNeu-TTS bằng nhận dạng ngược (mục 0).
+Đã xong (2026-10-17): cho phép Hugging Face, chạy PhoWhisper-small, đo Kokoro và VieNeu-TTS bằng nhận dạng ngược (mục 0), đóng gói quy trình
+thành script (`scripts/vo/`, `scripts/preview/`) và render video mẫu với giọng nữ và giọng nam: xem `docs/voiceover-workflow.md`.
 
 1. Nghe thử các giọng VieNeu-TTS bằng tai: phép đo chỉ cho biết mức dễ hiểu.
 2. Thử VoxCPM2 hoặc OmniVoice khi có máy GPU (máy cloud hiện tại không có).
 3. Thử PhoWhisper cỡ medium hoặc large, và lệnh `transcribe` của HyperFrames, cho phụ đề. Cần thêm bước viết hoa và chấm câu.
-4. Đóng gói VieNeu-TTS thành script hoặc skill dùng chung, gồm bước thay liên kết trong bộ nhớ đệm và bước kiểm tra bằng nhận dạng ngược.
+4. Biến `scripts/vo/` thành skill để Claude tự gọi khi gặp yêu cầu làm video có tiếng Việt (hiện mới là script và tài liệu, chưa phải skill).
+5. Thử các giọng nam miền Nam của VieNeu-TTS (Thái Sơn, Minh Triết, Đức Trí, Adam), vì "giọng nam" hiện mới là một giọng miền Bắc.
 
 ## Lệnh cài (theo README; `vieneu`, PhoWhisper và Kokoro đã chạy thử, phần còn lại thì chưa)
 

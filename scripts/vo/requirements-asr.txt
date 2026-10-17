@@ -1,0 +1,3 @@
+# Versions that worked on a 4-core CPU, Python 3.13 (2026-10-17). PhoWhisper runs through transformers; ffmpeg must be on PATH.
+torch==2.14.1
+transformers==5.20.1

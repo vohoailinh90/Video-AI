@@ -1,0 +1,9 @@
+{
+  "comment": "Single source of truth for the narration: text, start time in the composition (seconds), the end of the scene it belongs to, and a short name of that scene. A clip should end before scene_end minus the 0.35 s fade-out used in index.html. scripts/vo/* and scripts/preview/* read this file.",
+  "lines": [
+    { "id": "vo-1", "start": 0.5, "scene_end": 3.5, "scene": "Cảnh mở đầu", "text": "Video AI bằng code." },
+    { "id": "vo-2", "start": 4.1, "scene_end": 8.5, "scene": "Ba thẻ: Engine, Skill, Kiến thức", "text": "Có ba lớp để tự động hóa video: engine, skill và kiến thức." },
+    { "id": "vo-3", "start": 9.2, "scene_end": 12.8, "scene": "Sơ đồ từ ý tưởng đến video", "text": "Từ ý tưởng đến file MP4, hoàn toàn tự động." },
+    { "id": "vo-4", "start": 13.6, "scene_end": 17.0, "scene": "Lệnh render trong terminal", "text": "Chỉ cần một lệnh để render." }
+  ]
+}

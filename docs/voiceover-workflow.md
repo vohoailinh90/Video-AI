@@ -1,0 +1,124 @@
+# Lời đọc tiếng Việt cho video và trang xem thử: quy trình đã chạy được
+
+Quy trình này đã chạy thật ngày 2026-10-17 trên phiên Claude Code trên web (4 nhân CPU, không GPU) cho dự án `videos/demo-video`, với hai
+giọng: nữ (Mai Anh) và nam (Hải Đăng). Mọi lệnh bên dưới là lệnh đã dùng; các script nằm trong `scripts/vo/` và `scripts/preview/`.
+
+Chọn công cụ giọng đọc và giấy phép: xem `docs/vietnamese-audio.md`.
+
+## Tóm tắt
+
+| Bước | Việc | Công cụ |
+|---|---|---|
+| 1 | Viết lời thoại, thời điểm bắt đầu, hết cảnh | `videos/<tên>/voiceover.json` |
+| 2 | Tạo clip giọng đọc cho từng câu | `scripts/vo/synth.py` (VieNeu-TTS) |
+| 3 | Nghe lại từng clip bằng máy, chọn lượt tốt nhất cho từng câu | `scripts/vo/roundtrip.py` (PhoWhisper) |
+| 4 | Ghép clip vào video và render | `scripts/vo/revoice.py` |
+| 5 | Đo lại âm thanh của file MP4 cuối | `ffprobe`, `volumedetect` (có trong bước 4) và `roundtrip.py --video` |
+| 6 | Dựng trang xem thử phát được trong trình xem của Claude | `scripts/preview/build_preview.py` |
+| 7 | Thử trang trong trình duyệt thật rồi đăng | `scripts/preview/test_preview.js`, công cụ Artifact |
+
+## Chuẩn bị (một lần)
+
+```bash
+python3 -m venv .venv/tts && .venv/tts/bin/pip install -r scripts/vo/requirements-tts.txt     # VieNeu-TTS, không cần torch
+python3 -m venv .venv/asr && .venv/asr/bin/pip install -r scripts/vo/requirements-asr.txt     # PhoWhisper, cần torch
+npx hyperframes browser ensure                                                                 # Chrome headless để render
+```
+
+- Phiên cloud phải cho phép các tên miền Hugging Face (`docs/vietnamese-audio.md`, mục 4), vì model tải từ đó.
+- Các phiên bản trong hai file `requirements-*.txt` là phiên bản của hai môi trường đã chạy được; mình chưa cài lại môi trường từ chính hai file đó.
+- Lần đầu VieNeu-TTS có thể báo `External data path escapes model directory`. Chạy `python3 -I scripts/vo/fix_hf_cache.py` một lần (nó thay
+  liên kết tượng trưng trong bộ nhớ đệm bằng file thật), rồi chạy lại các lệnh `synth.py` với `HF_HUB_OFFLINE=1`.
+
+## 1. Lời thoại: `voiceover.json`
+
+Mỗi dòng có `id` (trùng `id` của thẻ `<audio>` trong `index.html`), `start` (giây), `scene_end` (giây), `scene` (tên cảnh) và `text`. Các script đọc cùng
+một file này nên lời đọc, thời điểm và trang xem thử không lệch nhau.
+
+Hai bài học khi viết lời:
+- Giọng Mai Anh đọc "Ba lớp..." ở đầu câu thành "bàn lớp" ở mọi lần thử, còn "Có ba lớp..." thì đúng. Nếu một từ tiếng Việt bị nghe sai nhiều lần, đổi cách diễn đạt.
+- Từ tiếng Anh (code, engine, skill, file MP4, render) được đọc theo kiểu Việt hóa. Máy nhận dạng chép lại đúng như nghe được ("cốt", "răn đe", "phai mờ phê bốn"),
+  nên số WER của câu có từ tiếng Anh luôn cao hơn. Muốn tránh, viết bằng từ tiếng Việt.
+
+## 2. Tạo giọng
+
+```bash
+.venv/tts/bin/python -I scripts/vo/synth.py --list-voices
+.venv/tts/bin/python -I scripts/vo/synth.py --lines videos/demo-video/voiceover.json --voice "Hải Đăng" --out build/voices/hai-dang
+.venv/tts/bin/python -I scripts/vo/synth.py --lines videos/demo-video/voiceover.json --voice "Hải Đăng" --out build/voices/hai-dang --only vo-2   # làm lại một câu
+```
+
+Tổng hợp giọng có yếu tố ngẫu nhiên: hai lần chạy cho hai clip hơi khác nhau, có khi một từ bị nuốt mất. Mỗi lần ra một `manifest.json` cùng các file `vo-N.wav`
+(48 kHz, mono). Trên máy 4 nhân, tốc độ khoảng 0,7 giây xử lý cho mỗi giây giọng.
+
+## 3. Nghe lại từng clip và chọn lượt tốt nhất
+
+```bash
+.venv/asr/bin/python -I scripts/vo/roundtrip.py --out build/voices/hai-dang/roundtrip.json build/voices/hai-dang/manifest.json
+```
+
+Với mỗi clip, PhoWhisper chép lại những gì nghe được rồi so với câu gốc (WER = số từ sai chia số từ của câu gốc). Mình tạo ba lượt cho giọng Hải Đăng và chọn lượt tốt
+nhất cho từng câu, dựa trên từ tiếng Việt có đúng không:
+
+| Câu | Lượt 1 | Lượt 2 | Lượt 3 | Chọn |
+|---|---|---|---|---|
+| `vo-1` Video AI bằng code. | 2/4 | 3/4 | 5/4 | lượt 1 |
+| `vo-2` Có ba lớp để tự động hóa video... | 5/13 (rơi mất "ba") | 3/13 ("ba" thành "bà") | 2/13 | lượt 3 |
+| `vo-3` Từ ý tưởng đến file MP4... | 5/10 ("từ" thành "tư") | 4/10 | 4/10 | lượt 2 |
+| `vo-4` Chỉ cần một lệnh để render. | 2/6 | 2/6 | 2/6 | lượt 1 |
+
+Các clip đã chọn nằm trong `videos/demo-video/voices/hai-dang/`. Giọng mặc định (Mai Anh) nằm trong `videos/demo-video/assets/`.
+
+## 4. Ghép vào video và render
+
+```bash
+python3 -I scripts/vo/revoice.py --project videos/demo-video --lines videos/demo-video/voiceover.json \
+    --clips videos/demo-video/voices/hai-dang --out videos/demo-video/renders/demo-video-nam.mp4
+```
+
+`revoice.py` chép dự án sang thư mục tạm (dự án gốc không đổi), đặt clip vào `assets/`, ghi lại `data-start`, `data-duration` và `data-volume` của các thẻ
+`<audio id="vo-N">` (độ dài lấy từ clip, âm lượng đưa mức trung bình mỗi clip về -19 dB nhưng đỉnh không vượt -1,5 dB), chạy `npm run check`, render và in kết quả.
+Nó cảnh báo nếu một clip chạm vào đoạn mờ dần cuối cảnh. Bản giọng mặc định render bằng `npm run render -- --output renders/demo-video.mp4` trong thư mục dự án.
+
+## 5. Đo lại âm thanh của file MP4 cuối
+
+```bash
+.venv/asr/bin/python -I scripts/vo/roundtrip.py --out build/final-nam.json --video videos/demo-video/renders/demo-video-nam.mp4 \
+    --lines videos/demo-video/voiceover.json --label "final mix"
+```
+
+Lệnh này cắt từng cảnh ra từ âm thanh của MP4 (nhạc nền cũng nằm trong đó) rồi cho PhoWhisper nghe lại. Kết quả ngày 2026-10-17:
+
+| Giọng | WER trên file MP4 cuối | Nhận xét (đọc từ kết quả) |
+|---|---|---|
+| Nữ, Mai Anh | 10/33 = 30% | Mọi từ tiếng Việt đúng; lỗi ở từ tiếng Anh; một chữ "ai" thừa ở câu đầu |
+| Nam, Hải Đăng | 10/33 = 30% | Mọi từ tiếng Việt đúng; lỗi ở từ tiếng Anh |
+
+`revoice.py` cũng in mức âm của cả file (bản nam: trung bình -21,7 dB, đỉnh -2,5 dB). WER chỉ là chỉ số tương đối về mức dễ hiểu; nó không nói gì về độ tự nhiên,
+ngữ điệu hay chất lượng âm thanh, nên vẫn cần nghe bằng tai.
+
+## 6. Trang xem thử phát được trong trình xem của Claude
+
+**Vấn đề.** Trình xem của trang Artifact báo "No video with supported format and MIME type found" khi video được đăng dưới dạng file đính kèm, và cả khi đăng vào kho tài nguyên
+(`assets`), dù file là MP4 H.264 + AAC bình thường (`yuv420p`, phần mô tả ở đầu file) và bản WebM dự phòng cũng lỗi như vậy. Mình không biết chính xác trình xem chặn kiểu nào.
+
+**Cách đã chạy.** Nhúng video vào chính trang dưới dạng base64 và để script dựng nguồn phát. Trang thử MP4 trước rồi WebM (VP9 + Opus), mỗi định dạng thử `blob:` rồi `data:`,
+và ghi một dòng trạng thái cho biết nguồn nào đang dùng, hoặc mã lỗi và khả năng giải mã của trình duyệt nếu tất cả đều lỗi. Cách này đã phát được trong trình xem của chủ sở hữu.
+
+```bash
+python3 -I scripts/preview/build_preview.py --config videos/demo-video/preview.json --out build/preview/index.html
+NODE_PATH=$(npm root -g) node scripts/preview/test_preview.js build/preview/index.html build/preview/test
+```
+
+- `preview.json` khai báo tiêu đề, danh sách giọng (mỗi giọng một file MP4) và nội dung hiển thị; lời đọc lấy từ `voiceover.json`. Trang có nút chuyển giọng (giữ nguyên vị trí và trạng thái phát)
+  và các dòng lời đọc bấm để nhảy tới đúng điểm. Bản WebM được mã hóa tự động bằng ffmpeg nếu chưa có.
+- Giới hạn 16 MB cho một trang. Mỗi giọng khoảng 5 MB (MP4 2,5 MB + WebM 1,2 MB, sau khi mã hóa base64); hai giọng ra 9,9 MB. Nhiều giọng hơn thì hạ độ phân giải hoặc tăng CRF.
+- `test_preview.js` mở trang trong Chromium thật dưới bốn chính sách chặn media khác nhau (không chặn, chỉ cho `data:`, chỉ cho `blob:`, chặn hết), đổi giọng giữa chừng, bấm một dòng lời đọc và kiểm tra
+  không tràn ngang ở khổ điện thoại. Chromium của Playwright không có H.264 nên phát bản WebM: bài thử chứng minh phần logic của trang, không chứng minh trình xem của bạn cho phép `blob:` hay `data:`.
+- Đăng bằng công cụ Artifact (trang riêng tư, chỉ chủ sở hữu xem được): đưa `build/preview/index.html` làm file trang, không khai báo `capabilities`.
+
+## Giới hạn
+
+- Chưa có đánh giá bằng tai người về độ tự nhiên của hai giọng.
+- Một số giọng dựng sẵn của VieNeu-TTS mang tên giống người thật (ví dụ "Phạm Tuyên"); chưa rõ nguồn dữ liệu giọng. Hai giọng đang dùng là Mai Anh và Hải Đăng.
+- "Giọng nam" ở đây hiểu là giọng của nam giới (Hải Đăng, miền Bắc). VieNeu-TTS còn có giọng nam miền Nam, ví dụ Thái Sơn, Minh Triết, Đức Trí và Adam; chưa thử.
