@@ -1,0 +1,212 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# The conductor runs model-written code on a VPS that also runs CI jobs. Each
+# entry removes one of the boundaries that keep that code away from keys, the
+# host and the auditor's view, and names the test that must notice.
+target: scripts/team/team.py
+note: Worker isolation, key isolation, host git safety and the audit pack's test-weakening view.
+mutations:
+- label: the reviewer gets a writable repository
+  find: '"-v", f"{f.repo}:/work" + (":ro" if role == "reviewer" else ""),'
+  replace: '"-v", f"{f.repo}:/work",'
+  test: tests.test_team.ContainerTests.test_reviewer_cannot_write_the_repo
+- label: workers see the real .git directory
+  find: "        \"--mount\", \"type=tmpfs,destination=/work/.git,tmpfs-size=1m\",\n"
+  replace: ''
+  test: tests.test_team.ContainerTests.test_workers_never_see_the_real_git_dir
+- label: handoff files are mounted writable
+  find: '        argv += ["-v", f"{path}:/handoff/{name}:ro"]'
+  replace: '        argv += ["-v", f"{path}:/handoff/{name}"]'
+  test: tests.test_team.ContainerTests.test_handoff_files_are_read_only
+- label: every worker key reaches every container
+  find: "    if name and keys.get(name):\n        env[name] = keys[name]\n    return env\n"
+  replace: "    env.update(keys)\n    return env\n"
+  test: tests.test_team.PipelineTests.test_each_worker_gets_only_its_providers_key
+- label: host git runs hooks a worker planted
+  find: 'GIT_SAFE = ("-c", "core.hooksPath=/dev/null", '
+  replace: 'GIT_SAFE = ('
+  test: tests.test_team.GitSafetyTests.test_host_git_ignores_planted_hooks
+- label: the gates run on the working tree instead of a clean checkout
+  find: "    shutil.rmtree(dest / \".git\")\n"
+  replace: "    shutil.rmtree(dest / \".git\")\n    shutil.copytree(repo, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(\".git\"))\n"
+  test: tests.test_team.GitSafetyTests.test_gates_see_a_clean_checkout
+- label: tests weakened after the tester stage are hidden from the auditor
+  find: "    return [path for path in changed if path in written or TEST_PATH_RE.search(path)]\n"
+  replace: "    return []\n"
+  test: tests.test_team.PipelineTests.test_a_weakened_test_is_shown_to_the_auditor
+- label: the audit pack ignores its line limit
+  find: "    if lines > limit and not force:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_an_oversized_pack_is_refused
+- label: a world-readable workers.env passes doctor
+  find: "    elif secrets.stat().st_mode & 0o077:\n"
+  replace: "    elif False:\n"
+  test: tests.test_team.DoctorTests.test_world_readable_keys_are_a_problem
+- label: unlimited audit rounds
+  find: "    if state.get(\"audit_rounds\", 0) >= 1 and not force:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_verdict_round_is_limited_to_one
+- label: a verdict is read by substring, so a BLOCK that mentions APPROVE passes
+  find: "    match = VERDICT_RE.search(text)\n    return match.group(1) if match else None\n"
+  replace: "    return \"APPROVE\" if \"APPROVE\" in text else (\"BLOCK\" if \"BLOCK\" in text else None)\n"
+  test: tests.test_team.PipelineTests.test_a_block_that_mentions_approve_is_not_an_approval
+- label: push accepts an APPROVE for a HEAD that moved after the pack
+  find: "            if state.get(\"pack_head\") != source:\n"
+  replace: "            if False:\n"
+  test: tests.test_team.PipelineTests.test_push_refuses_a_head_that_moved_after_the_audit
+- label: the auditor's feedback is dropped when a verdict round is resumed
+  find: "            text for text in (state.get(\"pending_feedback\"), state.get(\"gate_feedback\")) if text) or None\n"
+  replace: "            text for text in (state.get(\"gate_feedback\"),) if text) or None\n"
+  test: tests.test_team.PipelineTests.test_auditor_feedback_survives_a_blocked_retry
+- label: a review fix that breaks the gates is kept
+  find: "                    git(f.repo, \"reset\", \"-q\", \"--hard\", before)\n"
+  replace: ''
+  test: tests.test_team.PipelineTests.test_a_fix_that_breaks_the_gates_is_reverted
+- label: CI and agent-instruction changes are not called out
+  find: "        \"\\n\".join(p for p in touched if SENSITIVE_PATH_RE.search(p)))\n"
+  replace: "        \"\")\n"
+  test: tests.test_team.PipelineTests.test_sensitive_paths_are_called_out
+- label: the status probe creates the lock file
+  find: "    if not path.is_file():\n        return False\n    with open(path) as handle:\n"
+  replace: "    with open(path, \"a\") as handle:\n"
+  test: tests.test_team.LockTests.test_status_never_creates_the_lock_file
+- label: a missing file is mounted (docker creates a root-owned directory)
+  find: "    return {name: path for name, path in mounts.items() if path.is_file()}\n"
+  replace: "    return mounts\n"
+  test: tests.test_team.PipelineTests.test_reviewer_without_gates_log_does_not_mount_it
+- label: push resolves the branch name instead of the audited commit
+  find: "        git(f.repo, \"push\", \"origin\", f\"{source}:refs/heads/{f.branch}\")\n"
+  replace: "        git(f.repo, \"push\", \"origin\", f.branch)\n"
+  test: tests.test_team.PipelineTests.test_push_sends_the_audited_commit_not_the_branch
+- label: lockfile changes are hidden from the audit pack again
+  find: "    add(\"Diff\", \"```diff\\n\" + git(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\").rstrip() + \"\\n```\")\n"
+  replace: "    add(\"Diff\", \"```diff\\n\" + git(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\", \"--\", \".\", \":(exclude,glob)**/package-lock.json\").rstrip() + \"\\n```\")\n"
+  test: tests.test_team.PipelineTests.test_lockfile_changes_reach_the_auditor
+- label: a blocked coder's gate output is lost on resume
+  find: "        state[\"gate_feedback\"] = last_gates  # a resumed `team run` starts from it\n"
+  replace: ''
+  test: tests.test_team.PipelineTests.test_a_blocked_coder_hands_its_gate_output_to_the_resumed_run
+- label: a .gitattributes `-diff` hides a file's change from the reviewer and the auditor
+  find: '    return (f"--attr-source={empty_tree}", "diff", "--no-ext-diff", "--no-textconv")'
+  replace: '    return ("diff", "--no-ext-diff", "--no-textconv")'
+  test: tests.test_team.PipelineTests.test_gitattributes_cannot_hide_a_diff_from_the_auditor
+- label: a diff byte that is not UTF-8 crashes the conductor
+  find: "    result = subprocess.run([\"git\", *GIT_SAFE, \"-C\", str(repo), *args], capture_output=True, text=True,\n                            errors=\"replace\")\n"
+  replace: "    result = subprocess.run([\"git\", *GIT_SAFE, \"-C\", str(repo), *args], capture_output=True, text=True)\n"
+  test: tests.test_team.PipelineTests.test_a_real_binary_is_summarised_and_never_crashes_the_pipeline
+- label: real binaries are dumped as text instead of summarised
+  find: '    return (f"--attr-source={empty_tree}", "diff", "--no-ext-diff", "--no-textconv")'
+  replace: '    return (f"--attr-source={empty_tree}", "diff", "--text", "--no-ext-diff", "--no-textconv")'
+  test: tests.test_team.PipelineTests.test_a_real_binary_is_summarised_and_never_crashes_the_pipeline
+- label: a worker's caches and bytecode are committed with the feature
+  find: "    ensure_excludes(repo)\n"
+  replace: ''
+  test: tests.test_team.GitSafetyTests.test_caches_stay_out_of_commits_without_a_base
+- label: a cache committed before the excludes stays tracked and is recommitted
+  find: "    untrack_caches(repo, base)\n"
+  replace: ''
+  test: tests.test_team.PipelineTests.test_a_cache_committed_before_the_excludes_is_untracked
+- label: caches the repository tracks at base are untracked too
+  find: '    added = [path for path in tracked if path not in at_base]'
+  replace: '    added = list(tracked)'
+  test: tests.test_team.PipelineTests.test_a_cache_committed_before_the_excludes_is_untracked
+- label: caches are untracked before `git add -A`, where a worker .gitignore stages them again
+  find: "    git(repo, \"add\", \"-A\")\n    untrack_caches(repo, base)\n"
+  replace: "    untrack_caches(repo, base)\n    git(repo, \"add\", \"-A\")\n"
+  test: tests.test_team.PipelineTests.test_a_worker_gitignore_cannot_stage_caches
+- label: ignored worker artifacts (.venv, node_modules) survive into the next container
+  find: '    git(repo, "clean", "-ffdqx")'
+  replace: '    git(repo, "clean", "-fdq")'
+  test: tests.test_team.PipelineTests.test_ignored_artifacts_never_reach_the_next_worker
+- label: a successful worker's leftovers are not purged before the next one
+  find: "        git(repo, \"commit\", \"-q\", \"--no-verify\", \"-m\", message)\n    purge_untracked(repo)\n"
+  replace: "        git(repo, \"commit\", \"-q\", \"--no-verify\", \"-m\", message)\n"
+  test: tests.test_team.PipelineTests.test_ignored_artifacts_never_reach_the_next_worker
+- label: worker-chosen cache paths go on one update-index command line, past ARG_MAX
+  find: '["git", *GIT_SAFE, "-C", str(repo), "update-index", "-z", "--force-remove", "--stdin"]'
+  replace: '["git", *GIT_SAFE, "-C", str(repo), "update-index", "--force-remove", "--", *added]'
+  test: tests.test_team.GitSafetyTests.test_thousands_of_worker_paths_never_overflow_argv
+- label: worker-chosen test paths go on one git diff command line, past ARG_MAX
+  find: 'ARG_BATCH = 200'
+  replace: 'ARG_BATCH = 10 ** 9'
+  test: tests.test_team.GitSafetyTests.test_thousands_of_worker_paths_never_overflow_argv
+- label: a source file with one NUL byte is summarised as binary and never named to the auditor
+  find: '    return [record.split("\t", 2)[2] for record in records if record.startswith("-\t-\t")]'
+  replace: '    return []'
+  test: tests.test_team.PipelineTests.test_a_nul_byte_cannot_hide_source_from_the_auditor
+- label: a worker's chmod 000 wedges git add and git clean
+  find: "    restore_permissions(repo)\n    ensure_excludes(repo)\n"
+  replace: "    ensure_excludes(repo)\n"
+  test: tests.test_team.GitSafetyTests.test_worker_permissions_cannot_wedge_the_checkout
+- label: path lists are decoded lossily, so a non-UTF-8 test file drops out of the weakening view
+  find: '    return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]'
+  replace: '    return [path.decode("utf-8", "replace") for path in result.stdout.split(b"\0") if path]'
+  test: tests.test_team.PipelineTests.test_a_weakened_test_with_a_non_utf8_name_is_shown_too
+- label: the diffstat honours a worker's .gitattributes again
+  find: '    add("Diffstat", git(f.repo, *readable_diff(f.repo), "--stat", f"{base}..HEAD"))'
+  replace: '    add("Diffstat", git(f.repo, "diff", "--stat", f"{base}..HEAD"))'
+  test: tests.test_team.PipelineTests.test_gitattributes_cannot_hide_a_diff_from_the_auditor
+- label: a blocked coder blames the code when no model run worked at all
+  find: "    state[\"coder_error\"] = \"\" if last_gates else last_error\n"
+  replace: "    state[\"coder_error\"] = \"\"\n"
+  test: tests.test_team.PipelineTests.test_a_quota_error_is_named_when_no_coder_run_works
+- label: the conductor's own timeout line is filtered out of the coder error
+  find: '    rows = [row.strip() for row in text.splitlines() if row.strip()]'
+  replace: '    rows = [row.strip() for row in text.splitlines() if row.strip() and not row.startswith("[team]")]'
+  test: tests.test_team.PipelineTests.test_a_timeout_is_named_when_no_coder_run_works
+- label: the Codex team's lock is its own home's, so both teams can run pipelines at once
+  find: 'return Path(os.environ.get("TEAM_LOCK") or home / ".run.lock")'
+  replace: 'return home / ".run.lock"'
+  test: tests.test_team.CodexTeamTests.test_the_two_teams_share_one_pipeline_lock
+- label: the Codex team pushes to the Claude team's branch
+  find: 'self.branch = f"{team_lead().command}/{fid}"'
+  replace: 'self.branch = f"team/{fid}"'
+  test: tests.test_team.CodexTeamTests.test_the_lead_names_the_branch_and_the_containers
+- label: an unknown TEAM_LEAD silently becomes a lead
+  find: "    if name not in LEADS:\n        raise SystemExit(f\"TEAM_LEAD={name!r}: expected one of {', '.join(LEADS)}\")\n    return LEADS[name]"
+  replace: "    return LEADS.get(name, LEADS['claude'])"
+  test: tests.test_team.CodexTeamTests.test_an_unknown_lead_is_refused
+- label: a change under .codex/ is no longer called out to the auditor
+  find: '|\.codex|\.agents|CLAUDE\.md'
+  replace: '|\.agents|CLAUDE\.md'
+  test: tests.test_team.CodexTeamTests.test_codex_instruction_files_are_sensitive
+- label: a repo-local .agents/ skill is no longer called out to the auditor
+  find: '|\.codex|\.agents|CLAUDE\.md'
+  replace: '|\.codex|CLAUDE\.md'
+  test: tests.test_team.CodexTeamTests.test_codex_instruction_files_are_sensitive
+- label: AGENTS.override.md is no longer called out to the auditor
+  find: 'AGENTS(?:\.override)?\.md'
+  replace: 'AGENTS\.md'
+  test: tests.test_team.CodexTeamTests.test_codex_instruction_files_are_sensitive
+- label: the Codex audit prompt stops naming the Codex team's own command
+  find: 'id=f.id, dir=f.dir, team=lead.command))'
+  replace: 'id=f.id, dir=f.dir, team="team"))'
+  test: tests.test_team.CodexTeamTests.test_both_leads_get_the_same_checks_under_their_own_command
+- label: the Codex team's containers share the Claude team's name prefix again
+  find: '"codex": Lead("codex", "team-codex", "codex-team", "Codex", "codex-lead"),'
+  replace: '"codex": Lead("codex", "team-codex", "team-codex", "Codex", "codex-lead"),'
+  test: tests.test_team.CodexTeamTests.test_two_teams_never_name_the_same_container
+- label: the oversized-pack hint names the Claude team's command again
+  find: 'f"or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)'
+  replace: 'f"or `team pack {f.id} --force`", file=sys.stderr)'
+  test: tests.test_team.CodexTeamTests.test_recovery_commands_name_the_selected_team
+- label: the doctor hint to re-pick a model names the Claude team's command again
+  find: 'f"worker cannot start it; pick another ({team_lead().command} models {provider})")'
+  replace: 'f"worker cannot start it; pick another (team models {provider})")'
+  test: tests.test_team.CodexTeamTests.test_no_message_hard_codes_the_first_teams_command
+- label: the push help names the Claude team's branch prefix again
+  find: 'f"push {team_lead().command}/<id> after an APPROVE verdict")'
+  replace: '"push team/<id> after an APPROVE verdict")'
+  test: tests.test_team.CodexTeamTests.test_push_help_names_the_selected_teams_branch
+- label: new stops rendering the selected team's command into the handoff templates
+  find: "title=lead.title, team=lead.command)"
+  replace: "title=lead.title, team='team')"
+  test: tests.test_team.CodexTeamTests.test_generated_handoff_files_name_the_selected_teams_command
+- label: the conductor tells the operator to start plain codex instead of the confined launcher
+  find: '"codex": Lead("codex", "team-codex", "codex-team", "Codex", "codex-lead"),'
+  replace: '"codex": Lead("codex", "team-codex", "codex-team", "Codex", "codex"),'
+  test: tests.test_team.CodexTeamInstallTests.test_the_conductor_and_the_docs_only_start_the_lead_through_the_launcher
+- label: doctor stops reporting a missing sandbox runtime for the Codex team
+  find: 'if team_lead().name == "codex" and not shutil.which("bwrap"):'
+  replace: 'if False:'
+  test: tests.test_team.CodexTeamTests.test_doctor_reports_a_missing_sandbox_runtime_for_the_codex_team_only

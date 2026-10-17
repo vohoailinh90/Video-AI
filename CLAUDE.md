@@ -77,3 +77,20 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
 - A cloud session is ephemeral: commit sources, because renders and caches are lost when it ends.
 - `huggingface.co` was blocked by the default network policy, so anything that downloads models from it (for example
   Whisper) can fail there.
+
+## VPS agent team (`team-video`)
+
+A free-model team can make videos on a VPS with Claude Code as architect and auditor: guide in `docs/vps-team-video.md`
+(Vietnamese), conductor and worker image in `scripts/team/`. It follows this file's layout and rules; what it adds:
+
+- **Roles.** In a `/srv/team-video/work/<id>` session the prompt printed by `team-video prompt video-spec|video-audit <id>` is the
+  task: write `spec.md`, `tasks.md`, `acceptance.md`, or write `verdict.md` from `audit-pack.md` only. Builders (free models)
+  create `videos/<id>/` with `hyperframes init <id> --example blank`, vendor GSAP, make the audio and edit nothing else.
+- **The gate is a script.** `scripts/team/video/video_gates.py` judges a render's streams, length, size, loudness, true peak and
+  silence from `videos/<id>/expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
+- **Audit BLOCKs:** a loosened `expected.json`; any change under `.claude/` the spec did not ask for; a project `AGENTS.md` or
+  `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
+- **Audio.** Local Kokoro voices only (no Vietnamese, see Language above): Vietnamese narration is a supplied clip per scene.
+  No provider key ever goes to a worker container.
+- **Changing the team itself:** `python3 -m unittest discover -s tests` and, from a clean tree, `python3 scripts/mutation_check.py --all`
+  (needs PyYAML). Docs: `docs/vps-team.md` (security model), `docs/vps-team-video.md` (this team).

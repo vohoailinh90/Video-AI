@@ -1,0 +1,56 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# The video team renders with Chrome inside the same hardened containers as the code team. Each entry
+# removes one of the pieces that make that work (shared memory, uncommitted renders, offline smoke test)
+# or that keep it apart from the other teams (prompts, container names).
+target: scripts/team/team.py
+note: The video lead's settings, prompts, smoke test and the files it must never commit.
+mutations:
+- label: Chrome gets Docker's 64 MB /dev/shm
+  find: '        *(["--shm-size", cfg["TEAM_WORKER_SHM"]] if cfg["TEAM_WORKER_SHM"] else []),'
+  replace: ''
+  test: tests.test_team.VideoTeamTests.test_chrome_gets_shared_memory_and_the_frame_cache_gets_room
+- label: renders and the check cache are committed
+  find: 'VIDEO_EXCLUDES = ("renders/", "snapshots/", ".hyperframes/")'
+  replace: 'VIDEO_EXCLUDES = ()'
+  test: tests.test_team.VideoTeamTests.test_renders_snapshots_and_the_check_cache_are_never_committed
+- label: the video excludes leak into the code teams
+  find: '    return LOCAL_EXCLUDES + (VIDEO_EXCLUDES if team_lead().name == "video" else ())'
+  replace: '    return LOCAL_EXCLUDES + VIDEO_EXCLUDES'
+  test: tests.test_team.VideoTeamTests.test_the_code_teams_keep_a_renders_package_and_a_hyperframes_directory
+- label: the video team stops committing the project instructions hyperframes init writes
+  find: 'VIDEO_EXCLUDES = ("renders/", "snapshots/", ".hyperframes/")'
+  replace: 'VIDEO_EXCLUDES = ("renders/", "snapshots/", ".hyperframes/", "AGENTS.md", "CLAUDE.md")'
+  test: tests.test_team.VideoTeamTests.test_the_video_team_commits_everything_hyperframes_init_writes
+- label: the video lead falls back to the code team's prompts
+  find: '    own = directory / team_lead().name / name'
+  replace: '    own = directory / "nobody" / name'
+  test: tests.test_team.VideoTeamTests.test_the_video_team_has_its_own_prompts_and_the_others_keep_theirs
+- label: the video lead's container prefix extends the code team's
+  find: '"video": Lead("video", "team-video", "video-team", "Claude Code", "claude")}'
+  replace: '"video": Lead("video", "team-video", "team-video", "Claude Code", "claude")}'
+  test: tests.test_team.CodexTeamTests.test_two_teams_never_name_the_same_container
+- label: the smoke test gets the workers' network
+  find: 'rc, output = run_docker(gate_argv(cfg, work, command, "none", name), name,'
+  replace: 'rc, output = run_docker(gate_argv(cfg, work, command, cfg["TEAM_WORKER_NETWORK"], name), name,'
+  test: tests.test_team.VideoTeamTests.test_smoke_runs_both_checks_in_the_hardened_offline_image
+- label: a failed smoke render is only a note
+  find: 'for label, command, found in (("render", SMOKE_RENDER, problems), ("narration", SMOKE_NARRATION, notes)):'
+  replace: 'for label, command, found in (("render", SMOKE_RENDER, notes), ("narration", SMOKE_NARRATION, notes)):'
+  test: tests.test_team.VideoTeamTests.test_a_failed_smoke_render_is_a_problem_but_a_failed_voice_is_a_note
+- label: doctor accepts the code team's image for the video team
+  find: '        if cfg["TEAM_IMAGE"] == VIDEO_IMAGE_DEFAULT:'
+  replace: '        if False:'
+  test: tests.test_team.VideoTeamTests.test_doctor_rejects_the_code_teams_image_and_a_missing_shm_size
+- label: doctor accepts an empty shm size
+  find: '        if not cfg["TEAM_WORKER_SHM"]:'
+  replace: '        if False:'
+  test: tests.test_team.VideoTeamTests.test_doctor_rejects_the_code_teams_image_and_a_missing_shm_size
+- label: the smoke test runs on top of known config problems
+  find: '        elif not problems:'
+  replace: '        elif True:'
+  test: tests.test_team.VideoTeamTests.test_smoke_waits_until_the_config_problems_are_fixed
+- label: --smoke is accepted outside the video team
+  find: '        if team_lead().name != "video":'
+  replace: '        if False:'
+  test: tests.test_team.VideoTeamTests.test_smoke_is_refused_outside_the_video_team

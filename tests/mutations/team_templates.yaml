@@ -1,0 +1,16 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# The handoff templates are written into each feature's directory and read by
+# the lead and by the free workers. A template that names the Claude team's
+# command sends the Codex team's operator to the other team's home.
+target: scripts/team/templates/spec.md
+note: The spec template must name the selected team's command, not a fixed one.
+mutations:
+- label: the spec template names the first team's command again
+  find: "`{{team}} check-spec` rejects more."
+  replace: "`team check-spec` rejects more."
+  test: tests.test_team.CodexTeamTests.test_generated_handoff_files_name_the_selected_teams_command
+- label: the spec template names the first team's command again (static scan)
+  find: "`{{team}} check-spec` rejects more."
+  replace: "`team check-spec` rejects more."
+  test: tests.test_team.CodexTeamTests.test_no_shipped_text_hard_codes_the_first_teams_command

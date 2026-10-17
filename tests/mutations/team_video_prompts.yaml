@@ -1,0 +1,19 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# The builders are free models that only know what the prompt says. Video-AI's conventions (a project made by
+# `hyperframes init`, offline tooling) reach them through this prompt and nowhere else.
+target: scripts/team/prompts/video/coder.md
+note: The coder creates the project with init, keeps its instruction files and never reaches for npm scripts.
+mutations:
+- label: the coder is no longer told to create the project with init
+  find: "hyperframes init {{id}} --example blank --non-interactive"
+  replace: "mkdir {{id}}"
+  test: tests.test_team.VideoTeamTests.test_the_prompts_follow_the_video_ai_conventions
+- label: the coder may run npm scripts, which download with npx --yes
+  find: "never `npx` and never `npm run`"
+  replace: "never `npx`"
+  test: tests.test_team.VideoTeamTests.test_the_prompts_follow_the_video_ai_conventions
+- label: the coder may edit the instruction files init wrote
+  find: "keep them exactly as written, never edit them"
+  replace: "edit them as you like"
+  test: tests.test_team.VideoTeamTests.test_the_prompts_follow_the_video_ai_conventions

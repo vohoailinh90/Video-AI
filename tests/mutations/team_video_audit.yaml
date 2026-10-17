@@ -1,0 +1,11 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# A project's AGENTS.md and CLAUDE.md are read by the next agent. The audit lets them through only as
+# the unmodified `hyperframes init` text; this is the one place that says so.
+target: scripts/team/prompts/video/audit.md
+note: The auditor blocks any added instruction in the init files.
+mutations:
+- label: the auditor accepts any content in the init files
+  find: "only as the unmodified init text"
+  replace: "with any content"
+  test: tests.test_team.VideoTeamTests.test_the_prompts_follow_the_video_ai_conventions

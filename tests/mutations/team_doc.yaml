@@ -1,0 +1,15 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# The Codex team's doc tells the operator how to start the lead. Starting plain
+# codex instead of the launcher drops every confinement the audit relies on.
+target: docs/vps-team-codex.md
+note: The doc must send the operator through codex-lead, never plain codex.
+mutations:
+- label: the spec step starts plain codex
+  find: "cd /srv/team-codex/work/F12 && codex-lead\n#   dán nội dung của:  team-codex prompt codex-spec F12"
+  replace: "cd /srv/team-codex/work/F12 && codex\n#   dán nội dung của:  team-codex prompt codex-spec F12"
+  test: tests.test_team.CodexTeamInstallTests.test_the_conductor_and_the_docs_only_start_the_lead_through_the_launcher
+- label: the table names plain codex as the lead
+  find: "`codex-lead` (Codex trong sandbox đã siết)"
+  replace: "`codex`"
+  test: tests.test_team.CodexTeamInstallTests.test_the_conductor_and_the_docs_only_start_the_lead_through_the_launcher

@@ -1,0 +1,32 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# setup-vps-team.sh needs root, so CI checks its structure: the subnet check
+# that keeps workers inside the egress rules must stay wired in, ahead of the
+# first command that changes the box.
+target: scripts/team/setup-vps-team.sh
+note: The worker-network check in check-worker-net.sh only protects anyone if setup calls it before acting.
+mutations:
+- label: setup no longer calls the worker-network subnet check
+  find: "if command -v docker >/dev/null; then \"${SRC}/check-worker-net.sh\" \"${WORKER_SUBNET}\"; fi\n"
+  replace: ''
+  test: tests.test_team.LayoutTests.test_setup_checks_the_worker_net_before_any_side_effect
+- label: the subnet check runs only after packages are installed
+  find: "if command -v docker >/dev/null; then \"${SRC}/check-worker-net.sh\" \"${WORKER_SUBNET}\"; fi\n\necho \"== packages\"\n"
+  replace: "echo \"== packages\"\napt-get --version >/dev/null\nif command -v docker >/dev/null; then \"${SRC}/check-worker-net.sh\" \"${WORKER_SUBNET}\"; fi\n"
+  test: tests.test_team.LayoutTests.test_setup_checks_the_worker_net_before_any_side_effect
+- label: the Codex team's sudoers rule skips the visudo check
+  find: "    visudo -cf \"${codex_rule}\" >/dev/null\n"
+  replace: ''
+  test: tests.test_team.CodexTeamInstallTests.test_hermes_gets_a_separate_visudo_checked_rule_for_the_codex_team
+- label: the Codex wrapper is installed without --with-codex
+  find: "if [ \"${WITH_CODEX}\" -eq 1 ]; then\n  # The same file under another name"
+  replace: "if true; then\n  # The same file under another name"
+  test: tests.test_team.CodexTeamInstallTests.test_setup_installs_the_codex_team_only_when_asked
+- label: setup tells the operator to log in under the default Codex home again
+  find: '  4. CODEX_HOME="\$HOME/.codex-lead" codex login      # as'
+  replace: '  4. codex login                                       # as'
+  test: tests.test_team.CodexTeamInstallTests.test_every_codex_login_instruction_uses_the_lead_profile
+- label: setup no longer installs bubblewrap for the Codex team
+  find: 'command -v bwrap >/dev/null || need+=(bubblewrap)'
+  replace: 'command -v bwrap >/dev/null || true'
+  test: tests.test_team.CodexTeamInstallTests.test_setup_installs_bubblewrap_only_for_the_codex_team

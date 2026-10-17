@@ -1,0 +1,60 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# video_gates.py is the only judge of a rendered video's sound. A gate that
+# passes a silent render, a clipped mix or a dead tail ships a video nobody can
+# hear, and the model audit never listens. Each entry removes one check.
+target: scripts/team/video/video_gates.py
+note: A render with no audio, silence, clipping, a dead tail or the wrong length must be rejected.
+mutations:
+- label: a render with no audio stream passes
+  find: 'check(audio, "audio stream", "present" if audio else "missing: the render is silent")'
+  replace: 'check(True, "audio stream", "present" if audio else "missing: the render is silent")'
+  test: tests.test_video_gates.EvaluateTests.test_a_render_without_an_audio_stream_fails
+- label: an unmeasured loudness passes
+  find: 'check(lufs is not None and low <= lufs <= high, "loudness",'
+  replace: 'check(lufs is None or low <= lufs <= high, "loudness",'
+  test: tests.test_video_gates.EvaluateTests.test_an_unmeasured_loudness_fails_instead_of_passing_silently
+- label: a silent track passes the loudness window
+  find: 'check(lufs is not None and low <= lufs <= high, "loudness",'
+  replace: 'check(True, "loudness",'
+  test: tests.test_video_gates.EvaluateTests.test_a_silent_track_fails_on_loudness
+- label: a clipped mix passes
+  find: 'check(peak is not None and peak <= ceiling, "true peak",'
+  replace: 'check(True, "true peak",'
+  test: tests.test_video_gates.EvaluateTests.test_clipping_fails_on_true_peak
+- label: a long silence passes
+  find: 'check(longest <= limit, "silence gap",'
+  replace: 'check(True, "silence gap",'
+  test: tests.test_video_gates.EvaluateTests.test_a_long_silence_fails
+- label: a dead tail is not counted as silence
+  find: "    if start is not None:\n        gaps.append(audio_length - start)\n"
+  replace: "    if False:\n        gaps.append(audio_length - start)\n"
+  test: tests.test_video_gates.ParserTests.test_a_silence_that_never_ends_runs_to_the_end_of_the_audio
+- label: a short audio track passes
+  find: 'check(coverage >= opts.get("min_coverage", 0.9), "audio coverage",'
+  replace: 'check(True, "audio coverage",'
+  test: tests.test_video_gates.EvaluateTests.test_a_short_audio_track_fails_on_coverage
+- label: the wrong length passes
+  find: 'check(abs(length - expected["duration_s"]) <= tolerance, "duration",'
+  replace: 'check(True, "duration",'
+  test: tests.test_video_gates.EvaluateTests.test_a_wrong_length_fails_on_duration
+- label: a mistyped key silently disables a check
+  find: "    if unknown:\n        raise SystemExit"
+  replace: "    if False:\n        raise SystemExit"
+  test: tests.test_video_gates.ExpectedFileTests.test_a_typo_in_a_key_is_an_error_not_a_disabled_check
+- label: the audio check ignores an optional-audio declaration
+  find: 'if not opts.get("required", True):'
+  replace: 'if False:'
+  test: tests.test_video_gates.EvaluateTests.test_audio_can_be_declared_optional
+- label: a string passes as a number in expected.json
+  find: "    if wrong:\n        raise SystemExit("
+  replace: "    if False:\n        raise SystemExit("
+  test: tests.test_video_gates.ExpectedFileTests.test_a_string_where_a_number_belongs_is_a_clean_error
+- label: a boolean passes as a number
+  find: "    return isinstance(value, (int, float)) and not isinstance(value, bool)"
+  replace: "    return isinstance(value, (int, float))"
+  test: tests.test_video_gates.ExpectedFileTests.test_a_string_where_a_number_belongs_is_a_clean_error
+- label: an unreadable frame rate crashes the gate
+  find: "    except (ValueError, ZeroDivisionError):\n        return 0.0\n"
+  replace: "    except KeyError:\n        return 0.0\n"
+  test: tests.test_video_gates.FrameRateTests.test_fractions_whole_numbers_and_unknowns
