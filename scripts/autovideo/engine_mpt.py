@@ -128,7 +128,10 @@ def has_music(env: MptEnv) -> bool:
     without music, and the video still passes QA on its narration."""
     for folder in MUSIC_FOLDERS:
         directory = env.home / folder
-        names = sorted(os.listdir(directory)) if directory.is_dir() else []
+        try:
+            names = sorted(os.listdir(directory)) if directory.is_dir() else []
+        except OSError:  # a folder that cannot be listed offers no song MPT could pick either
+            names = []
         for name in names:
             if name.lower().startswith(".bgm-upload-") or Path(name).suffix.lower() not in MUSIC_EXTENSIONS:
                 continue
@@ -167,7 +170,7 @@ def _secrets(value, key: str = "") -> list[str]:
         return [s for k, v in value.items() for s in _secrets(v, k)]
     if isinstance(value, list):
         return [s for v in value for s in _secrets(v, key)]
-    if isinstance(value, str) and len(value) >= 8 and SECRET_KEY.search(key):
+    if isinstance(value, str) and value.strip() and SECRET_KEY.search(key):  # any length: the doc promises every key value is hidden
         return [value]
     return []
 
@@ -270,14 +273,22 @@ def _log(env: MptEnv, workdir: Path, stderr: str) -> str:
     return "\n".join(text.strip().splitlines()[-12:])
 
 
+def usable_keys(value) -> bool:
+    """Whether a `*_api_keys` entry of config.toml gives MPT a key to send. MPT hands the entries out as they are (app/services/material.py
+    get_api_key: a string whole, a list entry by rotation), so it needs at least one entry and every entry a non-blank string: a blank one
+    would be sent as the key, and in a mixed list some requests would fail."""
+    entries = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    return bool(entries) and all(isinstance(entry, str) and entry.strip() for entry in entries)
+
+
 def doctor_info(env: MptEnv) -> dict:
     """What the MPT config says, as yes/no and provider names. A key's value is never part of the answer."""
     app = config_of(env).get("app", {})
     return {
         "config.toml": (env.home / "config.toml").is_file(),
-        "pexels_api_keys": bool(app.get("pexels_api_keys")),
-        "pixabay_api_keys": bool(app.get("pixabay_api_keys")),
-        "coverr_api_keys": bool(app.get("coverr_api_keys")),
+        "pexels_api_keys": usable_keys(app.get("pexels_api_keys")),
+        "pixabay_api_keys": usable_keys(app.get("pixabay_api_keys")),
+        "coverr_api_keys": usable_keys(app.get("coverr_api_keys")),
         "subtitle_provider": str(app.get("subtitle_provider", "edge")).strip().lower(),  # MPT reads it with .strip().lower()
         "llm_provider": app.get("llm_provider", ""),
     }

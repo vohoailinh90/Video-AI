@@ -323,6 +323,36 @@ class PackTests(unittest.TestCase):
         (env.home / "storage" / "bgm" / "mine.OPUS").write_bytes(b"x")  # an uploaded song counts
         self.assertIsNone(runner.preflight(env, job()))
 
+    def test_a_key_list_is_usable_only_when_every_entry_is_a_real_key(self):
+        # MPT hands out the entries as they are (material.py get_api_key: a string as is, a list entry by rotation), so a blank entry is
+        # sent as the key, and in a mixed list it fails now and then
+        job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]
+        env = fake_mpt(self.root)
+        config = env.home / "config.toml"
+        for value, usable in (('["real-key-123"]', True), ('"real-key-123"', True), ('["a-key", "another-key"]', True), ("[]", False), ('""', False),
+                              ('[""]', False), ('["   "]', False), ('["real-key-123", ""]', False), ('["real-key-123", "  "]', False), ("[1]", False)):
+            config.write_text(f"[app]\npexels_api_keys = {value}\n", encoding="utf-8")
+            problem = runner.preflight(env, job)
+            self.assertEqual(problem is None, usable, value)
+            self.assertEqual(engine_mpt.doctor_info(env)["pexels_api_keys"], usable, value)
+            if not usable:
+                self.assertIn("pexels_api_keys", problem)
+
+    def test_music_folder_that_cannot_be_listed_is_a_problem_not_a_traceback(self):
+        env = fake_mpt(self.root)
+        job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]  # random music at volume 0.2
+        self.assertIsNone(runner.preflight(env, job))
+        # (these tests run as root, which can read anything, so the failure is simulated)
+        with mock.patch.object(engine_mpt.os, "listdir", side_effect=PermissionError(13, "Permission denied")):
+            self.assertIn("music", runner.preflight(env, job))
+
+    def test_every_secret_value_of_mpts_config_is_hidden_whatever_its_length(self):
+        env = fake_mpt(self.root)
+        (env.home / "config.toml").write_text(
+            '[app]\npexels_api_keys = ["k1", "a-longer-key-value"]\n[ui]\nadmin_password = "pw"\nsome_token = "   "\nsubtitle_provider = "edge"\n', encoding="utf-8")
+        text = engine_mpt.redact("keys k1 and a-longer-key-value, password pw, provider edge, blank '   '", env)
+        self.assertEqual(text, "keys *** and ***, password ***, provider edge, blank '   '")  # a blank value hides nothing, and other fields stay readable
+
     def test_a_file_that_cannot_be_read_is_a_problem_not_a_traceback(self):
         env = fake_mpt(self.root)
         job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]

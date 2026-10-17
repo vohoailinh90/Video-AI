@@ -93,14 +93,14 @@ def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
     info = engine_mpt.doctor_info(env)
     key = f"{job.material_source}_api_keys"
     if job.material_source != "local" and not info.get(key):
-        return f"{key} is empty in {env.home}/config.toml (get a free key from the {job.material_source} website)"
+        return f"{key} in {env.home}/config.toml has no usable key: it is empty, or has an empty entry (MPT rotates through every entry); get a free key from the {job.material_source} website"
     # Only what MPT itself will read: it checks the font when subtitles are on, and a custom music file when its volume is above zero.
     if job.subtitles and engine_mpt.managed_file(env, job.font, ("resource/fonts",)) is None:
         return _missing_input(env, f"font {job.font}", job.font, ("resource/fonts",), f"is not in {env.home}/resource/fonts")
     if job.bgm not in ("none", "random") and job.bgm_volume > 0 and engine_mpt.managed_file(env, job.bgm, engine_mpt.MUSIC_FOLDERS) is None:
         return _missing_input(env, f"music file {job.bgm}", job.bgm, engine_mpt.MUSIC_FOLDERS, f"is in neither storage/bgm nor resource/songs of {env.home}")
     if job.bgm == "random" and job.bgm_volume > 0 and not engine_mpt.has_music(env):
-        return f'bgm is "random" but MPT has no music file in storage/bgm or resource/songs of {env.home}, so it would render without music; add songs there, or set bgm to "none"'
+        return f'bgm is "random" but MPT has no music file it can read in storage/bgm or resource/songs of {env.home}, so it would render without music; add songs there, or set bgm to "none"'
     for what, digest in engine_mpt.input_digests(env, job).items():
         if digest == engine_mpt.FILE_UNREADABLE:  # there, per the checks above, but not readable: MPT would stumble on it as well
             return f"the {'music' if what == 'bgm' else 'font'} file {job.bgm if what == 'bgm' else job.font} cannot be read (permissions?)"
