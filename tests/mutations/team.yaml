@@ -242,3 +242,15 @@ mutations:
   find: "    touched = [p for p in git(f.repo, \"diff\", \"-z\", \"--name-only\", \"--no-renames\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
   replace: "    touched = [p for p in git(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
   test: tests.test_team.PipelineTests.test_a_renamed_sensitive_file_is_still_listed
+- label: doctor stops reporting an inactive egress unit
+  find: "    if subprocess.run([\"systemctl\", \"is-active\", \"--quiet\", \"team-egress.service\"]).returncode:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.DoctorTests.test_an_inactive_egress_unit_is_a_problem_on_a_systemd_host
+- label: doctor asks about the egress unit on hosts without systemd
+  find: "    if not SYSTEMD_RUNTIME.is_dir() or not shutil.which(\"systemctl\"):\n"
+  replace: "    if False:\n"
+  test: tests.test_team.DoctorTests.test_the_egress_check_is_skipped_where_there_is_no_systemd
+- label: doctor ignores the egress check
+  find: "    if egress:\n        problems.append(egress)\n"
+  replace: ""
+  test: tests.test_team.DoctorTests.test_doctor_reports_the_egress_problem

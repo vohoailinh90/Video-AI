@@ -119,6 +119,18 @@ class EvaluateTests(unittest.TestCase):
     def test_a_long_silence_fails(self):
         self.assertEqual(failed(self.run_checks(gaps=[1.0, 4.5])), ["silence gap"])
 
+    def test_a_silent_tail_after_the_audio_stream_ends_counts_as_silence(self):
+        # Codex's seventh review: silencedetect only sees the audio stream, so the stretch between its end and the end of the
+        # video was never counted. 45 s of sound in a 50 s video passes the 90% coverage check but ends in 5 s of nothing.
+        checks = self.run_checks(info(duration=50.0, audio_duration=45.0), expected={**EXPECT, "duration_s": 50})
+        self.assertEqual(failed(checks), ["silence gap"])
+        detail = next(text for ok, name, text in checks if name == "silence gap")
+        self.assertIn("5.0s", detail)
+
+    def test_a_short_tail_within_the_limit_is_fine(self):
+        checks = self.run_checks(info(duration=50.0, audio_duration=47.0), expected={**EXPECT, "duration_s": 50})
+        self.assertEqual(failed(checks), [])
+
     def test_a_short_audio_track_fails_on_coverage(self):
         self.assertEqual(failed(self.run_checks(info(audio_duration=3.0))), ["audio coverage"])
 

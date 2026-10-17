@@ -58,3 +58,7 @@ mutations:
   find: "    except (ValueError, ZeroDivisionError):\n        return 0.0\n"
   replace: "    except KeyError:\n        return 0.0\n"
   test: tests.test_video_gates.FrameRateTests.test_fractions_whole_numbers_and_unknowns
+- label: the silent tail after the audio stream is not counted
+  find: "    longest = max(max(gaps, default=0.0), tail)\n"
+  replace: "    longest = max(gaps, default=0.0)\n"
+  test: tests.test_video_gates.EvaluateTests.test_a_silent_tail_after_the_audio_stream_ends_counts_as_silence

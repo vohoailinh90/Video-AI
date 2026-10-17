@@ -78,12 +78,15 @@ need=()
 command -v docker >/dev/null || need+=(docker.io)
 command -v git >/dev/null || need+=(git)
 command -v python3 >/dev/null || need+=(python3)
+# Worker egress is limited with iptables (below); without it every worker would reach this host and the cloud metadata service.
+command -v iptables >/dev/null || need+=(iptables)
 # Codex's Linux sandbox is bubblewrap: without it codex-lead's commands cannot run.
 if [ "${WITH_CODEX}" -eq 1 ]; then command -v bwrap >/dev/null || need+=(bubblewrap); fi
 if [ "${#need[@]}" -gt 0 ]; then
   apt-get update -q
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${need[@]}"
 fi
+command -v iptables >/dev/null || { echo "iptables is required to limit worker egress and could not be installed" >&2; exit 1; }
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || { echo "python3 >= 3.9 is required" >&2; exit 1; }
 getent group docker >/dev/null || { echo "no docker group: install Docker from its apt package" >&2; exit 1; }
 
@@ -189,13 +192,10 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
-if command -v iptables >/dev/null; then
-  systemctl daemon-reload
-  systemctl enable --now team-egress.service >/dev/null
-  systemctl restart team-egress.service
-else
-  echo "WARNING: iptables not found: team-net is NOT egress-limited" >&2
-fi
+# iptables was required above, so there is no "continue without limits" path: a failure here stops setup (set -e).
+systemctl daemon-reload
+systemctl enable --now team-egress.service >/dev/null
+systemctl restart team-egress.service
 
 if [ "${BUILD}" -eq 1 ]; then
   echo "== image team-worker:latest (a few minutes the first time)"

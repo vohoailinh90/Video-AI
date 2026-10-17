@@ -124,6 +124,10 @@ class Sandbox(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        # doctor asks systemd about the team-egress unit; a CI host has systemd but not that unit.
+        no_systemd = mock.patch.object(team, "SYSTEMD_RUNTIME", self.tmp / "no-systemd")
+        no_systemd.start()
+        self.addCleanup(no_systemd.stop)
         self.home = self.tmp / "home"
         self.home.mkdir()
         self.write_env(MODELS)
@@ -419,6 +423,36 @@ class PathTests(Sandbox):
 class DoctorTests(Sandbox):
     def problems(self, ping: bool = False) -> tuple[list[str], list[str]]:
         return team.doctor(self.home, team.load_config(self.home), ping)
+
+    def egress_with(self, unit_state: int | None, systemd: bool = True):
+        """team.egress_problem() on a host whose team-egress unit exits `unit_state` (None: no systemctl at all)."""
+        runtime = self.tmp / "systemd-runtime"
+        runtime.mkdir(exist_ok=True)
+        real_which = shutil.which
+        which = lambda n, *a, **k: ("/bin/systemctl" if unit_state is not None else None) if n == "systemctl" else real_which(n, *a, **k)  # noqa: E731
+        calls = []
+
+        def fake_run(argv, *a, **k):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=unit_state if argv[0] == "systemctl" else 0, stdout="", stderr="")
+        with mock.patch.object(team, "SYSTEMD_RUNTIME", runtime if systemd else self.tmp / "no-systemd"), \
+                mock.patch.object(team.shutil, "which", which), mock.patch.object(team.subprocess, "run", fake_run):
+            return team.egress_problem(), calls
+
+    def test_an_inactive_egress_unit_is_a_problem_on_a_systemd_host(self):
+        # Codex's seventh review: without the iptables rules every worker reaches the host, private ranges and cloud metadata.
+        problem, calls = self.egress_with(3)
+        self.assertIn("team-egress.service is not active", problem)
+        self.assertIn(["systemctl", "is-active", "--quiet", "team-egress.service"], calls)
+        self.assertIsNone(self.egress_with(0)[0])
+
+    def test_the_egress_check_is_skipped_where_there_is_no_systemd(self):
+        self.assertIsNone(self.egress_with(3, systemd=False)[0])
+        self.assertIsNone(self.egress_with(None)[0])
+
+    def test_doctor_reports_the_egress_problem(self):
+        with mock.patch.object(team, "egress_problem", lambda: "team-egress.service is not active: test"):
+            self.assertIn("team-egress.service is not active: test", self.problems()[0])
 
     def test_world_readable_keys_are_a_problem(self):
         (self.home / "workers.env").chmod(0o644)
@@ -1396,6 +1430,15 @@ class CodexTeamInstallTests(unittest.TestCase):
             self.assertIn("hermes may only", result.stderr)
         forced = self.wrapper("team-video", "run", "V1", "--force", sudo_user="hermes")
         self.assertIn("--force is for the admin", forced.stderr)
+
+    def test_setup_cannot_finish_without_iptables(self):
+        # Codex's seventh review: a missing iptables used to print a warning and let setup succeed with workers unrestricted.
+        script = "\n".join(self.setup_lines())
+        self.assertNotIn("is NOT egress-limited", script)
+        self.assertIn("command -v iptables >/dev/null || need+=(iptables)", script)
+        self.assertRegex(script, r'command -v iptables >/dev/null \|\| \{ echo "[^"]*iptables[^"]*" >&2; exit 1; \}')
+        early = script.index("command -v iptables >/dev/null || {")
+        self.assertLess(early, script.index("useradd --system"), "checked before the first side effect")
 
     def test_setup_installs_the_video_team_only_when_asked(self):
         script = "\n".join(self.setup_lines())

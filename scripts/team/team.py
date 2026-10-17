@@ -235,6 +235,20 @@ def shipped(directory: Path, name: str) -> Path:
     return own if own.is_file() else directory / name
 
 
+SYSTEMD_RUNTIME = Path("/run/systemd/system")
+
+
+def egress_problem() -> str | None:
+    """Workers may reach the internet and nothing else because the team-egress unit installed the iptables rules
+    (setup-vps-team.sh). If the unit is not active the rules are gone, and so is that guarantee."""
+    if not SYSTEMD_RUNTIME.is_dir() or not shutil.which("systemctl"):
+        return None  # no systemd to ask: a container, CI or a test
+    if subprocess.run(["systemctl", "is-active", "--quiet", "team-egress.service"]).returncode:
+        return ("team-egress.service is not active: worker containers are not limited to the internet "
+                "(rerun setup-vps-team.sh; it needs iptables)")
+    return None
+
+
 def lock_path(home: Path) -> Path:
     """One lock for the whole VPS: the second team's wrapper points TEAM_LOCK at the
     first team's, so two pipelines never run at once on a machine CI shares."""
@@ -1187,6 +1201,9 @@ def doctor(home: Path, cfg, ping: bool, run_smoke: bool = False) -> tuple[list[s
     if shutil.which("docker") and subprocess.run(["docker", "network", "inspect", cfg["TEAM_WORKER_NETWORK"]],
                                                  capture_output=True).returncode:
         problems.append(f"docker network {cfg['TEAM_WORKER_NETWORK']} missing: rerun setup-vps-team.sh")
+    egress = egress_problem()
+    if egress:
+        problems.append(egress)
     if team_lead().name == "codex" and not shutil.which("bwrap"):
         problems.append("bubblewrap (bwrap) is not installed: Codex's Linux sandbox cannot start, so codex-lead and its "
                         f"commands (even `{team_lead().command} check-spec`) would fail; sudo apt-get install bubblewrap "

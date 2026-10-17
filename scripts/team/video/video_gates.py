@@ -163,7 +163,9 @@ def evaluate(info: dict, loudness: tuple[float | None, float | None] | None, gap
     ceiling = opts.get("max_peak_db", -0.1)
     check(peak is not None and peak <= ceiling, "true peak",
           f"{'unmeasured' if peak is None else f'{peak:.1f} dBFS'}, ceiling {ceiling} dBFS")
-    longest = max(gaps, default=0.0)
+    # silencedetect only sees the audio stream: whatever follows its end, up to the end of the video, is silence too.
+    tail = max(0.0, length - audio_length)
+    longest = max(max(gaps, default=0.0), tail)
     limit = opts.get("max_silence_gap_s", 4.0)
     check(longest <= limit, "silence gap", f"longest silence {longest:.1f}s, limit {limit}s")
     return checks

@@ -30,3 +30,11 @@ mutations:
   find: 'command -v bwrap >/dev/null || need+=(bubblewrap)'
   replace: 'command -v bwrap >/dev/null || true'
   test: tests.test_team.CodexTeamInstallTests.test_setup_installs_bubblewrap_only_for_the_codex_team
+- label: setup no longer asks apt for iptables
+  find: "command -v iptables >/dev/null || need+=(iptables)\n"
+  replace: ""
+  test: tests.test_team.CodexTeamInstallTests.test_setup_cannot_finish_without_iptables
+- label: setup carries on when iptables is missing
+  find: "command -v iptables >/dev/null || { echo \"iptables is required to limit worker egress and could not be installed\" >&2; exit 1; }\n"
+  replace: ""
+  test: tests.test_team.CodexTeamInstallTests.test_setup_cannot_finish_without_iptables
