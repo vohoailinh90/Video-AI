@@ -627,6 +627,18 @@ def hardening(cfg: dict[str, str]) -> list[str]:
     ]
 
 
+def operator_inputs(f: Feature) -> Path | None:
+    """The files the operator supplied (the video team's videos/<id>.inputs/), when the checkout has them. They are
+    originals the audit pack cannot show as altered, so builders get them read-only. Never through a symlink: docker
+    resolves a bind source on the host."""
+    if team_lead().name != "video":
+        return None
+    path = f.repo / "videos" / f"{f.id}.inputs"
+    if path.is_symlink() or not path.is_dir() or not os.path.realpath(path).startswith(os.path.realpath(f.repo) + os.sep):
+        return None
+    return path
+
+
 def worker_argv(cfg: dict[str, str], f: Feature, role: str, model: str,
                 mounts: dict[str, Path], prompt: str) -> list[str]:
     argv = [
@@ -638,6 +650,9 @@ def worker_argv(cfg: dict[str, str], f: Feature, role: str, model: str,
         "--mount", "type=tmpfs,destination=/work/.git,tmpfs-size=1m",
         "-w", "/work",
     ]
+    inputs = operator_inputs(f)
+    if inputs and role != "reviewer":  # the reviewer's checkout is read-only as a whole
+        argv += ["-v", f"{inputs}:/work/videos/{f.id}.inputs:ro"]
     for name, path in sorted(mounts.items()):
         argv += ["-v", f"{path}:/handoff/{name}:ro"]
     env_name = key_env(cfg, provider_of(model))

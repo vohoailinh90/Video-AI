@@ -498,3 +498,27 @@ mutations:
   find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
   replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            lines += [f\"## SETUP"
   test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too
+- label: "a builder can overwrite the operator's supplied files"
+  find: "    if inputs and role != \"reviewer\":  # the reviewer's checkout is read-only as a whole\n"
+  replace: "    if False:\n"
+  test: tests.test_team.VideoTeamTests.test_the_operators_supplied_files_are_mounted_read_only_over_the_checkout
+- label: "the reviewer gets a second, redundant mount"
+  find: "    if inputs and role != \"reviewer\":"
+  replace: "    if inputs:"
+  test: tests.test_team.VideoTeamTests.test_the_operators_supplied_files_are_mounted_read_only_over_the_checkout
+- label: "supplied inputs are mounted writable"
+  find: "argv += [\"-v\", f\"{inputs}:/work/videos/{f.id}.inputs:ro\"]"
+  replace: "argv += [\"-v\", f\"{inputs}:/work/videos/{f.id}.inputs\"]"
+  test: tests.test_team.VideoTeamTests.test_the_operators_supplied_files_are_mounted_read_only_over_the_checkout
+- label: "a missing inputs directory is mounted anyway"
+  find: "or not path.is_dir() or"
+  replace: "or"
+  test: tests.test_team.VideoTeamTests.test_the_operators_supplied_files_are_mounted_read_only_over_the_checkout
+- label: "a link out of the checkout is mounted"
+  find: "    if path.is_symlink() or not path.is_dir() or not os.path.realpath(path).startswith(os.path.realpath(f.repo) + os.sep):\n        return None\n"
+  replace: "    if not path.is_dir():\n        return None\n"
+  test: tests.test_team.VideoTeamTests.test_the_operators_supplied_files_are_mounted_read_only_over_the_checkout
+- label: "every team protects video inputs"
+  find: "    if team_lead().name != \"video\":\n        return None\n    path = f.repo / \"videos\""
+  replace: "    path = f.repo / \"videos\""
+  test: tests.test_team.VideoTeamTests.test_only_the_video_team_has_supplied_inputs_to_protect

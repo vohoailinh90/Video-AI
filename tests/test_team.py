@@ -2376,6 +2376,38 @@ class VideoTeamTests(Sandbox):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def coder_argv(self, f, role="coder"):
+        cfg = {**team.DEFAULTS, **self.VIDEO_ENV}
+        return team.worker_argv(cfg, f, role, "openrouter/vendor/coder-a:free", {}, "prompt")
+
+    def test_the_operators_supplied_files_are_mounted_read_only_over_the_checkout(self):
+        # Codex's eighteenth review: videos/<id>.inputs/ holds the originals the operator supplied. A binary that is already
+        # in the base shows up in the audit pack only as its final bytes, so a builder that overwrote or deleted one
+        # could not be caught afterwards; the kernel has to refuse it.
+        f = self.new_feature("V1")
+        inputs = f.repo / "videos" / "V1.inputs"
+        inputs.mkdir(parents=True)
+        (inputs / "narration.wav").write_bytes(b"RIFF")
+        mount = f"{inputs}:/work/videos/V1.inputs:ro"
+        for role in ("coder", "tester"):
+            self.assertIn(mount, self.coder_argv(f, role), role)
+        self.assertNotIn(mount, self.coder_argv(f, "reviewer"), "the reviewer's whole checkout is read-only already")
+        shutil.rmtree(inputs)
+        self.assertFalse(any("/work/videos/V1.inputs" in part for part in self.coder_argv(f)),
+                         "nothing to protect: docker would create the missing source as root")
+        outside = self.tmp / "host-only"
+        outside.mkdir()
+        os.symlink(outside, inputs)
+        self.assertFalse(any("/work/videos/V1.inputs" in part for part in self.coder_argv(f)),
+                         "docker resolves a bind source on the host, so a link out of the checkout is never mounted")
+        inputs.unlink()
+
+    def test_only_the_video_team_has_supplied_inputs_to_protect(self):
+        f = self.new_feature("V1")
+        (f.repo / "videos" / "V1.inputs").mkdir(parents=True)
+        with mock.patch.dict(os.environ, {"TEAM_LEAD": "claude"}):
+            self.assertFalse(any("/work/videos/V1.inputs" in part for part in self.coder_argv(f)))
+
     def test_the_lead_names_the_branch_and_the_containers(self):
         f = self.new_feature("V1")
         self.assertEqual(f.branch, "team-video/V1")

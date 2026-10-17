@@ -71,7 +71,7 @@ Có 13 mutation check cho script này (`tests/mutations/video_gates.yaml`).
 - **Tiếng Việt: Kokoro không có.** Hãy tự thu âm, hoặc tạo bằng công cụ TTS tiếng Việt
   bên ngoài, đặt file vào `videos/<id>.inputs/` (cạnh, không phải trong, thư mục dự án: `hyperframes init`
   từ chối thư mục không rỗng) rồi commit lên nhánh trước khi chạy, và ghi tên từng file trong `request.md`. Spec
-  sẽ chỉ định file nào cho cảnh nào, coder chỉ ghép và cân âm. Danh sách công cụ TTS/STT
+  sẽ chỉ định file nào cho cảnh nào, coder chỉ ghép và cân âm. Container của tester và coder gắn thư mục `.inputs` **chỉ đọc** (bản gốc bạn đưa vào không thể bị ghi đè hay xoá; coder chép sang `assets/audio/` rồi mới xử lý). Danh sách công cụ TTS/STT
   tiếng Việt (kèm giấy phép; PhoWhisper-small, VieNeu-TTS v3 Turbo và Kokoro đã được chạy thử và đo, các công cụ
   khác chưa) ở [`docs/vietnamese-audio.md`](vietnamese-audio.md);
   team không gọi chúng: bạn tạo clip bên ngoài rồi đặt vào `videos/<id>.inputs/`, và ghi
