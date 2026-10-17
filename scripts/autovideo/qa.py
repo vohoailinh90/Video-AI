@@ -97,12 +97,17 @@ def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) 
     if astreams and expects_audio:
         mean, peak = levels(video)
         add("audible", mean is not None and mean > SILENT_DB, f"mean {mean} dB, peak {peak} dB; silence is below {SILENT_DB:g} dB")
-    if narration and narration.is_file() and (job.reads_aloud or job.audio_file):
-        mean, _ = levels(narration)
-        add("narration_audible", mean is not None and mean > SILENT_DB, f"{narration.name}: mean {mean} dB")
-        spoken = _duration(probe(narration))
-        if spoken and seconds:
-            add("length_matches_narration", abs(seconds - spoken) <= LENGTH_GAP, f"video {seconds:.1f} s, narration {spoken:.1f} s", "warn")
+    if job.reads_aloud or job.audio_file:
+        # The voice (or the audio_file) is half of what was asked for. Music makes the video audible without it, so the narration
+        # has to be checked as a file of its own: one that MPT did not hand over is a failure, not something to skip.
+        made = narration is not None and narration.is_file()
+        add("narration_made", made, narration.name if made else "MPT returned no narration file")
+        if made:
+            mean, _ = levels(narration)
+            add("narration_audible", mean is not None and mean > SILENT_DB, f"{narration.name}: mean {mean} dB")
+            spoken = _duration(probe(narration))
+            if spoken and seconds:
+                add("length_matches_narration", abs(seconds - spoken) <= LENGTH_GAP, f"video {seconds:.1f} s, narration {spoken:.1f} s", "warn")
 
     if job.subtitles:  # whatever makes the sound: a voice, an audio_file, or no-voice (MPT times the text over the silence)
         add("subtitles_made", bool(cues), f"{len(cues)} cue(s)")

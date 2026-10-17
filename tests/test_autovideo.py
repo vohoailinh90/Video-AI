@@ -56,7 +56,7 @@ FAKE_CLI = textwrap.dedent('''
             stamp = lambda s: "00:00:%%02d,%%03d" %% (int(s), round((s - int(s)) * 1000))
             srt += f"{n + 1}\\n{stamp(a)} --> {stamp(b)}\\n{line}\\n\\n"
         (d / "subtitle.srt").write_text(srt, encoding="utf-8")
-    entry["result"] = {"videos": [str(d / "final-1.mp4")], "audio_file": str(d / "audio.mp3"), "audio_duration": float(dur),
+    entry["result"] = {"videos": [str(d / "final-1.mp4")], "audio_file": "" if "NONARRATION" in subject else str(d / "audio.mp3"), "audio_duration": float(dur),
                        "subtitle_path": str(d / "subtitle.srt") if srt else "", "warnings": None}
     print(json.dumps({"total": 1, "succeeded": 1, "failed": 0, "tasks": [entry]}))
 ''') % {"secret": SECRET}
@@ -364,6 +364,11 @@ class RunnerTests(FakeMptCase):
         self.assertIn("audible", by_id["01-a"])
         self.assertIn("aspect", by_id["02-b"])
         self.assertEqual(self.state()["01-a"]["status"], "qa_failed")
+
+    def test_success_without_a_narration_file_fails_qa(self):
+        summary, _ = self.run_pack([video(title="NONARRATION")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "qa_failed")
+        self.assertIn("narration_made", summary["videos"][0]["qa_failures"])
 
     def test_missing_subtitles_fail_qa_when_requested(self):
         summary, _ = self.run_pack([video(title="NOSUB")], retries=0)
@@ -787,6 +792,21 @@ class QaTests(unittest.TestCase):
             checks = {c.name: c for c in qa.check_video(job, media, None, cues)}
             self.assertFalse(checks["subtitle_inside_video"].ok)
             self.assertIn("100.0", checks["subtitle_inside_video"].detail)
+
+    def test_a_voiced_job_must_come_with_its_narration_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "video.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=108x192:d=3:r=10", "-f", "lavfi",
+                            "-i", "sine=frequency=300:sample_rate=22050", "-t", "3", "-pix_fmt", "yuv420p", str(media)], check=True)  # sound: the music
+            voiced = packmod.load_pack(write_pack(Path(tmp), [video(subtitles=False)])).jobs[0]  # default voice, music on
+            checks = {c.name: c for c in qa.check_video(voiced, media, None, [])}
+            self.assertFalse(checks["narration_made"].ok)  # the music alone makes it audible, which is not what was asked for
+            self.assertTrue(checks["audible"].ok)
+            speech = Path(tmp) / "narration.mp3"
+            speech.write_bytes(media.read_bytes())  # any readable audio will do for this check
+            self.assertTrue({c.name: c for c in qa.check_video(voiced, media, speech, [])}["narration_made"].ok)
+            silent = packmod.load_pack(write_pack(Path(tmp), [video(voice="no-voice", subtitles=False)])).jobs[0]
+            self.assertNotIn("narration_made", {c.name for c in qa.check_video(silent, media, None, [])})  # no-voice has none to make
 
     def test_overlapping_subtitle_cues_fail_the_order_check(self):
         with tempfile.TemporaryDirectory() as tmp:
