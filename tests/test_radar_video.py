@@ -892,9 +892,19 @@ class ReviewFindings(unittest.TestCase):
             problems = check_facts.compat_problems(f"dùng {char}")
             self.assertEqual(len(problems), 1, char)
             self.assertIn(f"U+{ord(char):04X}", problems[0], char)
+        # a punctuation mark or a symbol outside the known marks is refused too: a Unicode hyphen, slash or colon can stand in a name
+        for char in ("\u2011", "\u2010", "\u2215", "\u2044", "\u2236", "\U0001F680", "\u2116", "\u2796", "\u2212"):
+            problems = check_facts.compat_problems(f"Open{char}AI")
+            self.assertEqual(len(problems), 1, repr(char))
+            self.assertIn(f"U+{ord(char):04X}", problems[0], repr(char))
+        source = check_facts.blob({"fact": "Open và AI"})
+        for char in ("\u2011", "\u2010"):                                   # and the gate reads them as the hyphen they look like
+            self.assertEqual(check_facts.untraced(f"Open{char}AI", source, set()), ["token 'Open-AI'"], repr(char))
+            self.assertEqual(check_facts.untraced("Open-AI", check_facts.blob({"fact": f"Open{char}AI"}), set()), [], repr(char))
+        self.assertEqual(check_facts.numbers("\u22123 và \u20105"), {"-3", "-5"})
         # what is left alone: the Vietnamese alphabet (also decomposed), ASCII, signs NFKC keeps, punctuation, spaces
         for text in ("Việt Nam, Hồ-Chí-Minh, nghiêng, Đức, ư ơ ê ô â ă", "Việt", "WeChat（微信）：ok，ok", "chờ… xong", "a b　c d",
-                     "© ® ° × → ← · • – — € $5 50% C++ C# 1/2"):
+                     "© ® ° × → ← · • – — € $5 50% C++ C# 1/2 Python ≥ 3.10 “x” ‘y’"):
             self.assertEqual(check_facts.compat_problems(text), [], text)
         # end to end, in the narration and on the page
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
