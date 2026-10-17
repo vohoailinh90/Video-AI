@@ -638,6 +638,23 @@ class PipelineTests(Sandbox):
         self.assertEqual(self.run_pipeline()[0], 0)
         self.assertTrue(any("already pass" in w for w in f.load_state()["warnings"]))
 
+    def test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack(self):
+        # Found by Codex's review of the Video-AI hand-over: a rerun from `review` (the repair round after a BLOCK) in which
+        # every reviewer fails used to keep the last run's prereview.md, so the auditor read an obsolete review as current.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        code, out = run_cli("run", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("No blockers.", f.file("prereview.md").read_text())
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer='print("the reviewer is confused")')
+        code, out = run_cli("run", "F1", "--from", "review")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(f.file("prereview.md").exists())
+        pack = f.file("audit-pack.md").read_text()
+        self.assertNotIn("No blockers.", pack)
+        self.assertIn("no reviewer model returned a review", pack)
+        self.assertNotIn("reviewer_model", f.load_state())
+
     def test_reviewer_blockers_get_one_fix_round(self):
         f = self.new_feature()
         review = 'print("=== REVIEW ===\\nBLOCKER feature.py:1 - no docstring - add one\\nSUMMARY: x\\n=== END ===")'

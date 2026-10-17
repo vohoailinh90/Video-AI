@@ -757,6 +757,10 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
     diff.write_text(git(f.repo, *readable_diff(f.repo), f"{merge_base(f, state)}..HEAD"), encoding="utf-8")
     mounts = handoff_mounts(f, {"diff.patch": diff, "gates.log": f.file("gates.log")})
     prompt = render(shipped(PROMPTS, "reviewer.md"), id=f.id)
+    # A review belongs to the HEAD it read. If every reviewer fails on a rerun, the pack must say "none", not carry
+    # the last run's review (blockers or a clean bill) for code that has since changed.
+    f.file("prereview.md").unlink(missing_ok=True)
+    state.pop("reviewer_model", None)
     for model in models_for(cfg, "reviewer"):
         rc, output = run_worker(cfg, f, "reviewer", model, mounts, prompt, keys)
         review = extract_review(output) if rc == 0 else None

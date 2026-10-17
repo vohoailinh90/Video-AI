@@ -210,3 +210,7 @@ mutations:
   find: 'if team_lead().name == "codex" and not shutil.which("bwrap"):'
   replace: 'if False:'
   test: tests.test_team.CodexTeamTests.test_doctor_reports_a_missing_sandbox_runtime_for_the_codex_team_only
+- label: a failed review round keeps the previous run's review in the audit pack
+  find: "    f.file(\"prereview.md\").unlink(missing_ok=True)\n    state.pop(\"reviewer_model\", None)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack
