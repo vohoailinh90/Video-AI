@@ -110,7 +110,13 @@ class Visible(HTMLParser):
                 del self.stack[index:]
                 return
 
+    SHOWN = ("value", "placeholder", "alt", "label")      # attributes whose text a browser can draw (inputs, a broken image, options)
+
     def look_at_code(self, tag, attrs):
+        for name in self.SHOWN:
+            text = (attrs.get(name) or "").strip()
+            if text and not self.stack_is_hidden():
+                self.parts.append(text)
         for name in attrs:
             if name.startswith("on"):
                 self.code.append(f"the event handler attribute {name} on <{tag}>")
@@ -122,6 +128,9 @@ class Visible(HTMLParser):
                     self.scripts.append(attrs[wanted])
                 else:
                     self.code.append(f"<{tag} {wanted}=...> that is not the template's {TRUSTED_SCRIPT}")
+
+    def stack_is_hidden(self):
+        return any(entry[1] for entry in self.stack)
 
     def close(self):
         super().close()
@@ -163,8 +172,9 @@ def resolve(root, path):
 
 
 def normalize(text) -> str:
-    """A command as the video shows it: no code backticks, one space between words (scripts/radar/plan.clean)."""
-    return re.sub(r"\s+", " ", str(text or "").replace("`", "")).strip()
+    """A command as the video shows it: exactly as the digest gives it, without the spaces around it (a command is not prose, so no
+    backtick is dropped and no run of spaces is merged: scripts/radar/plan.py does the same)."""
+    return str(text or "").strip()
 
 
 def blob(value) -> str:
@@ -294,7 +304,7 @@ def main() -> int:
                   f"{expected} of its {len(commands)} commands")
             failures += 1
         required = commands[:expected]
-    rows = Counter(normalize(part) for part in parser.parts)    # a command is one row of the page, not a piece of a longer one
+    rows = Counter(parser.parts)    # a command is one row of the page, not a piece of a longer one
     for command, count in Counter(required).items():
         if rows[command] < count:
             print(f"{args.html}: command from try_it is not shown exactly{' ' + str(count) + ' times' if count > 1 else ''}: {command!r}")

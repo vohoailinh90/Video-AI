@@ -168,7 +168,7 @@ def build_plan(digest, selection=None, speech_seconds=60.0) -> dict:
     chosen = [u for u in candidates if u["key"] in set(selection)]
 
     try_it = digest["draft"].get("try_it") or {}
-    all_commands = [clean(c) for c in (try_it.get("commands") or []) if clean(c)]
+    all_commands = [str(c).strip() for c in (try_it.get("commands") or []) if str(c or "").strip()]    # verbatim: a command is not prose
     commands = all_commands[:MAX_COMMANDS]
     if len(all_commands) > MAX_COMMANDS:
         note = (note + "; " if note else "") + f"try_it has {len(all_commands)} commands, the terminal shows the first {MAX_COMMANDS}"

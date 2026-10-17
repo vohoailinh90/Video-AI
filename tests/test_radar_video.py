@@ -621,6 +621,39 @@ class ReviewFindings(unittest.TestCase):
         same_file = html.replace('src="gsap.min.js"', 'src="gsap.min.js" data-x', 1)                       # an attribute is not a file
         self.assertEqual(run_gate(digest, doc, same_file)[0], 0)
 
+    def test_text_that_attributes_show_is_traced_like_the_rest(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        for name, tag in (("value", '<input value="ElevenLabs nhanh gấp 99999 lần">'),
+                          ("placeholder", '<input placeholder="Dùng ElevenLabs">'),
+                          ("alt", '<img src="missing.png" alt="ElevenLabs nhanh gấp 99999 lần">'),
+                          ("label", '<option label="Dùng ElevenLabs"></option>')):
+            status, output = run_gate(digest, doc, html.replace("</body>", tag + "</body>", 1))
+            self.assertEqual(status, 1, name)
+            self.assertIn("ElevenLabs", output, name)
+        # an attribute that repeats text the digest has is fine
+        self.assertEqual(run_gate(digest, doc, html.replace("</body>", '<input value="Python"></body>', 1))[0], 0)
+
+    def test_a_command_is_shown_exactly_as_the_digest_gives_it(self):
+        commands = ["export V=`git describe`", 'echo "a  b"', "bun run dev"]
+        digest = digest_with(lambda d: d["draft"]["try_it"].update(commands=commands))
+        plan = planlib.build_plan(digest)
+        self.assertEqual(plan["try"]["commands"], commands)                       # no backtick dropped, no space collapsed
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertIn("export V=`git describe`", html)
+        self.assertIn("white-space: pre-wrap", html)                               # so that the two spaces are seen as well
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        for what, changed in (("backticks", html.replace("export V=`git describe`", "export V=git describe")),
+                              ("spaces", html.replace("echo &quot;a  b&quot;", "echo &quot;a b&quot;"))):
+            self.assertNotEqual(changed, html, what)                               # the page really was changed
+            status, output = run_gate(digest, doc, changed)
+            self.assertEqual(status, 1, what)
+            self.assertIn("not shown exactly", output, what)
+        self.assertEqual(planlib.build_plan(digest_with(lambda d: d["draft"]["try_it"].update(commands=["  bun run dev \n"])))["try"]["commands"], ["bun run dev"])
+
     def test_a_digest_url_with_a_query_or_fragment_is_refused(self):
         for url in ("https://github.com/o/r?access_token=SECRET", "https://github.com/o/r#SECRET", "https://github.com/o/r?"):
             with self.assertRaises(ValueError) as caught:
