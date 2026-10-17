@@ -8,10 +8,11 @@ import re
 DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
 GROUPS = ["", " nghìn", " triệu", " tỷ"]
 
-# a number that stands alone: not glued to letters, a hyphen or another number; an optional percent sign
+# a number that stands alone: not glued to letters, a hyphen or another number; an optional minus sign in front (read "âm") and an
+# optional percent sign after it
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
 VERSION = re.compile(r"(?<=[A-Za-z])-(\d+(?:[.,]\d+)*)(?![\w])")
-NUMBER = re.compile(r"(?<![\w.,\-])(\d+(?:[.,]\d+)*)(%?)(?![\w\-]|[.,]\d)")
+NUMBER = re.compile(r"(?<![\w.,\-−])([-−]?)(\d+(?:[.,]\d+)*)(%?)(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -55,8 +56,8 @@ def _digit_by_digit(token: str) -> str:
 
 def _token_words(token: str):
     """Words for one number token, or None to leave it as it is."""
-    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):          # 62.958  -> thousands separators
-        return integer_words(int(token.replace(".", "")))
+    if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", token):  # 62.958 and 62,958 -> thousands separators, as the facts gate reads them
+        return integer_words(int(re.sub(r"[.,]", "", token)))
     if re.fullmatch(r"\d+", token):
         if len(token) > 1 and token[0] == "0" or len(token) > 12:
             return _digit_by_digit(token)
@@ -71,10 +72,10 @@ def _token_words(token: str):
 
 def speak_text(text: str) -> str:
     def replace(match):
-        words = _token_words(match.group(1))
+        words = _token_words(match.group(2))
         if words is None:
             return match.group(0)
-        return words + (" phần trăm" if match.group(2) else "")
+        return ("âm " if match.group(1) else "") + words + (" phần trăm" if match.group(3) else "")
 
     def version(match):
         words = _token_words(match.group(1))

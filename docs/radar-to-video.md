@@ -31,7 +31,7 @@ Báo cáo từng bước nằm ở `build/<tên dự án>-<mã đường dẫn>/
 ## Bài thành cảnh thế nào
 
 Mỗi cảnh gồm các đơn vị (unit): một clip lời đọc cộng một phần tử trên màn hình, lấy nguyên văn từ trường của bài (chỉ bỏ dấu nháy mã, gộp khoảng trắng).
-Lời đọc đi vào bộ tổng hợp giọng có chữ số được đọc thành chữ (62.958 thành "sáu mươi hai nghìn chín trăm năm mươi tám"); chữ trên màn hình giữ nguyên chữ số.
+Lời đọc đi vào bộ tổng hợp giọng có chữ số được đọc thành chữ (62.958 và 62,958 thành "sáu mươi hai nghìn chín trăm năm mươi tám", -19 thành "âm mười chín"); chữ trên màn hình giữ nguyên chữ số. Cổng đối chiếu số theo giá trị: dấu phân cách hàng nghìn bị bỏ (nhóm đầu 1 đến 3 chữ số không bắt đầu bằng 0, các nhóm sau đúng 3 chữ số), dấu thập phân được giữ, dấu âm là một phần của giá trị (-19 khác 19).
 
 | Cảnh | Trường của bài | Lời đọc | Trên màn hình |
 |---|---|---|---|

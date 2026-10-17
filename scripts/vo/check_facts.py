@@ -15,7 +15,8 @@ A script decides, not a model, the way github-radar's gates do:
     present, limits this to the first N commands, for a terminal that cannot show them all; N must be what the video can show,
     min(commands, MAX_COMMANDS_SHOWN), or the gate fails).
 
-Numbers are compared without thousands separators (62.958 on screen equals 62958 in the facts). A Vietnamese word typed without
+Numbers are compared without thousands separators (62.958 or 62,958 on screen equals 62958 in the facts) and with their
+minus sign (-19 is not 19). A Vietnamese word typed without
 any diacritic (giao, cho, ba) looks like a Latin token and is flagged when the source lacks it; list such a word in the
 "allow" array of voiceover.json (or pass --allow).
 Single letters are skipped.
@@ -48,7 +49,8 @@ FIXED_LABELS = {
     "forks": "fork",
 }
 MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; scripts/radar/plan.py takes its cap from here
-NUMBER = re.compile(r"\d[\d.,]*")
+# a number, with its sign when the minus stands in front of it (-19, −3,5); a hyphen after a letter or a digit (AGPL-3.0, 10-20) is not one
+NUMBER = re.compile(r"(?:(?<![\w.,\-−])[-−])?\d[\d.,]*")
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
@@ -116,12 +118,14 @@ def blob(value) -> str:
 
 
 def canonical(number: str) -> str:
-    """A number as a value: 62.958 and 62,958 (thousands, groups of exactly three digits) are 62958; 3.14 and 3,14 stay one decimal
-    number, 3.14, and never become 314."""
-    number = number.rstrip(".,")
-    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", number):
-        return re.sub(r"[.,]", "", number)
-    return number.replace(",", ".")
+    """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
+    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus sign belongs to the value: -19 is
+    not 19."""
+    sign = "-" if number[:1] in "-−" else ""
+    number = number.lstrip("-−").rstrip(".,")
+    if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
+        return sign + re.sub(r"[.,]", "", number)
+    return sign + number.replace(",", ".")
 
 
 def numbers(text: str) -> set:

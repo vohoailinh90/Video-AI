@@ -441,6 +441,39 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.untraced("pi là 314", source, set()), ["number 314"])
         self.assertEqual(check_facts.untraced("có 6.2958 sao", source, set()), ["number 6.2958"])
 
+    def test_a_minus_sign_is_part_of_the_value(self):
+        self.assertEqual(check_facts.numbers("ngưỡng -19 dB và 19 dB"), {"-19", "19"})
+        self.assertEqual(check_facts.numbers("ngưỡng −19 dB"), {"-19"})              # U+2212 is the same sign
+        self.assertEqual(check_facts.numbers("(-0,5)"), {"-0.5"})
+        # a hyphen inside a name, a date or a range is not a sign
+        self.assertEqual(check_facts.numbers("AGPL-3.0, gpt-4o, 10-20, 2026-10-13"), {"3.0", "4", "10", "20", "2026", "13"})
+        source = check_facts.blob({"field": "ngưỡng -19 dB, cao hơn -3.5 dB"})
+        self.assertEqual(check_facts.untraced("ngưỡng -19 dB", source, set()), [])
+        self.assertEqual(check_facts.untraced("ngưỡng 19 dB", source, set()), ["number 19"])       # the sign cannot be dropped
+        self.assertEqual(check_facts.untraced("cao hơn 3.5 dB", source, set()), ["number 3.5"])
+        positive = check_facts.blob({"field": "ngưỡng 19 dB"})
+        self.assertEqual(check_facts.untraced("ngưỡng -19 dB", positive, set()), ["number -19"])   # nor added
+
+    def test_a_negative_number_is_read_with_its_sign(self):
+        self.assertEqual(numbers_vi.speak_text("ngưỡng -19 dB"), "ngưỡng âm mười chín dB")
+        self.assertEqual(numbers_vi.speak_text("từ −3,5 đến 3,5"), "từ âm ba phẩy năm đến ba phẩy năm")
+        self.assertEqual(numbers_vi.speak_text("giảm -20%"), "giảm âm hai mươi phần trăm")
+        # hyphens that are not signs are left as before
+        self.assertEqual(numbers_vi.speak_text("gpt-4o và 10-20"), "gpt-4o và 10-20")
+        self.assertEqual(numbers_vi.speak_text("giấy phép AGPL-3.0"), "giấy phép AGPL ba chấm không")
+
+    def test_the_reading_and_the_gate_agree_on_thousands(self):
+        # the gate treats 62,958 like 62.958 (groups of exactly three digits), so the voice must read both as 62 thousand 958
+        thousands = "sáu mươi hai nghìn chín trăm năm mươi tám"
+        self.assertEqual(numbers_vi.speak_text("62.958 sao"), f"{thousands} sao")
+        self.assertEqual(numbers_vi.speak_text("62,958 sao"), f"{thousands} sao")
+        self.assertEqual(numbers_vi.speak_text("1,234,567"), "một triệu hai trăm ba mươi bốn nghìn năm trăm sáu mươi bảy")
+        # a decimal, and a number whose first group starts with 0, are not thousands in either place
+        self.assertEqual(numbers_vi.speak_text("3,5 và 0,125"), "ba phẩy năm và không phẩy một hai năm")
+        self.assertEqual(numbers_vi.speak_text("0.125"), "không chấm một hai năm")
+        self.assertEqual(check_facts.numbers("0,125 và 0.125"), {"0.125"})
+        self.assertEqual(check_facts.numbers("62,958"), {"62958"})
+
     def test_the_report_that_a_standalone_render_created_accepts_a_later_voice_run(self):
         report = {"voice": {"voice": "Mai Anh"}}                       # what `render` writes when there is no report yet
         best = {"take": 2, "edits": 1, "ref_words": 10, "heard": "x"}
