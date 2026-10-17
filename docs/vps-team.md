@@ -241,8 +241,12 @@ Có test và mutation check canh giữ (`tests/test_team.py`, `tests/mutations/t
   thư mục lead ghi được, hay thư mục do lead tạo) thì xoá và để conductor tạo lại, rồi phải `pack` và audit lại các feature
   đã đóng dấu trong đó. Chính conductor cũng từ chối ghi hoặc tin một seal nằm trong `seals/` không phải thư mục thường
   của chính nó, kể cả khi chưa chạy lại setup.
+  `team push` cũng không đọc cấu hình `.git/config` của clone (phiên audit ghi được file đó: `remote.origin.pushurl`, `url.*.insteadOf`,
+  `core.sshCommand`, credential helper, hook). Đích push là repo mà bạn đưa cho `team new --repo`, được ghi vào
+  `<TEAM_HOME>/seals/<id>.origin`; commit được đẩy từ một repo bare tạm (mượn object của clone qua `alternates`, cấu hình riêng) và
+  dùng khoá deploy trong `~team/.ssh`. Feature tạo trước thay đổi này chưa có bản ghi: `push` từ chối và bạn tạo lại feature bằng `team new`.
 - **Dung lượng:** log của một container chỉ ghi tối đa `TEAM_LOG_MAX_BYTES` (cho cả một lần chạy gates);
-  thư mục làm việc `/work` mà worker ghi vào không được lớn thêm quá `TEAM_WORKSPACE_GROWTH_BYTES`
+  thư mục làm việc `/work` mà worker ghi vào không được lớn thêm quá `TEAM_WORKSPACE_GROWTH_BYTES` (các lệnh setup và gate của một lần chạy gates dùng chung một hạn mức, đo từ lúc checkout được xuất ra)
   (container bị dừng, lần thử bị bỏ; còn một lần đo cuối khi container thoát, nên ghi nhanh rồi thoát giữa hai lần đo định kỳ cũng bị bắt).
   Trước khi `git add -A` (ghi thêm một bản mỗi file đổi dưới dạng object của git), conductor kiểm tra file đổi cộng `TEAM_MIN_FREE_BYTES`
   có vừa với dung lượng trống không; không vừa thì bỏ lần thử và dừng. Danh sách đường dẫn đổi chỉ được đọc tới vài MB (quá thì dừng với

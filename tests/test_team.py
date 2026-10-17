@@ -1194,6 +1194,81 @@ class PipelineTests(Sandbox):
         self.assertEqual(stat.S_IMODE((self.home / "seals").stat().st_mode), 0o750, "writing a seal puts the mode right")
         self.assertIsNone(team.seal_problem(f)[1])
 
+    def tamper_with_the_repository_config(self, f, attacker: Path) -> Path:
+        """What a prompt-injected audit session can do to .git/config: a push URL of its own, a rewrite of the real URL, a
+        command for ssh, a credential helper and a hook."""
+        marker = self.tmp / "ran-from-config"
+        for key, value in (("remote.origin.pushurl", str(attacker)),
+                           (f"url.{attacker}.insteadOf", str(self.origin)),
+                           ("core.sshCommand", f"touch {marker}; false"),
+                           ("credential.helper", f"!touch {marker}"),
+                           ("core.hooksPath", str(self.tmp / "hooks"))):
+            git(f.repo, "config", key, value)
+        hooks = self.tmp / "hooks"
+        hooks.mkdir()
+        (hooks / "pre-push").write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        (hooks / "pre-push").chmod(0o755)
+        return marker
+
+    def test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says(self):
+        # Codex's twenty-fifth review: push read the destination and every transport option from the audit-writable
+        # .git/config, which the seal does not cover.
+        f = self.approved_feature()
+        sealed = (self.home / "seals" / "F1.origin")
+        self.assertEqual(json.loads(sealed.read_text())["repo"], str(self.origin))
+        self.assertEqual(stat.S_IMODE(sealed.stat().st_mode), 0o640, "readable by the group, not writable")
+        attacker = self.tmp / "attacker.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(attacker)], check=True)
+        marker = self.tamper_with_the_repository_config(f, attacker)
+        audited = f.load_state()["pack_head"]
+        code, out = run_cli("push", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(git(self.origin, "rev-parse", "team/F1").strip(), audited)
+        self.assertEqual(git(attacker, "for-each-ref").strip(), "", "nothing reached the repository the config named")
+        self.assertFalse(marker.exists(), "no command from the repository config ran")
+        self.assertEqual(list(self.home.glob(".push-*")), [], "the scratch repository is removed")
+
+    def test_push_refuses_a_feature_whose_origin_was_never_sealed_or_whose_record_is_not_trusted(self):
+        f = self.approved_feature()
+        sealed = self.home / "seals" / "F1.origin"
+        sealed.unlink()
+        code, out = run_cli("push", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("no sealed destination", out)
+        self.assertEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "")
+        sealed.write_text("not json")
+        self.assertNotEqual(run_cli("push", "F1")[0], 0)
+        shutil.rmtree(self.home / "seals")
+        (self.home / "seals").symlink_to(f.out)  # a link in place of the directory is never read through
+        code, out = run_cli("push", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("not a plain directory", out)
+        with mock.patch.object(team, "confirm_force", lambda feature: None):  # --force skips the seal checks, not this one
+            code, out = run_cli("push", "F1", "--force")
+        self.assertNotEqual(code, 0)
+        self.assertIn("not a plain directory", out)
+        self.assertEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "")
+
+    def test_a_relative_repository_path_is_sealed_as_an_absolute_one(self):
+        # push runs from another directory, where a relative path would name something else
+        cwd = os.getcwd()
+        os.chdir(self.tmp)
+        self.addCleanup(os.chdir, cwd)
+        code, out = run_cli("new", "F9", "--repo", "origin")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(json.loads((self.home / "seals" / "F9.origin").read_text())["repo"], str(self.origin))
+
+    def test_force_push_uses_the_sealed_origin_too(self):
+        f = self.approved_feature()
+        attacker = self.tmp / "attacker.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(attacker)], check=True)
+        self.tamper_with_the_repository_config(f, attacker)
+        with mock.patch.object(team, "confirm_force", lambda feature: None):
+            code, out = run_cli("push", "F1", "--force")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(git(attacker, "for-each-ref").strip(), "")
+        self.assertNotEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "")
+
     def test_push_trusts_the_seal_not_the_files_a_lead_can_rewrite(self):
         f = self.approved_feature()
         sealed = team.head(f.repo)
@@ -1619,6 +1694,31 @@ class PipelineTests(Sandbox):
         with mock.patch.object(team, "WORKSPACE_POLL_S", 0.05):
             self.assertEqual(run_cli("gates", "F1")[0], 1)
         self.assertIn("## SETUP exit 125", f.file("gates.log").read_text(), "the setup command")
+
+    def test_gate_commands_share_one_workspace_budget(self):
+        # Codex's twenty-fifth review: every run_docker call measured growth from the checkout as it then was, so three
+        # commands that each stay under the allowance could grow the reused checkout by three times it.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(self.run_pipeline()[0], 0)
+        self.write_env({**MODELS, "TEAM_WORKSPACE_GROWTH_BYTES": "5000000"})
+        commands = "\n".join(f"python3 -c \"open('part{i}.bin','wb').write(b'x' * 2_000_000)\"" for i in range(3))
+        f.file("acceptance.md").write_text(f"# Acceptance\n\n```bash\n{commands}\n```\n")
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 0.05):
+            self.assertEqual(run_cli("gates", "F1")[0], 1)
+        log = f.file("gates.log").read_text()
+        self.assertEqual(log.count("## PASS exit 0"), 2, "the first two fit in the budget together")
+        self.assertIn("## FAIL exit 125", log, "the third is what takes it past the allowance")
+        # the setup command spends from the same allowance as the commands that follow it
+        setup = "python3 -c \"open('setup.bin','wb').write(b'x' * 3_000_000)\""
+        self.write_env({**MODELS, "TEAM_WORKSPACE_GROWTH_BYTES": "5000000", "TEAM_GATES_SETUP": setup})
+        one = "python3 -c \"open('after.bin','wb').write(b'x' * 3_000_000)\""
+        f.file("acceptance.md").write_text(f"# Acceptance\n\n```bash\n{one}\n```\n")
+        with mock.patch.object(team, "WORKSPACE_POLL_S", 0.05):
+            self.assertEqual(run_cli("gates", "F1")[0], 1)
+        log = f.file("gates.log").read_text()
+        self.assertIn("## SETUP exit 0", log)
+        self.assertIn("## FAIL exit 125", log, "3 MB of setup plus 3 MB of command is past 5 MB")
 
     def test_the_output_cap_is_configurable_and_documented(self):
         self.assertEqual(int(team.DEFAULTS["TEAM_LOG_MAX_BYTES"]), 20_000_000)

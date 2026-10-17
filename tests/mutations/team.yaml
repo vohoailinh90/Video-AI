@@ -71,8 +71,8 @@ mutations:
   replace: "    return mounts\n"
   test: tests.test_team.PipelineTests.test_reviewer_without_gates_log_does_not_mount_it
 - label: push resolves the branch name instead of the audited commit
-  find: "        git(f.repo, \"push\", \"origin\", f\"{source}:refs/heads/{f.branch}\")\n"
-  replace: "        git(f.repo, \"push\", \"origin\", f.branch)\n"
+  find: "        push_sealed(f, sealed_origin(f), source)\n"
+  replace: "        push_sealed(f, sealed_origin(f), f.branch)\n"
   test: tests.test_team.PipelineTests.test_push_sends_the_audited_commit_not_the_branch
 - label: lockfile changes are hidden from the audit pack again
   find: "    shown, cut = git_capped(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\", limit=diff_limit)\n"
@@ -447,8 +447,8 @@ mutations:
   replace: "    seals.chmod(0o770)\n"
   test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
 - label: "the seal file is writable by everyone"
-  find: "    tmp.chmod(0o640)\n"
-  replace: "    tmp.chmod(0o666)\n"
+  find: "    tmp.write_text(json.dumps(seal, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o640)\n"
+  replace: "    tmp.write_text(json.dumps(seal, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o666)\n"
   test: tests.test_team.PipelineTests.test_the_audit_is_sealed_outside_the_leads_workspace
 - label: "a refused pack leaves its old seal behind"
   find: "        seal_path(f).unlink(missing_ok=True)\n"
@@ -459,12 +459,12 @@ mutations:
   replace: "worker_env(cfg, keys, model), log,\n"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "a gate command's output is not held to the cap"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
-  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
+  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "the gates setup output is not held to the cap"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
-  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            lines += [f\"## SETUP"
+  replace: "name, timeout, base_env(), raw,\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            lines += [f\"## SETUP"
   test: tests.test_team.PipelineTests.test_every_container_the_conductor_starts_is_held_to_the_output_cap
 - label: "each gate command gets a fresh output allowance"
   find: "        written = sink.tell()\n"
@@ -475,7 +475,7 @@ mutations:
   replace: "        if False:\n            watcher = threading.Thread(target=guard"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
 - label: "workspace growth is measured from an empty directory"
-  find: "    baseline = disk_usage(workspace) if workspace and workspace_growth > 0 else 0\n"
+  find: "    baseline = (disk_usage(workspace) if workspace_baseline is None else workspace_baseline) if tracked else 0\n"
   replace: "    baseline = 0\n"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_is_stopped
 - label: "a container over the workspace limit keeps running"
@@ -491,11 +491,11 @@ mutations:
   replace: "workspace=None,"
   test: tests.test_team.PipelineTests.test_a_worker_that_fills_the_checkout_fails_and_its_files_are_discarded
 - label: "a gate command's workspace is not watched"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
   replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            passed += rc == 0"
   test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too
 - label: "the gates setup workspace is not watched"
-  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            lines += [f\"## SETUP"
+  find: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]),\n                                    workspace=work, workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            lines += [f\"## SETUP"
   replace: "name, timeout, base_env(), raw, int(cfg[\"TEAM_LOG_MAX_BYTES\"]))\n            lines += [f\"## SETUP"
   test: tests.test_team.PipelineTests.test_gate_containers_are_held_to_the_workspace_limit_too
 - label: "a builder can overwrite the operator's supplied files"
@@ -639,8 +639,8 @@ mutations:
   replace: "os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644"
   test: tests.test_team.PipelineTests.test_workers_get_copies_of_the_handoff_files_that_only_the_conductor_can_change
 - label: "the staged handoff copies are left behind"
-  find: "        shutil.rmtree(root, ignore_errors=True)\n"
-  replace: "        pass\n"
+  find: "        yield {name: root / name for name in mounts}\n    finally:\n        shutil.rmtree(root, ignore_errors=True)\n"
+  replace: "        yield {name: root / name for name in mounts}\n    finally:\n        pass\n"
   test: tests.test_team.PipelineTests.test_workers_get_copies_of_the_handoff_files_that_only_the_conductor_can_change
 - label: "workers are given the original handoff files again"
   find: "        yield {name: root / name for name in mounts}\n"
@@ -686,3 +686,39 @@ mutations:
   find: "\"--name-only\", base, limit=TREE_PATHS_MAX_BYTES)"
   replace: "\"--name-only\", base)"
   test: tests.test_team.PipelineTests.test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed
+- label: "each gate command gets a fresh workspace allowance again"
+  find: "workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]),\n                                    workspace_baseline=budget_from)\n            passed += rc == 0"
+  replace: "workspace_growth=int(cfg[\"TEAM_WORKSPACE_GROWTH_BYTES\"]))\n            passed += rc == 0"
+  test: tests.test_team.PipelineTests.test_gate_commands_share_one_workspace_budget
+- label: "push reads the destination and options from the clone's own configuration"
+  find: "        push_sealed(f, sealed_origin(f), source)\n"
+  replace: "        git(f.repo, \"push\", \"origin\", f\"{source}:refs/heads/{f.branch}\")\n"
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+- label: "push borrows no objects, so it cannot send the audited commit"
+  find: "        (git_dir / \"objects\" / \"info\" / \"alternates\").write_text(f\"{f.repo / '.git' / 'objects'}\\n\", encoding=\"utf-8\")\n"
+  replace: "        pass\n"
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+- label: "the push scratch repository is left behind"
+  find: "            raise SystemExit(f\"git push failed: {pushed.stderr.strip()}\")\n    finally:\n        shutil.rmtree(root, ignore_errors=True)\n"
+  replace: "            raise SystemExit(f\"git push failed: {pushed.stderr.strip()}\")\n    finally:\n        pass\n"
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+- label: "push goes ahead without a sealed destination"
+  find: "    raise SystemExit(f\"no sealed destination for {f.id}"
+  replace: "    return \"origin\"\n    raise SystemExit(f\"no sealed destination for {f.id}"
+  test: tests.test_team.PipelineTests.test_push_refuses_a_feature_whose_origin_was_never_sealed_or_whose_record_is_not_trusted
+- label: "push reads the destination through a seals directory that is a link"
+  find: "def sealed_origin(f: Feature) -> str:\n    why = seals_problem(f)\n"
+  replace: "def sealed_origin(f: Feature) -> str:\n    why = None\n"
+  test: tests.test_team.PipelineTests.test_push_refuses_a_feature_whose_origin_was_never_sealed_or_whose_record_is_not_trusted
+- label: "a new feature does not record its destination"
+  find: "        write_origin(f, str(local.resolve()) if local.exists() else args.repo)\n"
+  replace: "        pass\n"
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+- label: "the recorded destination is writable by everyone"
+  find: "\"recorded\": now()}, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o640)\n"
+  replace: "\"recorded\": now()}, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o666)\n"
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+- label: "a relative repository path is recorded as given"
+  find: "write_origin(f, str(local.resolve()) if local.exists() else args.repo)"
+  replace: "write_origin(f, args.repo)"
+  test: tests.test_team.PipelineTests.test_a_relative_repository_path_is_sealed_as_an_absolute_one

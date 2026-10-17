@@ -812,7 +812,8 @@ def disk_usage(path: Path) -> int:
 
 
 def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path,
-               max_bytes: int = 20_000_000, workspace: Path | None = None, workspace_growth: int = 0) -> tuple[int, str]:
+               max_bytes: int = 20_000_000, workspace: Path | None = None, workspace_growth: int = 0,
+               workspace_baseline: int | None = None) -> tuple[int, str]:
     """Run a container; return the exit code and the last OUTPUT_TAIL_BYTES of its output.
 
     The output goes to `log` only until the file is `max_bytes` long (a looping model or test can print gigabytes for the
@@ -821,7 +822,8 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
 
     `workspace` is the host directory bind-mounted into the container as /work: neither the tmpfs nor the memory limit
     bounds what is written there, so the container is stopped (exit 125) once the directory has grown by more than
-    `workspace_growth` bytes since it started."""
+    `workspace_growth` bytes since it started, or since `workspace_baseline` when the caller gives one: containers that reuse
+    one workspace one after another (the gate commands) share a single allowance instead of getting a fresh one each."""
     network = network_of(argv)
     if network != "none":
         # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
@@ -829,7 +831,8 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
         if problem:
             raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-    baseline = disk_usage(workspace) if workspace and workspace_growth > 0 else 0
+    tracked = bool(workspace and workspace_growth > 0)
+    baseline = (disk_usage(workspace) if workspace_baseline is None else workspace_baseline) if tracked else 0
     tail = bytearray()
     written = 0
 
@@ -1004,16 +1007,75 @@ def seals_problem(f: Feature, mode: bool = True) -> str | None:
     return None
 
 
+def ensure_seals_dir(f: Feature, what: str) -> Path:
+    """The seals directory, made if it is missing, once it is known to be a plain directory the conductor owns."""
+    why = seals_problem(f, mode=False)  # the mode is put right below
+    if why:
+        raise SystemExit(f"cannot {what}: {why}. Run setup-vps-team.sh as root again, then rebuild the pack")
+    seals = seals_dir(f)
+    seals.mkdir(exist_ok=True)
+    seals.chmod(0o750)
+    return seals
+
+
+def origin_path(f: Feature) -> Path:
+    return seals_dir(f) / f"{f.id}.origin"
+
+
+def write_origin(f: Feature, url: str) -> None:
+    """Record, where the lead cannot write, the repository `team push` publishes to: the one the operator named in
+    `team new --repo`. The clone's own .git/config is writable by whoever works in the feature directory, so it decides
+    nothing."""
+    seals = ensure_seals_dir(f, "record the destination")
+    tmp = seals / f".{f.id}.origin.tmp"
+    tmp.write_text(json.dumps({"repo": url, "recorded": now()}, indent=2) + "\n", encoding="utf-8")
+    tmp.chmod(0o640)
+    tmp.replace(origin_path(f))
+
+
+def sealed_origin(f: Feature) -> str:
+    why = seals_problem(f)
+    if why:
+        raise SystemExit(f"{why}: run setup-vps-team.sh as root again before pushing")
+    try:
+        url = json.loads(origin_path(f).read_text(encoding="utf-8"))["repo"]
+        if isinstance(url, str) and url:
+            return url
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    raise SystemExit(f"no sealed destination for {f.id}: it was created before destinations were sealed, or the record is "
+                     f"damaged. Create the feature again with `{team_lead().command} new`")
+
+
+def push_sealed(f: Feature, url: str, source: str) -> None:
+    """Push the commit `source` to `url` from a repository made for this call.
+
+    The clone's .git/config is writable by the audit session, and push honours what is in it: remote.origin.pushurl, url.*.
+    insteadOf, core.sshCommand, a credential helper, hooks. So that file is never read: the objects are borrowed through
+    `alternates` into an empty bare repository with a config of its own, and the destination is the sealed one."""
+    root = Path(tempfile.mkdtemp(prefix=".push-", dir=f.home))
+    try:
+        git_dir = root / "push.git"
+        env = {**base_env(), "GIT_TERMINAL_PROMPT": "0"}
+        made = subprocess.run(["git", *GIT_SAFE, "init", "--bare", "-q", "--template=", str(git_dir)], cwd=root, env=env,
+                              capture_output=True, text=True)
+        if made.returncode:
+            raise SystemExit(f"could not prepare the push: {made.stderr.strip()}")
+        (git_dir / "objects" / "info").mkdir(parents=True, exist_ok=True)
+        (git_dir / "objects" / "info" / "alternates").write_text(f"{f.repo / '.git' / 'objects'}\n", encoding="utf-8")
+        pushed = subprocess.run(["git", *GIT_SAFE, f"--git-dir={git_dir}", "push", "--no-verify", "--", url,
+                                 f"{source}:refs/heads/{f.branch}"], cwd=root, env=env, capture_output=True, text=True)
+        if pushed.returncode:
+            raise SystemExit(f"git push failed: {pushed.stderr.strip()}")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def write_seal(f: Feature, pack: Path) -> None:
     """Record, outside the feature directory, what the audit was shown. A lead that obeys an instruction hidden in the pack
     can rewrite everything inside its own workspace (the repository, state.json, gates.log); the directory it cannot write
     to is the only thing `team push` believes. The conductor creates it 0750: the group (the lead's login) can read, not write."""
-    seals = seals_dir(f)
-    why = seals_problem(f, mode=False)  # the mode is put right below
-    if why:
-        raise SystemExit(f"cannot seal the audit: {why}. Run setup-vps-team.sh as root again, then rebuild the pack")
-    seals.mkdir(exist_ok=True)
-    seals.chmod(0o750)
+    seals = ensure_seals_dir(f, "seal the audit")
     seal = {"pack_head": head(f.repo), "pack_sha256": hashlib.sha256(pack.read_bytes()).hexdigest(),
             "handoff": handoff_digest(f), "sealed": now()}
     tmp = seals / f".{f.id}.tmp"
@@ -1065,13 +1127,15 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
     try:
         work = tmp / "work"
         export_head(f.repo, work)
+        budget_from = disk_usage(work)  # the setup and every command spend one allowance, measured from here
         setup = cfg["TEAM_GATES_SETUP"]
         if setup:
             # Setup installs what the (possibly model-edited) dependency files name,
             # so it gets the workers' egress-limited network, never the host's.
             rc, output = run_docker(gate_argv(cfg, work, setup, cfg["TEAM_WORKER_NETWORK"], name),
                                     name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]),
-                                    workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
+                                    workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]),
+                                    workspace_baseline=budget_from)
             lines += [f"## SETUP exit {rc}: {setup}", tail_text(output, 20)]
             if rc:
                 commands = []
@@ -1079,7 +1143,8 @@ def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
             started = time.monotonic()
             rc, output = run_docker(gate_argv(cfg, work, command, cfg["TEAM_GATES_NETWORK"], name),
                                     name, timeout, base_env(), raw, int(cfg["TEAM_LOG_MAX_BYTES"]),
-                                    workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
+                                    workspace=work, workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]),
+                                    workspace_baseline=budget_from)
             passed += rc == 0
             lines += [f"## {'PASS' if rc == 0 else 'FAIL'} exit {rc} ({time.monotonic() - started:.1f}s): {command}",
                       tail_text(output, 40)]
@@ -1442,6 +1507,8 @@ def cmd_new(args, home: Path, cfg) -> int:
         if clone.returncode:
             raise SystemExit(f"could not clone {args.repo} at {base}")
         git(f.repo, "checkout", "-q", "-b", f.branch)
+        local = Path(args.repo)  # a path is made absolute: the push runs from another directory
+        write_origin(f, str(local.resolve()) if local.exists() else args.repo)
     except SystemExit:
         shutil.rmtree(f.dir, ignore_errors=True)
         raise
@@ -1598,8 +1665,9 @@ def cmd_push(args, home, cfg) -> int:
                 raise SystemExit("verdict.md is older than audit-pack.md: audit the current pack")
             source = seal["pack_head"]
         # An object id, never the branch name: the commit that was audited is
-        # the one that is published, whatever the branch points at by now.
-        git(f.repo, "push", "origin", f"{source}:refs/heads/{f.branch}")
+        # the one that is published, whatever the branch points at by now. And to the repository sealed when the feature was
+        # made, with none of the clone's own configuration: that file is writable by the audit session.
+        push_sealed(f, sealed_origin(f), source)
     print(f"pushed {source[:12]} to origin {f.branch}")
     return 0
 
