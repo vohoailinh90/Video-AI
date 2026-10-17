@@ -36,6 +36,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
@@ -72,9 +73,9 @@ TRUSTED_COPY = Path(__file__).resolve().parents[1].joinpath("radar", "assets", T
 FRAMES = {"iframe", "frame", "object", "embed", "base", "canvas"}   # another page, another place to load files from, or pixels drawn by script
 
 
-# a number, with its sign when the minus stands in front of it (-19, −3,5; a hyphen after a letter or digit, as in AGPL-3.0 or 10-20, is
-# not one) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
-NUMBER = re.compile(r"(?:(?<![\w.,\-−])[-−])?\d[\d.,]*(?:\s?%|\s+phần trăm\b)?")
+# a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
+# or 10-20, and a plus after one, as in 1+1 or x+5, are not signs) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
+NUMBER = re.compile(r"(?:(?<![\w.,\-−+])[-−+])?\d[\d.,]*(?:\s?%|\s+phần trăm\b)?")
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
@@ -219,11 +220,11 @@ def has_name(token: str, names: set) -> bool:
 
 def canonical(number: str) -> str:
     """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
-    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus sign and a percent sign belong to
-    the value: -19 is not 19, and 19% (or 19 phần trăm) is not 19."""
-    sign = "-" if number[:1] in "-−" else ""
+    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus or plus sign and a percent sign belong
+    to the value: -19 is not 19, +19% is not 19%, and 19% (or 19 phần trăm) is not 19."""
+    sign = "-" if number[:1] in "-−" else "+" if number[:1] == "+" else ""
     percent = "%" if re.search(r"%|phần trăm", number) else ""
-    number = re.sub(r"\s?%$|\s+phần trăm$", "", number.lstrip("-−")).rstrip(".,")
+    number = re.sub(r"\s?%$|\s+phần trăm$", "", number.lstrip("-−+")).rstrip(".,")
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
         return sign + re.sub(r"[.,]", "", number) + percent
     return sign + number.replace(",", ".") + percent
@@ -236,6 +237,9 @@ def numbers(text: str) -> set:
 def latin_tokens(text: str, allow: set) -> list:
     """Chunks made only of ASCII letters/digits/punctuation that look like a name, acronym, command or URL."""
     out = []
+    # A character outside ASCII that is not a letter (a symbol like ™ ® or an emoji, a zero-width or combining mark) ends a word and
+    # hides nothing; a non-ASCII letter (Vietnamese) makes the chunk a Vietnamese word, which is not compared.
+    text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in unicodedata.normalize("NFC", text))
     for chunk in SPLIT.split(text):
         chunk = chunk.strip(".:,;")
         if not chunk or not re.search(r"[A-Za-z]", chunk) or re.search(r"[^\x00-\x7f]", chunk):

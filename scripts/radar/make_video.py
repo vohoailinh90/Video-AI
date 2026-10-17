@@ -143,6 +143,8 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
         spoken = speak_text(line["text"])
         if spoken != line["text"]:
             line["speak"] = spoken
+        if unit["key"] in old and old[unit["key"]].get("voiced"):
+            line["voiced"] = old[unit["key"]]["voiced"]          # which words the clip in assets/ was made from
         lines.append(line)
     doc = {"allow": (existing or {}).get("allow", [])}
     if (existing or {}).get("voice"):
@@ -151,6 +153,17 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
         doc["commands_shown"] = len(plan["try"]["commands"])    # the terminal's commands the gate must find on screen, exactly
     doc["lines"] = lines
     return doc
+
+
+def voiced_fingerprint(text) -> str:
+    """A short hash of what the synthesizer is given for a line. A clip in assets/ is good for the words it was made from: `voice`
+    records this per line, and `render` refuses a line whose words have changed since."""
+    return hashlib.sha1(speak_text(text).encode("utf-8")).hexdigest()[:12]
+
+
+def stale_voices(doc) -> list:
+    """Ids of the lines whose clip was not made from their current words (reworded and not voiced again, or never voiced)."""
+    return [line["id"] for line in doc["lines"] if line.get("voiced") != voiced_fingerprint(line["text"])]
 
 
 def refresh_speak(doc) -> bool:
@@ -367,6 +380,9 @@ def cmd_voice(args, project=None) -> dict:
             fail(f"{rel(wav)} is missing; run voice without --only first")
         durations[line_id] = clip_seconds(wav)
     tl = planlib.timeline(plan, durations)
+    for line in doc["lines"]:
+        if line["id"] in only:
+            line["voiced"] = voiced_fingerprint(line["text"])       # the clip just copied to assets/ was made from these words
     write_composition(project, plan, tl, doc)
     make_pad(project / "assets" / "pad.wav", tl["duration"])
 
@@ -407,6 +423,10 @@ def cmd_render(args, project=None) -> dict:
     project = project or project_dir(args.project, args.videos_dir)
     digest, plan, doc = load_project(project)
     gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
+    stale = stale_voices(doc)
+    if stale:
+        fail(f"the clip of {', '.join(stale)} was not made from the line's current words (reworded since, or never voiced): "
+             f"run `voice {rel(project)} --only {','.join(stale)}` (or without --only) first, so that what is heard is what was checked")
     mp4 = project / "renders" / f"{project.name}.mp4"
     print("render: revoice.py (levels, npm run check, render) ...", flush=True)
     result = run([sys.executable, "-I", VO / "revoice.py", "--project", project, "--lines", project / "voiceover.json",

@@ -13,7 +13,8 @@
       "source": [
         "facts.full_name",
         "draft.hook"
-      ]
+      ],
+      "voiced": "9d7cb98d030d"
     },
     {
       "id": "vo-2",
@@ -24,7 +25,8 @@
       "text": "Nhiều người sáng tạo nội dung và lập trình viên muốn tạo giọng đọc, lồng tiếng hay phiên âm nhưng e ngại chi phí dịch vụ đám mây cùng rủi ro lộ dữ liệu âm thanh.",
       "source": [
         "draft.problem"
-      ]
+      ],
+      "voiced": "30531635b667"
     },
     {
       "id": "vo-3",
@@ -35,7 +37,8 @@
       "text": "VoiceStudio giải quyết vấn đề này bằng một ứng dụng desktop trọn gói chạy khép kín trên máy.",
       "source": [
         "draft.problem"
-      ]
+      ],
+      "voiced": "e9ed153a445c"
     },
     {
       "id": "vo-4",
@@ -46,7 +49,8 @@
       "text": "Người dùng chọn giọng mẫu hoặc tải lên tệp âm thanh tham chiếu, sau đó nhập văn bản cần đọc hoặc chọn tệp video cần lồng tiếng.",
       "source": [
         "draft.how_it_works.steps[0]"
-      ]
+      ],
+      "voiced": "777049f657ec"
     },
     {
       "id": "vo-5",
@@ -57,7 +61,8 @@
       "text": "Backend xử lý nạp mô hình tương ứng và điều phối việc tính toán đến phần cứng phù hợp để tổng hợp hoặc bóc băng giọng nói.",
       "source": [
         "draft.how_it_works.steps[1]"
-      ]
+      ],
+      "voiced": "4ef05412ede4"
     },
     {
       "id": "vo-6",
@@ -68,7 +73,8 @@
       "text": "Hệ thống tạo ra tệp âm thanh hoàn chỉnh và cho phép điều khiển tự động qua giao tiếp Local API hoặc Model Context Protocol.",
       "source": [
         "draft.how_it_works.steps[2]"
-      ]
+      ],
+      "voiced": "7cee4a12ce77"
     },
     {
       "id": "vo-7",
@@ -79,7 +85,8 @@
       "text": "Phân tách kiến trúc rõ ràng giữa giao diện desktop Electron và backend AI bằng Python để dễ bảo trì.",
       "source": [
         "draft.learn[0]"
-      ]
+      ],
+      "voiced": "c36e490fb6df"
     },
     {
       "id": "vo-8",
@@ -90,7 +97,8 @@
       "text": "Thiết kế cơ chế linh hoạt tận dụng đa dạng phần cứng từ card đồ họa cao cấp đến chỉ chạy trên CPU.",
       "source": [
         "draft.learn[1]"
-      ]
+      ],
+      "voiced": "355cf2b15e4d"
     },
     {
       "id": "vo-9",
@@ -102,7 +110,8 @@
       "speak": "Mã nguồn dùng giấy phép AGPL ba chấm không, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng.",
       "source": [
         "draft.caveats[0]"
-      ]
+      ],
+      "voiced": "68a00ed91cbe"
     }
   ]
 }

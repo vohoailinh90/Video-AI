@@ -8,11 +8,11 @@ import re
 DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
 GROUPS = ["", " nghìn", " triệu", " tỷ"]
 
-# a number that stands alone: not glued to letters, a hyphen or another number; an optional minus sign in front (read "âm") and an
+# a number that stands alone: not glued to letters, a hyphen or another number; an optional minus (read "âm") or plus (read "cộng") sign in front and an
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
 VERSION = re.compile(r"(?<=[A-Za-z])-(\d+(?:[.,]\d+)*)(?![\w])")
-NUMBER = re.compile(r"(?<![\w.,\-−])([-−]?)(\d+(?:[.,]\d+)*)(\s?%)?(?![\w\-]|[.,]\d)")
+NUMBER = re.compile(r"(?:(?<![\w.,\-−+])([-−+])|(?<![\w.,\-−]))(\d+(?:[.,]\d+)*)(\s?%)?(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -75,7 +75,8 @@ def speak_text(text: str) -> str:
         words = _token_words(match.group(2))
         if words is None:
             return match.group(0)
-        return ("âm " if match.group(1) else "") + words + (" phần trăm" if match.group(3) else "")
+        sign = {"+": "cộng ", "-": "âm ", "−": "âm "}.get(match.group(1) or "", "")
+        return sign + words + (" phần trăm" if match.group(3) else "")
 
     def version(match):
         words = _token_words(match.group(1))

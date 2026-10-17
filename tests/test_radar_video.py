@@ -674,6 +674,54 @@ class ReviewFindings(unittest.TestCase):
             self.assertIn("not shown exactly", output, what)
         self.assertEqual(planlib.build_plan(digest_with(lambda d: d["draft"]["try_it"].update(commands=["  bun run dev \n"])))["try"]["commands"], ["bun run dev"])
 
+    def test_a_name_stuck_to_a_symbol_is_still_checked(self):
+        source = check_facts.blob({"field": "Dùng npm để cài; mô hình faster-whisper-large-v3, tiếng Việt"})
+        untraced = lambda text: check_facts.untraced(text, source, set())
+        for glued in ("ElevenLabs™", "OpenAI🚀", "ElevenLabs\u200b", "Eleven\u200bLabs", "npm\u0301 và ElevenLabs®", "ElevenLabs\ufe0f"):
+            self.assertTrue(any("Eleven" in problem or "OpenAI" in problem for problem in untraced(glued)), glued)
+        self.assertEqual(untraced("npm™ và npm®, npm🚀"), [])                      # a symbol does not hide the name, nor invent one
+        self.assertEqual(untraced("tiếng Việt, faster-whisper-large-v3™"), [])    # Vietnamese words are still not compared
+
+    def test_a_plus_sign_is_part_of_the_value(self):
+        self.assertEqual(check_facts.numbers("tăng +19% và 19%, giảm -19%"), {"+19%", "19%", "-19%"})
+        self.assertEqual(check_facts.numbers("Python 3.10+ và C++ và 1+1 và x+5 và a +5"), {"3.10", "1", "5", "+5"})
+        source = check_facts.blob({"field": "tăng +19% trong tuần"})
+        self.assertEqual(check_facts.untraced("tăng +19%", source, set()), [])
+        self.assertEqual(check_facts.untraced("tăng 19%", source, set()), ["number 19%"])           # the sign cannot be dropped
+        self.assertEqual(check_facts.untraced("tăng +19%", check_facts.blob({"field": "tăng 19%"}), set()), ["number +19%"])   # nor added
+        self.assertEqual(numbers_vi.speak_text("tăng +19% và +3,5"), "tăng cộng mười chín phần trăm và cộng ba phẩy năm")
+        self.assertEqual(numbers_vi.speak_text("Python 3.10+ và C++ và 1+1"), "Python ba chấm một không+ và C++ và một+một")
+        self.assertEqual(numbers_vi.speak_text("+19 %"), numbers_vi.speak_text("+19%"))
+
+    def test_a_clip_made_for_older_words_is_not_rendered_with_the_new_ones(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(make_video.stale_voices(doc), [line["id"] for line in doc["lines"]])       # nothing was voiced yet
+        for line in doc["lines"]:
+            line["voiced"] = make_video.voiced_fingerprint(line["text"])
+        self.assertEqual(make_video.stale_voices(doc), [])
+        # the file is rewritten when the project is (voice does it): the record of what was voiced stays with each line
+        again = make_video.voiceover_doc(plan, tl, doc)
+        self.assertEqual([l["voiced"] for l in again["lines"]], [l["voiced"] for l in doc["lines"]])
+        # a line reworded afterwards, and not voiced again, is named
+        first = doc["lines"][0]
+        first["text"] = first["text"].replace("VoiceStudio", "VoiceStudio hôm nay", 1)
+        self.assertEqual(make_video.stale_voices(doc), [first["id"]])
+        first["voiced"] = make_video.voiced_fingerprint(first["text"])
+        self.assertEqual(make_video.stale_voices(doc), [])
+        # and the render command stops before any slow step
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "source").mkdir()
+            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
+            make_video.write_composition(project, plan, tl)
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None})()
+            with self.assertRaises(SystemExit):
+                make_video.cmd_render(args, project)
+
     def test_a_digest_url_with_a_query_or_fragment_is_refused(self):
         for url in ("https://github.com/o/r?access_token=SECRET", "https://github.com/o/r#SECRET", "https://github.com/o/r?"):
             with self.assertRaises(ValueError) as caught:
