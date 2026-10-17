@@ -197,7 +197,7 @@ def blob(value) -> str:
     return "\n".join(parts).lower()
 
 
-NAME = re.compile(r"[a-z0-9_]+(?:[-.][a-z0-9_]+)*")           # faster-whisper-large-v3, bun.sh, AGPL-3.0: a name ends at / : space ...
+NAME = re.compile(r"[a-z0-9_]+(?:[-.][a-z0-9_]+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
 
 
@@ -205,9 +205,10 @@ def names_in(source_blob: str) -> set:
     """Every name the source writes, whole: letters, digits and _ joined by - or . (a / or : or space ends it), and the name before
     a trailing version (AGPL for AGPL-3.0). faster-whisper-large-v3 is one name: faster-whisper and whisper are not in it."""
     names = set()
-    for name in NAME.findall(source_blob):
-        names.add(name)
-        names.add(VERSION_TAIL.sub("", name))
+    for chunk in ascii_chunks(source_blob, need_letter=False):      # not the pieces of a Vietnamese word: c in công is not the name C
+        for name in NAME.findall(chunk.lower()):
+            names.add(name)
+            names.add(VERSION_TAIL.sub("", name))
     names.discard("")
     return names
 
@@ -234,20 +235,20 @@ def numbers(text: str) -> set:
     return {canonical(n) for n in NUMBER.findall(text)} - {""}
 
 
-def latin_tokens(text: str, allow: set) -> list:
-    """Chunks made only of ASCII letters/digits/punctuation that look like a name, acronym, command or URL."""
-    out = []
-    # A character outside ASCII that is not a letter (a symbol like ™ ® or an emoji, a zero-width or combining mark) ends a word and
-    # hides nothing; a non-ASCII letter (Vietnamese) makes the chunk a Vietnamese word, which is not compared.
+def ascii_chunks(text: str, need_letter: bool = True):
+    """The chunks of a text made only of ASCII (names, acronyms, commands, addresses; a chunk ends at a space or at one of SPLIT).
+    A character outside ASCII that is not a letter (a symbol like (tm) or an emoji, a zero-width or combining mark) ends a word and
+    hides nothing; a non-ASCII letter makes the chunk a Vietnamese word, which is left out, so nothing is cut out of it."""
     text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in unicodedata.normalize("NFC", text))
     for chunk in SPLIT.split(text):
         chunk = chunk.strip(".:,;")
-        if not chunk or not re.search(r"[A-Za-z]", chunk) or re.search(r"[^\x00-\x7f]", chunk):
-            continue
-        if len(chunk) < 2 or chunk.lower() in allow:
-            continue
-        out.append(chunk)
-    return out
+        if chunk and (not need_letter or re.search(r"[A-Za-z]", chunk)) and not re.search(r"[^\x00-\x7f]", chunk):
+            yield chunk
+
+
+def latin_tokens(text: str, allow: set) -> list:
+    """Chunks made only of ASCII letters/digits/punctuation that look like a name, acronym, command or URL."""
+    return [chunk for chunk in ascii_chunks(text) if len(chunk) >= 2 and chunk.lower() not in allow]
 
 
 def untraced(text: str, source_blob: str, allow: set) -> list:
