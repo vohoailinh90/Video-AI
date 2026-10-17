@@ -61,7 +61,8 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
   a TTS that supports Vietnamese. VieNeu-TTS v3 Turbo (CPU, Apache-2.0) was tested and understood 100% on plain sentences, but it
   reads English loanwords the Vietnamese way. Put one clip per scene in `assets/`, and set each `data-duration` from `ffprobe`.
 - A video with a Vietnamese voice-over keeps its lines in `videos/<name>/voiceover.json` (id, start, scene_end, scene, text), the default
-  clips in `assets/vo-N.wav` and any other voice in `voices/<voice>/vo-N.wav`. The workflow that was run end to end (VieNeu-TTS, PhoWhisper
+  clips in `assets/vo-N.wav` and any other voice in `voices/<voice>/vo-N.wav`. The default narrator is **Hải Đăng** (VieNeu-TTS preset, male,
+  northern; the owner's choice): `synth.py` uses it without `--voice`, and a brief must ask for another voice to get one. The workflow that was run end to end (VieNeu-TTS, PhoWhisper
   round-trip check, `scripts/vo/revoice.py`, preview page) is in `docs/voiceover-workflow.md`; follow it instead of rebuilding it.
 - `docs/vietnamese-audio.md` ranks the GitHub repos with Vietnamese TTS and speech recognition (stars, licenses, install
   commands, which are non-commercial) and records what was run here: PhoWhisper-small, VieNeu-TTS v3 Turbo and Kokoro. The
