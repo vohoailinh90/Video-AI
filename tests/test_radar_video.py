@@ -825,6 +825,15 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(status, 1, what)
             self.assertIn("audio", output, what)
 
+    def test_the_solution_sentence_is_the_one_that_names_the_tool_not_one_that_contains_its_name(self):
+        sentences = ["Nhiều nhóm gặp khó khăn.", "Họ lưu dữ liệu trong MongoDB và tự viết mã lặp lại.", "Go giúp xây dựng dịch vụ nhanh gọn.", "Kết thúc."]
+        self.assertEqual(planlib.solution_index(sentences, "Go"), 2)              # MongoDB contains "go", but it is not Go
+        self.assertEqual(planlib.solution_index(sentences, "go"), 2)
+        self.assertEqual(planlib.solution_index(["a", "Bạn dùng go-task để chạy.", "Go chạy nhanh."], "Go"), 2)    # go-task is another name
+        self.assertEqual(planlib.solution_index(["a", "VoiceStudio's chạy cục bộ.", "b"], "VoiceStudio"), 1)      # a possessive is still the name
+        self.assertEqual(planlib.solution_index(["a", "(VoiceStudio) chạy cục bộ.", "b"], "voicestudio"), 1)
+        self.assertEqual(planlib.solution_index(["a", "Không có tên.", "Cũng không."], "Go"), 2)                  # none names it: the last one
+
     def rendered_plan(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
         return plan, planlib.timeline(plan, estimated_durations(plan))

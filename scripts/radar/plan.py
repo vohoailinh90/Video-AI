@@ -116,9 +116,11 @@ def candidate_units(digest) -> list:
 
 
 def solution_index(sentences, name) -> int:
-    """The sentence of `problem` that presents the tool: the first after the opening one that names it, else the last."""
+    """The sentence of `problem` that presents the tool: the first after the opening one that names it, else the last. It names it when
+    the name stands as a word of its own: Go is not in MongoDB, nor in go-task."""
+    pattern = re.compile(rf"(?<!\w)(?<!\w[-.]){re.escape(name)}(?!\w|[-.]\w)", re.I)
     for i in range(1, len(sentences)):
-        if name.lower() in sentences[i].lower():
+        if pattern.search(sentences[i]):
             return i
     return len(sentences) - 1
 
