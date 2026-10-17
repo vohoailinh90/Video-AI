@@ -72,6 +72,9 @@ URL = re.compile(r"https?://|www\.|\S+@\S+\.\S+", re.I)
 MARKDOWN = re.compile(r"[*#_`~|<>\[\]{}\\]")
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️]")
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# For text that is printed on one line (the title, file names): no control character at all, newline, tab and escape included; also the
+# C1 controls and the Unicode line and paragraph separators, which terminals and log viewers may render as a line break.
+UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 CJK = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
 
 
@@ -199,6 +202,9 @@ def _file(value, root: Path, extensions: tuple[str, ...], where: str, problems: 
     if not isinstance(value, str) or not value.strip():
         problems.append(f"{where}: must be a file path")
         return None
+    if UNPRINTABLE.search(value):
+        problems.append(f"{where}: the path has control characters")
+        return None
     path = Path(value).expanduser()
     path = path if path.is_absolute() else root / path
     if path.suffix.lower() not in extensions:
@@ -319,6 +325,9 @@ def _video(raw, index: int, defaults: dict, root: Path, problems: list[str], war
     title = raw.get("title")
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
         problems.append(f"{where}.title: must be 1 to 120 characters")
+        title = ""
+    elif UNPRINTABLE.search(title):
+        problems.append(f"{where}.title: must be one line, without control characters")
         title = ""
     scenes = _scenes(raw.get("scenes"), f"{where}.scenes", problems, warnings)
     extra = _terms(raw.get("terms"), f"{where}.terms", problems, 40)

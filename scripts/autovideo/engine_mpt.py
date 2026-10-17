@@ -20,6 +20,7 @@ from pathlib import Path
 from .pack import NO_VOICE, Job
 
 DEFAULT_HOME = Path("~/MoneyPrinterTurbo")
+MUSIC_FOLDERS = ("storage/bgm", "resource/songs")  # where MPT looks for a custom music file, in this order
 FILE_MISSING = "missing"  # what input_digests says for a file the job needs and MPT's directories do not have (never a hex digest)
 FILE_UNREADABLE = "unreadable"  # ... and for one that is there but cannot be read (permissions, or it went away while it was being read)
 SECRET_KEY = re.compile(r"key|token|secret|password", re.I)
@@ -109,27 +110,38 @@ def video_params(job: Job) -> dict:
     return params
 
 
-def _digest_in(env: MptEnv, name: str, folders: tuple[str, ...]) -> str:
+def managed_file(env: MptEnv, name: str, folders: tuple[str, ...]) -> Path | None:
+    """The file MPT will use for `name`: the first of `folders` (inside the MPT checkout) that holds it as a regular file whose real path
+    stays inside that folder. MPT resolves real paths and refuses a file that leaves its folder (a link to somewhere else), and for music
+    then tries its next folder (cli.py _resolve_managed_resource_file, app/services/bgm.py resolve_bgm_file)."""
     for folder in folders:
-        path = env.home / folder / name
-        if path.is_file():
-            try:
-                with open(path, "rb") as handle:
-                    return hashlib.file_digest(handle, "sha256").hexdigest()
-            except OSError:
-                return FILE_UNREADABLE
-    return FILE_MISSING
+        base = os.path.realpath(env.home / folder)
+        real = os.path.realpath(os.path.join(base, name))
+        if os.path.isfile(real) and os.path.commonpath([base, real]) == base:
+            return Path(real)
+    return None
+
+
+def _digest_in(env: MptEnv, name: str, folders: tuple[str, ...]) -> str:
+    path = managed_file(env, name, folders)
+    if path is None:
+        return FILE_MISSING
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
+    except OSError:
+        return FILE_UNREADABLE
 
 
 def input_digests(env: MptEnv, job: Job) -> dict[str, str]:
     """SHA-256 of the files the pack names that MPT reads from its own directories: the custom music (only when its volume is above zero;
-    MPT looks in storage/bgm, then resource/songs) and the subtitle font (only when subtitles are on; resource/fonts).
+    MPT looks in MUSIC_FOLDERS: storage/bgm, then resource/songs) and the subtitle font (only when subtitles are on; resource/fonts).
 
     A file that is needed and not there is FILE_MISSING, one that is there and cannot be read is FILE_UNREADABLE. These files are outside the pack, so the job's fingerprint cannot cover them:
     the digests are kept beside the fingerprint instead. What the pack does not name (MPT's config.toml, MPT itself) is not covered."""
     digests: dict[str, str] = {}
     if job.bgm not in ("none", "random") and job.bgm_volume > 0:
-        digests["bgm"] = _digest_in(env, job.bgm, ("storage/bgm", "resource/songs"))
+        digests["bgm"] = _digest_in(env, job.bgm, MUSIC_FOLDERS)
     if job.subtitles:
         digests["font"] = _digest_in(env, job.font, ("resource/fonts",))
     return digests

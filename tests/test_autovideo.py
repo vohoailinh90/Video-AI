@@ -196,6 +196,13 @@ class PackTests(unittest.TestCase):
         for name in ("font.otf", "font", "font.ttf.txt", "dir/font.ttf"):
             self.assertIn("font: must be a .ttf or .ttc font file name", self.problems([video()], {"font": name}), name)
 
+    def test_text_that_is_printed_cannot_carry_control_characters(self):
+        # the title and the file names are written to the terminal by plan and run, so a newline or an escape sequence in them could forge a log line
+        for bad in ("Line one\nline two", "Tab\there", "red \x1b[2J clear", "nul\x00", "cr\rreturn", "sep\u2028x", "c1\x85x"):
+            self.assertIn("title: must be one line", self.problems([video(title=bad)]), repr(bad))
+        text = self.problems([video()], {"material_source": "local", "materials": ["a\nb.mp4"]})
+        self.assertIn("control characters", text)
+
     def test_tts_unfriendly_text_is_a_warning_not_an_error(self):
         scenes = [{"narration": "Xem tại https://example.com **ngay**", "terms": ["a"]}]
         pack = packmod.load_pack(write_pack(self.root, [{"id": "01-a", "title": "T", "scenes": scenes}]))
@@ -258,6 +265,28 @@ class PackTests(unittest.TestCase):
             self.assertNotIn("bgm", engine_mpt.input_digests(env, job(**kind)), kind)  # no custom music that is read
         self.assertEqual(engine_mpt.input_digests(env, job(bgm="missing.mp3"))["bgm"], engine_mpt.FILE_MISSING)  # asked for and gone
         self.assertEqual(engine_mpt.input_digests(env, job(font="Gone.ttf"))["font"], engine_mpt.FILE_MISSING)
+
+    def test_a_font_or_music_file_that_links_outside_mpts_folder_is_not_usable(self):
+        env = fake_mpt(self.root)
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "font.ttf").write_bytes(b"f")
+        (outside / "song.mp3").write_bytes(b"s")
+        fonts, songs, uploads = env.home / "resource" / "fonts", env.home / "resource" / "songs", env.home / "storage" / "bgm"
+        songs.mkdir()
+        uploads.mkdir(parents=True)
+        (fonts / "Linked.ttf").symlink_to(outside / "font.ttf")
+        (uploads / "song.mp3").symlink_to(outside / "song.mp3")
+        job = lambda **d: packmod.load_pack(write_pack(self.root, [video()], d)).jobs[0]
+        # MPT resolves real paths and refuses a file that leaves its folder (cli.py _resolve_managed_resource_file, bgm.py resolve_bgm_file)
+        self.assertIn("outside", runner.preflight(env, job(font="Linked.ttf")))
+        self.assertEqual(engine_mpt.input_digests(env, job(font="Linked.ttf"))["font"], engine_mpt.FILE_MISSING)
+        self.assertIn("outside", runner.preflight(env, job(bgm="song.mp3")))
+        (songs / "song.mp3").write_bytes(b"real")  # MPT then tries its next folder, and a real file there is used
+        self.assertIsNone(runner.preflight(env, job(bgm="song.mp3")))
+        self.assertEqual(engine_mpt.input_digests(env, job(bgm="song.mp3"))["bgm"], hashlib.sha256(b"real").hexdigest())
+        (fonts / "Inner.ttf").symlink_to(fonts / "BeVietnamPro-Bold.ttf")  # a link that stays inside the folder is fine
+        self.assertIsNone(runner.preflight(env, job(font="Inner.ttf")))
 
     def test_a_file_that_cannot_be_read_is_a_problem_not_a_traceback(self):
         env = fake_mpt(self.root)

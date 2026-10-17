@@ -78,6 +78,13 @@ def write_json(path: Path, data) -> None:
     os.replace(tmp, path)
 
 
+def _missing_input(env: engine_mpt.MptEnv, what: str, name: str, folders: tuple[str, ...], absent: str) -> str:
+    """Why a font or music file MPT needs is not usable: not there, or a link that leaves the folder MPT reads it from."""
+    if any((env.home / folder / name).is_file() for folder in folders):
+        return f"{what} is a link to a file outside its folder in {env.home}; MPT only uses files that stay inside it (copy the file there)"
+    return f"{what} {absent}"
+
+
 def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
     """Reasons a render cannot work, found before MPT starts. None when nothing is wrong."""
     gone = [tool for tool in ("ffmpeg", "ffprobe") if shutil.which(tool) is None]
@@ -88,10 +95,10 @@ def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
     if job.material_source != "local" and not info.get(key):
         return f"{key} is empty in {env.home}/config.toml (get a free key from the {job.material_source} website)"
     # Only what MPT itself will read: it checks the font when subtitles are on, and a custom music file when its volume is above zero.
-    if job.subtitles and not (env.home / "resource" / "fonts" / job.font).is_file():
-        return f"font {job.font} is not in {env.home}/resource/fonts"
-    if job.bgm not in ("none", "random") and job.bgm_volume > 0 and not any((env.home / d / job.bgm).is_file() for d in ("storage/bgm", "resource/songs")):
-        return f"music file {job.bgm} is in neither storage/bgm nor resource/songs of {env.home}"
+    if job.subtitles and engine_mpt.managed_file(env, job.font, ("resource/fonts",)) is None:
+        return _missing_input(env, f"font {job.font}", job.font, ("resource/fonts",), f"is not in {env.home}/resource/fonts")
+    if job.bgm not in ("none", "random") and job.bgm_volume > 0 and engine_mpt.managed_file(env, job.bgm, engine_mpt.MUSIC_FOLDERS) is None:
+        return _missing_input(env, f"music file {job.bgm}", job.bgm, engine_mpt.MUSIC_FOLDERS, f"is in neither storage/bgm nor resource/songs of {env.home}")
     for what, digest in engine_mpt.input_digests(env, job).items():
         if digest == engine_mpt.FILE_UNREADABLE:  # there, per the checks above, but not readable: MPT would stumble on it as well
             return f"the {'music' if what == 'bgm' else 'font'} file {job.bgm if what == 'bgm' else job.font} cannot be read (permissions?)"
