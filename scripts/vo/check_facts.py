@@ -10,11 +10,11 @@ A script decides, not a model, the way github-radar's gates do:
     faster-whisper-large-v3, and a key such as `license` is not a value; a name before a version, AGPL for AGPL-3.0, is found); Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
-  * the page's code is not read, but the plain ways it has of putting words on the screen or bringing in more code are refused
-    (CSS `content:`, @import, DOM-writing script, canvas text, any script or stylesheet other than the template's own gsap.min.js,
-    frames, <base>, <canvas>, on* attributes).
-    That is a pattern check, not a sandbox: code written to hide what it does gets past it, so the diff of the composition is still
-    reviewed, and the gate does not look at images, video or audio;
+  * the page's code is held to what the template uses: its elements and attributes, the names and characters of its script, the
+    properties of its style, and no file but its own gsap.min.js (byte for byte). Anything else is refused as code that could put
+    words on the screen or load more code. This reads text: the gate does not look at what an image, a video or a sound file holds;
+  * the `allow` array of voiceover.json may list only Vietnamese words typed without diacritics from VIETNAMESE_WORDS; a name added
+    there would escape the comparison with the digest, so it is refused (the operator's --allow is not limited);
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
     traced;
   * each command in try_it.commands must appear on screen exactly as the digest gives it, as a row of its own (not inside a longer
@@ -58,19 +58,40 @@ FIXED_LABELS = {
     "forks": "fork",
 }
 MAX_COMMANDS_SHOWN = 6   # the most try_it commands a video's terminal shows; scripts/radar/plan.py takes its cap from here
-# What a style or a script can do to put words on the screen, or to bring in code that can. The composition does none of it: GSAP
-# moves and fades elements that are already in the page. check_facts.py cannot prove arbitrary code harmless (nor read pixels of an
-# image), so it refuses the ways code has of writing text and leaves the rest to the review of the composition's diff.
-CSS_TEXT = re.compile(r"(?<![\w-])content\s*:(?!\s*(?:\"\"|''|none|normal)\s*(?:[;}!]|$))|@import\b|url\(\s*[\"']?\s*(?:[a-z]+:)?//", re.I)
-JS_WRITES = re.compile(r"\b(?:innerHTML|outerHTML|innerText|textContent|insertAdjacentHTML|insertAdjacentText|createTextNode|createElement|"
-                       r"createElementNS|appendChild|insertBefore|replaceChildren|replaceWith|setAttribute|nodeValue|DOMParser|eval|Function|"
-                       r"import|importScripts|fetch|XMLHttpRequest|WebSocket|Worker|SharedWorker|fillText|strokeText|getContext)\b|\bdocument\s*\.\s*write(?:ln)?\b|"
-                       r"\b(?:append|prepend)\s*\(|\.\s*(?:text|html)\s*\(")
+# What the page's code may contain: exactly what the video template uses, and nothing else. Everything outside these lists is refused,
+# so a way of putting words on the screen that nobody has thought of yet (a style, a script API, a tag, an attribute) is refused too.
+# scripts/radar/compose.py writes pages that stay inside them; the committed hand-made pilot does as well (tests check both).
+# Not covered, and cannot be by reading text: what an image, a video or a sound file contains.
+TEMPLATE_TAGS = {"audio", "b", "body", "div", "em", "h1", "h2", "head", "html", "i", "meta", "p", "script", "section", "small", "span",
+                 "strong", "style"}
+TEMPLATE_ATTRIBUTES = {"*": {"id", "class", "style", "lang"}, "audio": {"src"}, "script": {"src"}, "meta": {"charset", "name", "content"}}
+# any data-* attribute is allowed (data-start, data-duration, data-label ...): nothing draws it, because content is only ever empty
+JS_NAMES = {"E", "__timelines", "arrow", "at", "clipPath", "const", "delay", "draw", "dur", "duration", "ease", "end", "fadeOut", "forEach",
+            "from", "fromTo", "gsap", "i", "id", "opacity", "paused", "pop", "rise", "scale", "scaleX", "seek", "sel", "set", "timeline",
+            "tl", "to", "true", "window", "x", "y", "yPercent"}     # and S1, S2 ... (scene start times)
+JS_TOKEN = re.compile(r"\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'|//[^\n]*|/\*.*?\*/", re.S)   # a string or a comment
+CSS_PROPERTIES = {
+    "align-items", "background", "border", "border-bottom", "border-color", "border-left", "border-left-color", "border-radius", "border-top",
+    "bottom", "box-sizing", "color", "content", "display", "flex", "flex-direction", "flex-wrap", "font-family", "font-size", "font-style",
+    "font-weight", "gap", "height", "inset", "justify-content", "left", "letter-spacing", "line-height", "margin", "margin-right",
+    "margin-top", "max-width", "min-height", "min-width", "opacity", "overflow", "overflow-wrap", "padding", "padding-bottom",
+    "padding-top", "position", "right", "top", "transform-origin", "vertical-align", "white-space", "width"}    # and custom properties --x
 # The only file a page may load: the template's GSAP, named exactly so and identical to the copy vendored in scripts/radar/assets.
 # Any other file next to the page (a script, a stylesheet) is code this check does not read, so it is refused.
 TRUSTED_SCRIPT = "gsap.min.js"
 TRUSTED_COPY = Path(__file__).resolve().parents[1].joinpath("radar", "assets", TRUSTED_SCRIPT)
-FRAMES = {"iframe", "frame", "object", "embed", "base", "canvas"}   # another page, another place to load files from, or pixels drawn by script
+LOCAL_FILE = re.compile(r"(?!\.\.?/)[\w.\-]+(?:/[\w.\-]+)*")      # a file next to the page: no scheme, no leading /, no ..
+
+# Vietnamese words that have no diacritic and so look like Latin names to this check. A voiceover.json `allow` may list only these:
+# the list is part of the check, not of the document being checked, because a name added to `allow` would not be compared with the digest
+# at all. A name has to come from the digest.
+VIETNAMESE_WORDS = frozenset("""
+a ai an anh ao ba bac bai ban bang bao bat bay be ben bi bo bon bu ca cac cai cam can cao cap cat cau ce cha chi cho chu co cua cu cung
+da dai dan dao day de den di dia do don du dung em ga gan gi gia giao gio ha hai han hay he hen hi ho hoa hon hu khi kho khu la lai
+lam lan lao le len li lo loa loi ma mai man mang mau may me men mi mo mua mui na nam nao nay ne nen nga ngu nha nhe nhi nho nhu no noi
+nu nua oi pha phai phi pho phu qua que quan ra rai ram ro ru sa sach sai san sao se si so soi su ta tai tam tan tao tay te ten thi tho
+thu ti to toi tu tua tui va vai van vao ve vi vo vua xa xe xi xo xu y yeu
+""".split())
 
 
 # a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
@@ -111,24 +132,23 @@ class Visible(HTMLParser):
                 del self.stack[index:]
                 return
 
-    SHOWN = ("value", "placeholder", "alt", "label")      # attributes whose text a browser can draw (inputs, a broken image, options)
-
     def look_at_code(self, tag, attrs):
-        for name in self.SHOWN:
-            text = (attrs.get(name) or "").strip()
-            if text and not self.stack_is_hidden():
-                self.parts.append(text)
-        for name in attrs:
-            if name.startswith("on"):
-                self.code.append(f"the event handler attribute {name} on <{tag}>")
-        if tag in FRAMES:
-            self.code.append(f"<{tag}> (it shows another page, changes where files load from, or draws what no text node says)")
-        for name, wanted in (("script", "src"), ("link", "href")):
-            if tag == name and attrs.get(wanted) is not None:
-                if tag == "script" and attrs[wanted] == TRUSTED_SCRIPT:
-                    self.scripts.append(attrs[wanted])
-                else:
-                    self.code.append(f"<{tag} {wanted}=...> that is not the template's {TRUSTED_SCRIPT}")
+        if tag not in TEMPLATE_TAGS:
+            self.code.append(f"<{tag}>, which the template never uses")
+            return
+        for name, value in attrs.items():
+            if name.startswith("data-") or name in TEMPLATE_ATTRIBUTES["*"] or name in TEMPLATE_ATTRIBUTES.get(tag, ()):
+                if name == "style":
+                    self.code += [f"an inline style that sets {problem}" for problem in css_problems(value or "", inline=True)]
+                elif name == "src" and tag == "script":
+                    if value == TRUSTED_SCRIPT:
+                        self.scripts.append(value)
+                    else:
+                        self.code.append(f"<script src=...> that is not the template's {TRUSTED_SCRIPT}")
+                elif name == "src" and not LOCAL_FILE.fullmatch((value or "").strip()):
+                    self.code.append(f"<{tag} src=...> that is not a file next to the page")
+            else:
+                self.code.append(f"the attribute {name} on <{tag}>, which the template never uses")
 
     def stack_is_hidden(self):
         return any(entry[1] for entry in self.stack)
@@ -147,16 +167,61 @@ class Visible(HTMLParser):
         if not text:
             return
         inside = [entry[0] for entry in self.stack if entry[0] in ("script", "style")]
-        if inside:
-            found = (JS_WRITES if inside[-1] == "script" else CSS_TEXT).search(data)
-            if found:
-                self.code.append(f"{'script' if inside[-1] == 'script' else 'style'} text `{found.group(0).strip()}`")
+        if inside and inside[-1] == "script":
+            self.code += [f"script that uses {problem}" for problem in js_problems(data)]
+        elif inside:
+            self.code += [f"a style that sets {problem}" for problem in css_problems(data)]
         for entry in reversed(self.stack):
             if entry[2] is not None:          # inside a data-label element: held back until we know it is a fixed label
                 entry[2].append(text)
                 return
         if not any(entry[1] for entry in self.stack):
             self.parts.append(text)
+
+
+def js_problems(js: str) -> list:
+    """What an inline script uses that the template's script does not: a name, a character, a quoted property name, a bracket."""
+    problems, code, pos = [], [], 0
+    for token in JS_TOKEN.finditer(js):
+        code.append(js[pos:token.start()])
+        pos = token.end()
+        text = token.group(0)
+        if text[0] in "\"'":
+            code.append('""')
+            if re.match(r"\s*:", js[pos:]) and text[1:-1] != "--tip":       # a quoted property name could be innerHTML
+                problems.append(f"the property name {text}")
+        else:
+            code.append(" ")                                                   # a comment
+    code.append(js[pos:])
+    code = re.sub(r"\b\d[\d.]*", "0", "".join(code)).replace('__timelines[""]', "__timelines")
+    code = re.sub(r'(?<![\w$)\]])\[\s*""(?:\s*,\s*"")*\s*\]', '""', code)       # a list of selectors; name[...] is not one
+    for name in sorted(set(re.findall(r"[A-Za-z_$][\w$]*", code))):
+        if name not in JS_NAMES and not re.fullmatch(r"S\d+", name):
+            problems.append(f"the name `{name}`")
+    rest = re.sub(r"[A-Za-z_$][\w$]*|\d+", " ", code)
+    problems += [f"the character `{char}`" for char in sorted(set(re.findall(r"[^\s(){},;:.=>+\-*/|\"]", rest)))]
+    return problems
+
+
+def css_problems(css: str, inline: bool = False) -> list:
+    """What a style sets that the template's style does not: a property outside the list, a content that is not empty, @-rules, url()."""
+    css = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+    problems = []
+    if "@" in css:
+        problems.append("an @-rule")
+    if re.search(r"url\s*\(|expression\s*\(|\\", css, re.I):
+        problems.append("url(), expression() or an escape")
+    body = css if inline else ";".join(re.findall(r"\{([^{}]*)\}", css))
+    for declaration in body.split(";"):
+        if ":" not in declaration:
+            continue
+        prop, value = (part.strip() for part in declaration.split(":", 1))
+        prop = prop.lower()
+        if not (prop in CSS_PROPERTIES or prop.startswith("--")):
+            problems.append(f"the property `{prop}`")
+        elif prop == "content" and value not in ('""', "''", "none", "normal"):
+            problems.append(f"content: {value}")
+    return problems
 
 
 def resolve(root, path):
@@ -275,8 +340,14 @@ def main() -> int:
     source = json.loads(Path(args.source).read_text(encoding="utf-8"))
     doc = json.loads(Path(args.lines).read_text(encoding="utf-8"))
     lines = doc["lines"]
-    allow = {w.lower() for w in args.allow} | {w.lower() for w in doc.get("allow", [])}
+    document_allow = {w.lower() for w in doc.get("allow", [])}
+    allow = {w.lower() for w in args.allow} | document_allow         # --allow is the operator's; the document's own list is vetted
     failures = 0
+    unvetted = sorted(document_allow - VIETNAMESE_WORDS)
+    if unvetted:
+        print(f"{args.lines}: `allow` lists {', '.join(unvetted)}, which are not Vietnamese words typed without diacritics that this check "
+              f"knows; a name has to come from the digest (or the operator passes --allow)")
+        failures += 1
 
     for line in lines:
         cited = line.get("source") or []
