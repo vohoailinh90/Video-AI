@@ -617,9 +617,19 @@ def worker_env(cfg: dict[str, str], keys: dict[str, str], model: str) -> dict[st
     return env
 
 
+def network_of(argv: list[str]) -> str | None:
+    """The `--network` a `docker run` argv names (None: the flag is missing, so docker's default bridge)."""
+    return argv[argv.index("--network") + 1] if "--network" in argv else None
+
+
 def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path) -> tuple[int, str]:
     """Run a container, streaming its output to `log`; return the exit code and
     the last OUTPUT_TAIL_BYTES of output (a looping model can print gigabytes)."""
+    if network_of(argv) != "none":
+        # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
+        problem = egress_problem()
+        if problem:
+            raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     with open(log, "ab") as sink:
         start = sink.tell()
@@ -769,7 +779,16 @@ def blockers(review: str) -> list[str]:
     return found
 
 
+def drop_review_warnings(state: dict) -> None:
+    """A warning the review stage raised describes that round (no reviewer answered, a fix not re-reviewed, blockers that
+    stand). A new round replaces it; warnings from other stages still apply and stay."""
+    stale = state.pop("review_warnings", [])
+    state["warnings"] = [w for w in state.get("warnings", []) if w not in stale]
+
+
 def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
+    """One review round, from the pipeline or from `team work reviewer`: it replaces the last round's review and warnings."""
+    drop_review_warnings(state)
     diff = f.out / "diff.patch"
     diff.write_text(git(f.repo, *readable_diff(f.repo), f"{merge_base(f, state)}..HEAD"), encoding="utf-8")
     mounts = handoff_mounts(f, {"diff.patch": diff, "gates.log": f.file("gates.log")})
@@ -786,6 +805,7 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
             state["reviewer_model"] = model
             return review
         say(f"reviewer: {model} returned no review block (exit {rc})")
+    warn(state, "no reviewer model returned a review", review=True)
     return None
 
 
@@ -906,13 +926,6 @@ def lock_busy(home: Path) -> bool:
     return False
 
 
-def drop_review_warnings(state: dict) -> None:
-    """A warning the review stage raised describes that round (no reviewer answered, a fix not re-reviewed, blockers that
-    stand). A new round replaces it; warnings from other stages still apply and stay."""
-    stale = state.pop("review_warnings", [])
-    state["warnings"] = [w for w in state.get("warnings", []) if w not in stale]
-
-
 def blocked(f: Feature, state: dict, reason: str) -> int:
     state["stage"] = f"blocked: {reason}"
     f.save_state(state)
@@ -922,6 +935,10 @@ def blocked(f: Feature, state: dict, reason: str) -> int:
 
 def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | None) -> int:
     for index, stage in enumerate(STAGES[STAGES.index(start):], STAGES.index(start)):
+        problem = None if stage == "pack" else egress_problem()
+        if problem:
+            state["next"] = stage
+            return blocked(f, state, problem)
         state["stage"] = f"running: {stage}"
         state["next"] = stage
         f.save_state(state)
@@ -938,11 +955,8 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
                                else "acceptance commands still fail after every coder attempt")
             state.pop("pending_feedback", None)
         elif stage == "review":
-            drop_review_warnings(state)
             review = run_reviewer(f, cfg, keys, state)
-            if review is None:
-                warn(state, "no reviewer model returned a review", review=True)
-            elif blockers(review):
+            if review is not None and blockers(review):
                 before = head(f.repo)
                 fix = "A reviewer found blockers. Fix them; change nothing else.\n\n" + review
                 if run_coder(f, cfg, keys, state, fix, attempts=1):
@@ -1083,13 +1097,15 @@ def cmd_work(args, home, cfg) -> int:
 def cmd_gates(args, home, cfg) -> int:
     f = Feature(home, args.id)
     f.require()
-    return 0 if run_gates(f, cfg) else 1
+    with run_lock(home):  # gates.log is also written by a running pipeline
+        return 0 if run_gates(f, cfg) else 1
 
 
 def cmd_pack(args, home, cfg) -> int:
     f = Feature(home, args.id)
     f.require()
-    return build_pack(f, cfg, f.load_state(), force=args.force)
+    with run_lock(home):  # audit-pack.md and state.json are also written by a running pipeline
+        return build_pack(f, cfg, f.load_state(), force=args.force)
 
 
 def cmd_push(args, home, cfg) -> int:

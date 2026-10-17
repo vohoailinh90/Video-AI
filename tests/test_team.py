@@ -708,6 +708,86 @@ class PipelineTests(Sandbox):
         self.assertIn("kept: a warning another stage raised", pack)
         self.assertEqual(f.load_state()["warnings"], ["kept: a warning another stage raised and that still applies"])
 
+    def test_a_standalone_reviewer_run_drops_the_previous_rounds_review_warnings(self):
+        # Codex's seventh review: `team work reviewer` is another way to run a review round, and it left the earlier
+        # round's warning behind, so a pack built afterwards still told the auditor that no reviewer had answered.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer='print("the reviewer is confused")')
+        self.assertEqual(run_cli("run", "F1")[0], 0)
+        self.assertIn("no reviewer model returned a review", f.load_state()["warnings"])
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        code, out = run_cli("work", "reviewer", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("review_warnings", f.load_state())
+        self.assertEqual(f.load_state().get("warnings", []), [])
+        code, out = run_cli("pack", "F1")
+        self.assertEqual(code, 0, out)
+        pack = f.file("audit-pack.md").read_text()
+        self.assertNotIn("no reviewer model returned a review", pack)
+        self.assertIn("No blockers.", pack)
+
+    def test_a_pipeline_review_round_raises_its_warning_once(self):
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer='print("the reviewer is confused")')
+        self.assertEqual(run_cli("run", "F1")[0], 0)
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer='print("still confused")')
+        self.assertEqual(run_cli("run", "F1", "--from", "review")[0], 0)
+        self.assertEqual(f.load_state()["warnings"].count("no reviewer model returned a review"), 1)
+
+    def test_a_standalone_pack_or_gates_run_refuses_while_a_pipeline_holds_the_lock(self):
+        # Codex's seventh review: both rewrite files a running pipeline is also writing (gates.log, audit-pack.md, state).
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(run_cli("run", "F1")[0], 0)
+        before = (f.file("gates.log").read_text(), f.file("audit-pack.md").read_text(), len(self.docker_runs()))
+        with team.run_lock(self.home):
+            for command in ("pack", "gates"):
+                code, out = run_cli(command, "F1")
+                self.assertNotEqual(code, 0, command)
+                self.assertIn("another pipeline is running", out, command)
+        self.assertEqual((f.file("gates.log").read_text(), f.file("audit-pack.md").read_text(),
+                          len(self.docker_runs())), before)
+        self.assertEqual(run_cli("gates", "F1")[0], 0)
+        self.assertEqual(run_cli("pack", "F1")[0], 0)
+
+    def test_the_pipeline_is_blocked_before_any_container_starts_when_the_egress_unit_is_down(self):
+        # Codex's seventh review (security): the egress rules live in team-egress.service. Without them team-net reaches
+        # the whole LAN and metadata endpoint, so no worker may start; doctor reporting it is not enough.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        with mock.patch.object(team, "egress_problem", lambda: "team-egress.service is not active: test"):
+            code, out = run_cli("run", "F1")
+        self.assertEqual(code, 2, out)
+        self.assertIn("team-egress.service is not active: test", out)
+        self.assertTrue(f.load_state()["stage"].startswith("blocked: "), f.load_state()["stage"])
+        self.assertEqual(self.docker_runs(), [])
+        code, out = run_cli("run", "F1")  # the unit is back: the same run now goes through
+        self.assertEqual(code, 0, out)
+        self.assertEqual(f.load_state()["stage"], "ready for audit")
+
+    def test_no_container_with_a_network_starts_while_the_egress_unit_is_down(self):
+        # The pre-stage check can be raced (the unit stops mid-run) and `team work` skips it: the launch itself refuses.
+        self.new_feature()
+        self.scenario(tester=WRITE_TEST)
+        with mock.patch.object(team, "egress_problem", lambda: "team-egress.service is not active: test"):
+            code, out = run_cli("work", "tester", "F1")
+            self.assertNotEqual(code, 0)
+            self.assertIn("team-egress.service is not active: test", out)
+            self.assertEqual(self.docker_runs(), [])
+            work = self.tmp / "gate-work"
+            work.mkdir()
+
+            def launch(network: str) -> int:
+                argv = ["docker", "run", "--rm", "--name", "t-gates", "--network", network, "-v", f"{work}:/work",
+                        "IMAGE", "bash", "-lc", "true"]
+                return team.run_docker(argv, "t-gates", 30, team.base_env(), self.tmp / "launch.log")[0]
+            for network in ("team-net", "bridge", "host"):
+                with self.assertRaises(SystemExit, msg=network):
+                    launch(network)
+            self.assertEqual(self.docker_runs(), [])
+            self.assertEqual(launch("none"), 0)  # no network, nothing to escape through
+            self.assertEqual(len(self.docker_runs()), 1)
+
     def test_reviewer_blockers_get_one_fix_round(self):
         f = self.new_feature()
         review = 'print("=== REVIEW ===\\nBLOCKER feature.py:1 - no docstring - add one\\nSUMMARY: x\\n=== END ===")'

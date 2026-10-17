@@ -198,7 +198,7 @@ Mẹo giữ quota Pro:
 | `team check-spec ID` | spec ≤120 dòng; mỗi task có `Files:`, `Do not touch:`, `Verify:`; acceptance có lệnh; không còn `TODO(` |
 | `team run ID [--from tester\|coder\|review\|pack\|verdict] [--detach]` | chạy pipeline; khi bị chặn, chạy lại sẽ tiếp tục từ bước hỏng |
 | `team work tester\|coder\|reviewer ID [--model M]` | chạy riêng một vai một lần |
-| `team gates ID` / `team pack ID [--force]` | chạy riêng gates hoặc đóng gói audit |
+| `team gates ID` / `team pack ID [--force]` | chạy riêng gates hoặc đóng gói audit (từ chối nếu đang có pipeline khác chạy, vì cùng ghi `gates.log`/`audit-pack.md`) |
 | `team status [ID]` | trạng thái mọi feature |
 | `team prompt NAME ID` | in prompt (`claude-spec`, `claude-audit`, `tester`, …) |
 | `team models PROVIDER [--free]` | liệt kê model id provider đang có |
@@ -257,7 +257,7 @@ Không đảm bảo, cần bạn tự quản:
 | worker thoát ngay, log báo lỗi config OpenCode | phiên bản OpenCode bạn cài không nhận một khoá trong `scripts/team/opencode.json`: bỏ khoá đó, chạy lại setup. Kiểm tra: `docker run --rm team-worker opencode --version` |
 | "another pipeline is running" | mỗi lúc chỉ chạy một pipeline (máy 8 GB, dùng chung với CI); chờ hoặc xem `team status` |
 | `blocked: …` | xem `out/*.log` và `gates.log`, sửa spec hoặc model, rồi `team run ID` để chạy tiếp |
-| worker không gọi được API | `systemctl status team-egress`, `docker network inspect team-net`. Nếu bạn gọi model qua proxy trong mạng nội bộ, hãy sửa `/usr/local/sbin/team-egress`. |
+| `BLOCKED: team-egress.service is not active` / worker không gọi được API | conductor không khởi động container có mạng khi service `team-egress` tắt (mất luật iptables thì `team-net` ra được cả LAN); chạy lại `setup-vps-team.sh`. Kiểm tra: `systemctl status team-egress`, `docker network inspect team-net`. Nếu bạn gọi model qua proxy trong mạng nội bộ, hãy sửa `/usr/local/sbin/team-egress`. |
 | `BLOCKED: every coder model run failed, last error: ... free-models-per-day` | hết quota `:free` trong ngày của OpenRouter: chờ sang ngày, nạp 5 credit, hoặc thêm model của provider khác vào `TEAM_MODELS_CODER` |
 | test cần cài thư viện | đặt `TEAM_GATES_SETUP` trong `team.env` (bước này có mạng, các lệnh gates thì không) |
 | pack quá dài | tách feature nhỏ hơn, hoặc `team pack ID --force` (tốn quota Claude hơn) |

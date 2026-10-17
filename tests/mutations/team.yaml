@@ -215,9 +215,45 @@ mutations:
   replace: ""
   test: tests.test_team.PipelineTests.test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack
 - label: a new review round keeps the previous round's review warnings
-  find: "            drop_review_warnings(state)\n"
-  replace: ""
+  find: "    drop_review_warnings(state)\n    diff = f.out / \"diff.patch\"\n"
+  replace: "    diff = f.out / \"diff.patch\"\n"
   test: tests.test_team.PipelineTests.test_a_new_review_round_drops_the_previous_rounds_review_warnings
+- label: a standalone reviewer run keeps the previous round's review warnings
+  find: "    drop_review_warnings(state)\n    diff = f.out / \"diff.patch\"\n"
+  replace: "    diff = f.out / \"diff.patch\"\n"
+  test: tests.test_team.PipelineTests.test_a_standalone_reviewer_run_drops_the_previous_rounds_review_warnings
+- label: a review round that gets no answer raises no warning
+  find: "    warn(state, \"no reviewer model returned a review\", review=True)\n    return None\n"
+  replace: "    return None\n"
+  test: tests.test_team.PipelineTests.test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack
+- label: the pipeline warns twice about a review nobody answered
+  find: "            review = run_reviewer(f, cfg, keys, state)\n"
+  replace: "            review = run_reviewer(f, cfg, keys, state)\n            if review is None:\n                warn(state, \"no reviewer model returned a review\", review=True)\n"
+  test: tests.test_team.PipelineTests.test_a_pipeline_review_round_raises_its_warning_once
+- label: standalone gates run beside a running pipeline
+  find: "    with run_lock(home):  # gates.log is also written by a running pipeline\n        return 0 if run_gates(f, cfg) else 1\n"
+  replace: "    return 0 if run_gates(f, cfg) else 1\n"
+  test: tests.test_team.PipelineTests.test_a_standalone_pack_or_gates_run_refuses_while_a_pipeline_holds_the_lock
+- label: standalone pack runs beside a running pipeline
+  find: "    with run_lock(home):  # audit-pack.md and state.json are also written by a running pipeline\n        return build_pack(f, cfg, f.load_state(), force=args.force)\n"
+  replace: "    return build_pack(f, cfg, f.load_state(), force=args.force)\n"
+  test: tests.test_team.PipelineTests.test_a_standalone_pack_or_gates_run_refuses_while_a_pipeline_holds_the_lock
+- label: a container with a network starts although the egress unit is down
+  find: "    if network_of(argv) != \"none\":\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
+- label: only the team network is checked for egress
+  find: "    if network_of(argv) != \"none\":\n"
+  replace: "    if network_of(argv) == \"team-net\":\n"
+  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
+- label: a container without a network is refused when the egress unit is down
+  find: "    if network_of(argv) != \"none\":\n"
+  replace: "    if True:\n"
+  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
+- label: the pipeline starts a stage although the egress unit is down
+  find: "        problem = None if stage == \"pack\" else egress_problem()\n"
+  replace: "        problem = None\n"
+  test: tests.test_team.PipelineTests.test_the_pipeline_is_blocked_before_any_container_starts_when_the_egress_unit_is_down
 - label: a new review round also drops the warnings other stages raised
   find: "    state[\"warnings\"] = [w for w in state.get(\"warnings\", []) if w not in stale]\n"
   replace: "    state[\"warnings\"] = []\n"
