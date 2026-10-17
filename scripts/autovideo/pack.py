@@ -203,6 +203,12 @@ def _file(value, root: Path, extensions: tuple[str, ...], where: str, problems: 
     if check_files and not path.is_file():
         problems.append(f"{where}: no such file: {path}")
         return None
+    if check_files:
+        try:
+            open(path, "rb").close()  # a file that is there but cannot be opened would only fail later, inside MPT
+        except OSError as exc:
+            problems.append(f"{where}: cannot read {path}: {exc.strerror or exc}")
+            return None
     return str(path.resolve())
 
 

@@ -163,6 +163,18 @@ class PackTests(unittest.TestCase):
         self.assertIn("list the video or image files", self.problems([video()], {"material_source": "local"}))
         self.assertIn("no such file", self.problems([video()], {"material_source": "local", "materials": ["missing.mp4"]}))
 
+    def test_a_local_input_that_cannot_be_read_is_a_problem_in_the_pack(self):
+        (self.root / "c.mp4").write_bytes(b"aaaa")
+        (self.root / "a.mp3").write_bytes(b"bbbb")
+        defaults = {"material_source": "local", "materials": ["c.mp4"], "audio_file": "a.mp3", "subtitles": False}
+        packmod.load_pack(write_pack(self.root, [video()], defaults))  # readable: fine
+        # (these tests run as root, which can read anything, so the failure is simulated)
+        with mock.patch.object(packmod, "open", side_effect=PermissionError(13, "Permission denied"), create=True):
+            text = self.problems([video()], defaults)
+        self.assertIn(".materials[0]: cannot read", text)
+        self.assertIn(".audio_file: cannot read", text)
+        self.assertIn("Permission denied", text)
+
     def test_tts_unfriendly_text_is_a_warning_not_an_error(self):
         scenes = [{"narration": "Xem tại https://example.com **ngay**", "terms": ["a"]}]
         pack = packmod.load_pack(write_pack(self.root, [{"id": "01-a", "title": "T", "scenes": scenes}]))
