@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -122,20 +123,29 @@ def collect(job: Job, result: engine_mpt.EngineResult, dest: Path) -> dict:
     return files
 
 
-def stored_outputs(dest: Path, files: dict) -> dict[str, int]:
-    """Name and size of every file collect() stored (the video, the narration and subtitles when there are any, and the transcripts).
-    The state keeps them so that a render which is later cut short, or loses a file, is not still called finished. job.json is not in
-    the list: its content is read and compared with the job's fingerprint, which says more than a size."""
+def _sha256(path: Path) -> str | None:
+    """SHA-256 of a file, None when it is not there or cannot be read."""
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
+    except OSError:
+        return None
+
+
+def stored_outputs(dest: Path, files: dict) -> dict[str, str]:
+    """Name and SHA-256 of every file collect() stored (the video, the narration and subtitles when there are any, and the transcripts).
+    The state keeps them so that a render which is later cut short, loses a file, or has a file swapped for another is not still called
+    finished. job.json is not in the list: its content is read and compared with the job's fingerprint."""
     names = [files["video"], files["narration"], files["subtitles"], "transcript.txt", "transcript.json"]
-    return {name: (dest / name).stat().st_size for name in names if name}
+    return {name: _sha256(dest / name) or "" for name in names if name}
 
 
 def outputs_intact(entry: dict, dest: Path) -> bool:
-    """Every file the render stored is still there, at the size it had. A state without the list (an older one) cannot say, so no."""
+    """Every file the render stored is still there with the content it had. A state without the list cannot say, so no."""
     outputs = entry.get("outputs")
     if not outputs:
         return False
-    return all((dest / name).is_file() and (dest / name).stat().st_size == size for name, size in outputs.items())
+    return all(digest and _sha256(dest / name) == digest for name, digest in outputs.items())
 
 
 def evaluate(job: Job, dest: Path) -> list[qa.Check]:

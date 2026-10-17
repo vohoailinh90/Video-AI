@@ -485,6 +485,16 @@ class RunnerTests(FakeMptCase):
         summary, _ = self.run_pack([video()])
         self.assertEqual((summary["done"], summary["skipped"]), (0, 1))  # and the new render is whole
 
+    def test_a_video_changed_without_changing_its_size_is_rendered_again(self):
+        self.run_pack([video()])
+        file = self.out / "test-batch" / "01-first" / "video.mp4"
+        data = bytearray(file.read_bytes())
+        data[len(data) // 2] ^= 0xFF  # one flipped byte: same name, same size, not the video that passed QA
+        file.write_bytes(bytes(data))
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
+        self.assertEqual(self.renders(), 2)
+
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
         self.assertEqual((summary["qa_failed"], self.renders()), (1, 2))
@@ -712,13 +722,16 @@ class CliTests(FakeMptCase):
         folder = self.out / "test-batch" / "01-first"
         status = lambda: (lambda r: (r[0], json.loads(r[1])[0]["status"]))(self.call("status", str(path), "--json", *mpt))
         self.assertEqual(status(), (0, "done"))
-        damage = {
-            "video.mp4": lambda f: f.write_bytes(b""),  # cut to nothing
-            "subtitles.srt": lambda f: f.unlink(),  # a sidecar that QA asked for, deleted
-            "narration.mp3": lambda f: f.unlink(),
-            "transcript.json": lambda f: f.unlink(),
-        }
-        for name, harm in damage.items():
+        flipped = lambda f: f.write_bytes(bytes(b ^ 0xFF if i == 5 else b for i, b in enumerate(f.read_bytes())))  # same size, one byte differs
+        damage = [
+            ("video.mp4", lambda f: f.write_bytes(b"")),  # cut to nothing
+            ("video.mp4", flipped),
+            ("narration.mp3", flipped),
+            ("subtitles.srt", lambda f: f.unlink()),  # a sidecar that QA asked for, deleted
+            ("narration.mp3", lambda f: f.unlink()),
+            ("transcript.json", lambda f: f.unlink()),
+        ]
+        for name, harm in damage:
             file = folder / name
             original = file.read_bytes()
             harm(file)
