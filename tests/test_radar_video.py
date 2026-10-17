@@ -869,7 +869,7 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(check_facts.untraced(text, check_facts.blob({"fact": name}), set()), [], text)
         self.assertEqual(check_facts.untraced("Open/AI", check_facts.blob({"fact": "Open／AI"}), set()), [])      # nor can the source's own be missed
         # what is not a compatibility form of one ASCII character is left alone
-        for symbol in ("™", "…", "½", "®", "°", "×", " "):
+        for symbol in ("™", "…", "®", "°", "×", " "):
             self.assertEqual(numbers_vi.plain_text(symbol), symbol, repr(symbol))
         self.assertEqual(check_facts.untraced("npm™ …", check_facts.blob({"fact": "npm"}), set()), [])
         # the Roman numeral characters are letters (Nl): ⅩⅨ% is XIX%, and the name has to be in the source
@@ -878,6 +878,14 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.untraced("ⅩⅨ%", check_facts.blob({"fact": "XIX%"}), set()), [])
         self.assertEqual(numbers_vi.speak_text("tăng ⅩⅨ%"), "tăng XIX%")
         self.assertEqual(numbers_vi.plain_text("〇"), "〇")                                  # a character with no ASCII form is left alone
+        # a vulgar fraction is its numerator and its denominator, set apart from a digit before it and a percent sign after it
+        self.assertEqual(numbers_vi.plain_text("½%"), " 1/2 %")
+        self.assertEqual(check_facts.numbers("½%"), {"1", "2%"})
+        self.assertEqual(check_facts.numbers("1½"), {"1", "2"})                              # 1 and 1/2, not 11/2
+        self.assertEqual(check_facts.untraced("½%", plain, set()), ["number 1", "number 2%"])
+        self.assertEqual(check_facts.untraced("⅓ và ¾", plain, set()), ["number 1", "number 3", "number 4"])
+        self.assertEqual(check_facts.untraced("½%", check_facts.blob({"fact": "tăng 1/2%"}), set()), [])
+        self.assertEqual(numbers_vi.speak_text("½%").strip(), "một/hai phần trăm")
 
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):

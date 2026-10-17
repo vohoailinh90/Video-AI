@@ -24,6 +24,8 @@ def plain_char(c: str) -> str:
     if category in ("Nd", "No"):
         if folded.isascii() and folded.isdigit():
             return folded
+        if "\u2044" in folded and folded.replace("\u2044", "").isascii() and folded.replace("\u2044", "").isdigit():     # a vulgar fraction, ½ ⅓ ¼ (NFKC: 1⁄2): the numerator and the denominator, set apart
+            return " " + folded.replace("\u2044", "/") + " "      # from a digit before it (1½ is 1 and 1/2) and from a % after it
         digit = unicodedata.digit(c, None)
         return str(digit) if digit is not None else c
     if category == "So" and len(folded) == 1 and folded.isascii() and folded.isalpha():
