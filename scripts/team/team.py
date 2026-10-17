@@ -126,6 +126,7 @@ DEFAULTS = {
     "TEAM_PACK_MAX_BYTES": "250000",
     "TEAM_LOG_MAX_BYTES": "20000000",
     "TEAM_WORKSPACE_GROWTH_BYTES": "3000000000",
+    "TEAM_MIN_FREE_BYTES": "1000000000",
     "TEAM_MAP_MAX_LINES": "600",
     "TEAM_GIT_NAME": "team-bot",
     "TEAM_GIT_EMAIL": "team-bot@localhost",
@@ -147,6 +148,12 @@ VIDEO_EXCLUDES = ("renders/", "snapshots/", ".hyperframes/")
 ARG_BATCH = 200
 # `pack --force` lifts TEAM_PACK_MAX_BYTES, but the diff it quotes still stops here, so it is never held whole.
 PACK_FORCE_DIFF_BYTES = 20_000_000
+# A list of changed paths is read only this far (a worker can make empty files with long names almost for free), and a list of
+# every path in the tree this far; past it the conductor stops with "too many paths" instead of holding gigabytes of names.
+PATHS_MAX_BYTES = 8_000_000
+TREE_PATHS_MAX_BYTES = 64_000_000
+# One handoff file is copied for a worker only up to this size (gates.log is capped at TEAM_LOG_MAX_BYTES, 20 MB by default).
+HANDOFF_FILE_MAX_BYTES = 64_000_000
 CUT_NOTE = "\n[team] diff cut at {limit} bytes: the rest of it was not read\n"
 SENSITIVE_PATH_RE = re.compile(
     r"(^|/)(\.github|\.claude|\.gitlab-ci\.yml|\.gitattributes|\.codex|\.agents|CLAUDE\.md|AGENTS(?:\.override)?\.md|\.cursorrules|\.hermes\.md"
@@ -406,28 +413,54 @@ def git(repo: Path, *args: str, check: bool = True) -> str:
     return result.stdout
 
 
-def git_paths(repo: Path, *args: str) -> list[str]:
-    """A -z path list that round-trips: surrogateescape keeps a non-UTF-8 name
-    byte-exact when it goes back to git as an argument. Text meant for reading
-    goes through git() and its lossy decode instead."""
-    result = subprocess.run(["git", *GIT_SAFE, "-C", str(repo), *args], capture_output=True)
-    if result.returncode:
-        raise SystemExit(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8', 'replace').strip()}")
-    return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]
-
-
-def git_capped(repo: Path, *args: str, limit: int) -> tuple[str, bool]:
+def read_capped(repo: Path, args: tuple[str, ...] | list[str], limit: int) -> tuple[bytes, bool]:
     """`git *args` output, at most `limit` bytes of it; True when there was more. Git is stopped at the limit rather than
-    waited for, so a diff of gigabytes is never held in memory or written out whole."""
+    waited for, so output of gigabytes is never held in memory or written out whole."""
     with subprocess.Popen(["git", *GIT_SAFE, "-C", str(repo), *args], stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL) as proc:
-        data = proc.stdout.read(limit + 1)
+        data = bytearray()
+        while len(data) <= limit:  # in chunks: one read(limit + 1) allocates its whole size at once, even for a short output
+            chunk = proc.stdout.read1(min(1 << 16, limit + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
         cut = len(data) > limit
         if cut:
             proc.kill()
         elif proc.wait():
             raise SystemExit(f"git {' '.join(args)} failed")
-    return data[:limit].decode("utf-8", "replace"), cut
+    return bytes(data[:limit]), cut
+
+
+def too_many_paths(args: tuple[str, ...] | list[str], limit: int) -> SystemExit:
+    return SystemExit(f"too many paths: `git {' '.join(args)}` lists more than {limit} bytes of names. "
+                      "Nothing that size can be audited: split the feature")
+
+
+def git_paths(repo: Path, *args: str, limit: int | None = None) -> list[str]:
+    """A -z path list that round-trips: surrogateescape keeps a non-UTF-8 name
+    byte-exact when it goes back to git as an argument. Text meant for reading
+    goes through git() and its lossy decode instead. Stops with "too many paths"
+    past `limit` (PATHS_MAX_BYTES) instead of holding the whole list."""
+    limit = PATHS_MAX_BYTES if limit is None else limit
+    data, cut = read_capped(repo, args, limit)
+    if cut:
+        raise too_many_paths(args, limit)
+    return [os.fsdecode(path) for path in data.split(b"\0") if path]
+
+
+def git_listing(repo: Path, *args: str) -> str:
+    """git_paths for output meant to be read as text (a -z listing shown in the pack): the same ceiling, lossy decode."""
+    data, cut = read_capped(repo, args, PATHS_MAX_BYTES)
+    if cut:
+        raise too_many_paths(args, PATHS_MAX_BYTES)
+    return data.decode("utf-8", "replace")
+
+
+def git_capped(repo: Path, *args: str, limit: int) -> tuple[str, bool]:
+    """`git *args` output as text, at most `limit` bytes of it; True when there was more."""
+    data, cut = read_capped(repo, args, limit)
+    return data.decode("utf-8", "replace"), cut
 
 
 def readable_diff(repo: Path) -> tuple[str, ...]:
@@ -504,9 +537,9 @@ def untrack_caches(repo: Path, base: str) -> None:
     if subprocess.run(["git", *GIT_SAFE, "-C", str(repo), "rev-parse", "--verify", "--quiet", f"{base}^{{tree}}"],
                       capture_output=True).returncode:
         return  # no base to tell the pipeline's caches from the repository's
-    at_base = set(git_paths(repo, "ls-tree", "-r", "-z", "--name-only", base))
+    at_base = set(git_paths(repo, "ls-tree", "-r", "-z", "--name-only", base, limit=TREE_PATHS_MAX_BYTES))
     excludes = [f"--exclude={pattern}" for pattern in local_excludes()]
-    tracked = git_paths(repo, "ls-files", "-z", "--cached", "--ignored", *excludes)
+    tracked = git_paths(repo, "ls-files", "-z", "--cached", "--ignored", *excludes, limit=TREE_PATHS_MAX_BYTES)
     added = [path for path in tracked if path not in at_base]
     if added:  # on stdin, as plain paths (not pathspecs), however many there are
         result = subprocess.run(["git", *GIT_SAFE, "-C", str(repo), "update-index", "-z", "--force-remove", "--stdin"],
@@ -515,12 +548,49 @@ def untrack_caches(repo: Path, base: str) -> None:
             raise SystemExit(f"git update-index failed: {result.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def commit_all(repo: Path, message: str, base: str) -> bool:
+def changed_bytes(repo: Path) -> int:
+    """Bytes of the regular files `git add -A` would store: those `git status` lists as modified or untracked."""
+    args = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    data, cut = read_capped(repo, args, PATHS_MAX_BYTES)
+    if cut:
+        raise too_many_paths(args, PATHS_MAX_BYTES)
+    total, skip = 0, False
+    for record in data.split(b"\0"):
+        if skip:  # a rename or copy is followed by the name it came from
+            skip = False
+            continue
+        if len(record) < 4:
+            continue
+        skip = record[:1] in (b"R", b"C")
+        try:
+            info = os.lstat(repo / os.fsdecode(record[3:]))
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            total += info.st_size
+    return total
+
+
+def commit_all(repo: Path, message: str, base: str, min_free: int = 0) -> bool:
     """Commit the whole working tree, then delete what stayed out of the commit,
     so the next worker starts from exactly HEAD. The conductor commits, never
-    the model."""
+    the model.
+
+    `git add -A` writes a loose object for every changed file: an output just inside the workspace allowance costs about that
+    much again. So the changed files must fit in the free space with `min_free` to spare, or the attempt is discarded and
+    the run stops, rather than the disk filling in the middle of staging."""
     restore_permissions(repo)
     ensure_excludes(repo)
+    try:
+        need = changed_bytes(repo)
+    except SystemExit:  # too many changed paths: nothing of this attempt is kept
+        discard(repo)
+        raise
+    free = shutil.disk_usage(repo).free
+    if free < need + min_free:
+        discard(repo)
+        raise SystemExit(f"not enough free disk space to stage this change: {need} bytes of changed files, {free} bytes free, "
+                         f"{min_free} to keep in reserve (TEAM_MIN_FREE_BYTES). The attempt was discarded; free some space and run again")
     git(repo, "add", "-A")
     untrack_caches(repo, base)
     staged = subprocess.run(["git", *GIT_SAFE, "-C", str(repo), "diff", "--cached", "--quiet"]).returncode != 0
@@ -830,16 +900,59 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
     return rc, ANSI_RE.sub("", bytes(tail[-OUTPUT_TAIL_BYTES:]).decode("utf-8", "replace"))
 
 
+def stage_file(src: Path, dst: Path) -> None:
+    """Copy one handoff file for a worker.
+
+    The feature directory is group-writable, so `src` is whatever the lead left there. A link to workers.env mounted as is would
+    have Docker, which follows it as root, bind the provider keys into a networked container. So the file is opened without
+    following links, must be a plain file of a sane size, and is copied; the copy is what gets mounted."""
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)  # NONBLOCK: a named pipe must not hang us
+    except OSError as exc:
+        raise SystemExit(f"handoff file {src} is a link or cannot be read ({exc.strerror}): refusing to mount it") from None
+    with os.fdopen(fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise SystemExit(f"handoff file {src} is not a plain file: refusing to mount it")
+        copied, too_big = 0, False
+        with os.fdopen(os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as target:
+            for chunk in iter(lambda: source.read(1 << 20), b""):
+                copied += len(chunk)
+                if copied > HANDOFF_FILE_MAX_BYTES:
+                    too_big = True
+                    break
+                target.write(chunk)
+    if too_big:
+        dst.unlink()
+        raise SystemExit(f"handoff file {src} is larger than {HANDOFF_FILE_MAX_BYTES} bytes: refusing to mount it")
+
+
+@contextlib.contextmanager
+def staged_mounts(f: Feature, mounts: dict[str, Path]):
+    """The handoff files as copies in a directory made for this call, in the team home (which the lead's login cannot write).
+    Their names are fixed strings; the directories they come from must not be links either."""
+    for directory in {path.parent for path in mounts.values()}:
+        if directory.is_symlink():
+            raise SystemExit(f"{directory} is a link: refusing to mount handoff files from it")
+    root = Path(tempfile.mkdtemp(prefix=".handoff-", dir=f.home))
+    try:
+        for name, path in mounts.items():
+            stage_file(path, root / name)
+        yield {name: root / name for name in mounts}
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def run_worker(cfg, f: Feature, role: str, model: str, mounts: dict[str, Path], prompt: str,
                keys: dict[str, str]) -> tuple[int, str]:
     say(f"{role}: {model}")
-    argv = worker_argv(cfg, f, role, model, mounts, prompt)
     log = f.out / f"{role}-{time.strftime('%Y%m%d-%H%M%S')}.log"
     log.write_text(f"# {role} {model} {now()}\n", encoding="utf-8")
-    return run_docker(argv, container_name(f, role), int(cfg["TEAM_WORKER_TIMEOUT"]),
-                      worker_env(cfg, keys, model), log, int(cfg["TEAM_LOG_MAX_BYTES"]),
-                      workspace=None if role == "reviewer" else f.repo,  # the reviewer's checkout is mounted read-only
-                      workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
+    with staged_mounts(f, mounts) as staged:
+        argv = worker_argv(cfg, f, role, model, staged, prompt)
+        return run_docker(argv, container_name(f, role), int(cfg["TEAM_WORKER_TIMEOUT"]),
+                          worker_env(cfg, keys, model), log, int(cfg["TEAM_LOG_MAX_BYTES"]),
+                          workspace=None if role == "reviewer" else f.repo,  # the reviewer's checkout is mounted read-only
+                          workspace_growth=int(cfg["TEAM_WORKSPACE_GROWTH_BYTES"]))
 
 
 def handoff_mounts(f: Feature, extra: dict[str, Path] | None = None) -> dict[str, Path]:
@@ -990,7 +1103,8 @@ def run_tester(f: Feature, cfg, keys, state: dict) -> bool:
     prompt = render(shipped(PROMPTS, "tester.md"), id=f.id)
     for model in models_for(cfg, "tester"):
         rc, _ = run_worker(cfg, f, "tester", model, handoff_mounts(f), prompt, keys)
-        if rc == 0 and commit_all(f.repo, f"test({f.id}): acceptance tests [{model}]", merge_base(f, state)):
+        if rc == 0 and commit_all(f.repo, f"test({f.id}): acceptance tests [{model}]", merge_base(f, state),
+                                  int(cfg["TEAM_MIN_FREE_BYTES"])):
             state["tester_commit"] = head(f.repo)
             state["tester_model"] = model
             if run_gates(f, cfg):
@@ -1021,7 +1135,8 @@ def run_coder(f: Feature, cfg, keys, state: dict, feedback: str | None, attempts
             last_error = last_line(output)
             say(f"coder: {model} failed (exit {rc}): {last_error}")
             continue
-        commit_all(f.repo, f"feat({f.id}): attempt {attempt + 1} [{model}]", merge_base(f, state))
+        commit_all(f.repo, f"feat({f.id}): attempt {attempt + 1} [{model}]", merge_base(f, state),
+                   int(cfg["TEAM_MIN_FREE_BYTES"]))
         if run_gates(f, cfg):
             state["coder_model"] = model
             state.pop("gate_feedback", None)
@@ -1120,7 +1235,7 @@ def binary_paths(repo: Path, revs: str) -> list[str]:
     """Paths the Diff shows only as `Binary files ... differ`. readable_diff
     ignores attributes, so this is git's content test, and one NUL byte passes
     it: a worker can hide a source file that way, so the auditor gets the list."""
-    records = git(repo, *readable_diff(repo), "--numstat", "-z", "--no-renames", revs).split("\0")
+    records = git_listing(repo, *readable_diff(repo), "--numstat", "-z", "--no-renames", revs).split("\0")
     return [record.split("\t", 2)[2] for record in records if record.startswith("-\t-\t")]
 
 
@@ -1197,7 +1312,7 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
         add("Test files changed after the tester commit", body)
     else:
         add("Test files changed after the tester commit", "UNKNOWN: no tester commit recorded")
-    touched = [p for p in git(f.repo, "diff", "-z", "--name-only", "--no-renames", f"{base}..HEAD").split("\0") if p]
+    touched = [p for p in git_listing(f.repo, "diff", "-z", "--name-only", "--no-renames", f"{base}..HEAD").split("\0") if p]
     add("Sensitive paths changed (CI on this VPS, agent instructions): BLOCK unless the spec asks for it",
         "\n".join(p for p in touched if SENSITIVE_PATH_RE.search(p)))
     add("Lockfiles changed (their diff is in Diff below: check every new, swapped or re-resolved package, URL "
@@ -1205,7 +1320,9 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
         "\n".join(p for p in touched if any(Path(p).match(name) for name in LOCKFILES)))
     add("Binary files changed (their contents are NOT in this pack, and one NUL byte makes any file binary, "
         "source included): BLOCK unless the spec asks for each one", "\n".join(binary_paths(f.repo, f"{base}..HEAD")))
-    add("Diffstat", git(f.repo, *readable_diff(f.repo), "--stat", f"{base}..HEAD"))
+    stat_text, stat_cut = git_capped(f.repo, *readable_diff(f.repo), "--stat", f"{base}..HEAD", limit=diff_limit)
+    cut_anywhere = cut_anywhere or stat_cut
+    add("Diffstat", stat_text + (CUT_NOTE.format(limit=diff_limit) if stat_cut else ""))
     shown, cut = git_capped(f.repo, *readable_diff(f.repo), f"{base}..HEAD", limit=diff_limit)
     cut_anywhere = cut_anywhere or cut
     add("Diff", "```diff\n" + shown.rstrip() + (CUT_NOTE.format(limit=diff_limit) if cut else "") + "\n```")

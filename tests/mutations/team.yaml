@@ -87,8 +87,8 @@ mutations:
   replace: '    return ("diff", "--no-ext-diff", "--no-textconv")'
   test: tests.test_team.PipelineTests.test_gitattributes_cannot_hide_a_diff_from_the_auditor
 - label: a diff byte that is not UTF-8 crashes the conductor
-  find: "    return data[:limit].decode(\"utf-8\", \"replace\"), cut\n"
-  replace: "    return data[:limit].decode(\"utf-8\"), cut\n"
+  find: "    return data.decode(\"utf-8\", \"replace\"), cut\n"
+  replace: "    return data.decode(\"utf-8\"), cut\n"
   test: tests.test_team.PipelineTests.test_a_real_binary_is_summarised_and_never_crashes_the_pipeline
 - label: real binaries are dumped as text instead of summarised
   find: '    return (f"--attr-source={empty_tree}", "diff", "--no-ext-diff", "--no-textconv")'
@@ -135,12 +135,12 @@ mutations:
   replace: "    ensure_excludes(repo)\n"
   test: tests.test_team.GitSafetyTests.test_worker_permissions_cannot_wedge_the_checkout
 - label: path lists are decoded lossily, so a non-UTF-8 test file drops out of the weakening view
-  find: '    return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]'
-  replace: '    return [path.decode("utf-8", "replace") for path in result.stdout.split(b"\0") if path]'
+  find: '    return [os.fsdecode(path) for path in data.split(b"\0") if path]'
+  replace: '    return [path.decode("utf-8", "replace") for path in data.split(b"\0") if path]'
   test: tests.test_team.PipelineTests.test_a_weakened_test_with_a_non_utf8_name_is_shown_too
 - label: the diffstat honours a worker's .gitattributes again
-  find: '    add("Diffstat", git(f.repo, *readable_diff(f.repo), "--stat", f"{base}..HEAD"))'
-  replace: '    add("Diffstat", git(f.repo, "diff", "--stat", f"{base}..HEAD"))'
+  find: '    stat_text, stat_cut = git_capped(f.repo, *readable_diff(f.repo), "--stat", f"{base}..HEAD", limit=diff_limit)'
+  replace: '    stat_text, stat_cut = git_capped(f.repo, "diff", "--stat", f"{base}..HEAD", limit=diff_limit)'
   test: tests.test_team.PipelineTests.test_gitattributes_cannot_hide_a_diff_from_the_auditor
 - label: a blocked coder blames the code when no model run worked at all
   find: "    state[\"coder_error\"] = \"\" if last_gates else last_error\n"
@@ -247,8 +247,8 @@ mutations:
   replace: "    changed = git_paths(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{tester_commit}..HEAD\")\n"
   test: tests.test_team.PipelineTests.test_a_renamed_tester_file_is_still_shown_to_the_auditor
 - label: a renamed sensitive file is hidden from the sensitive-paths section
-  find: "    touched = [p for p in git(f.repo, \"diff\", \"-z\", \"--name-only\", \"--no-renames\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
-  replace: "    touched = [p for p in git(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
+  find: "    touched = [p for p in git_listing(f.repo, \"diff\", \"-z\", \"--name-only\", \"--no-renames\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
+  replace: "    touched = [p for p in git_listing(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{base}..HEAD\").split(\"\\0\") if p]\n"
   test: tests.test_team.PipelineTests.test_a_renamed_sensitive_file_is_still_listed
 - label: doctor stops reporting an inactive egress unit
   find: "    if subprocess.run([\"systemctl\", \"is-active\", \"--quiet\", \"team-egress.service\"]).returncode:\n"
@@ -583,12 +583,12 @@ mutations:
   replace: ''
   test: tests.test_team.VideoTeamTests.test_no_container_logs_through_dockers_unrotated_json_file_driver
 - label: "git_capped returns one byte more than its limit"
-  find: "    return data[:limit].decode(\"utf-8\", \"replace\"), cut\n"
-  replace: "    return data.decode(\"utf-8\", \"replace\"), cut\n"
+  find: "    return bytes(data[:limit]), cut\n"
+  replace: "    return bytes(data), cut\n"
   test: tests.test_team.PipelineTests.test_git_capped_stops_reading_at_the_limit
 - label: "git_capped reads the whole output before cutting it"
-  find: "        data = proc.stdout.read(limit + 1)\n"
-  replace: "        data = proc.stdout.read()\n"
+  find: "        while len(data) <= limit:  # in chunks: one read(limit + 1) allocates its whole size at once, even for a short output\n            chunk = proc.stdout.read1(min(1 << 16, limit + 1 - len(data)))\n"
+  replace: "        while True:\n            chunk = proc.stdout.read1(1 << 16)\n"
   test: tests.test_team.PipelineTests.test_a_huge_diff_is_never_held_whole_for_the_reviewer
 - label: "the reviewer's diff is captured whole again"
   find: "    text, cut = git_capped(f.repo, *readable_diff(f.repo), f\"{merge_base(f, state)}..HEAD\", limit=limit)\n"
@@ -614,3 +614,75 @@ mutations:
   find: "{'at least ' if cut_anywhere else ''}"
   replace: "{''}"
   test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
+- label: "a link as a handoff file is followed when it is copied"
+  find: "os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC"
+  replace: "os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC"
+  test: tests.test_team.PipelineTests.test_a_handoff_file_that_is_a_link_is_never_mounted_into_a_worker
+- label: "a handoff file that is a named pipe is read"
+  find: "        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):\n"
+  replace: "        if False:\n"
+  test: tests.test_team.PipelineTests.test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read
+- label: "opening a named pipe as a handoff file waits for a writer"
+  find: "os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC"
+  replace: "os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC"
+  test: tests.test_team.PipelineTests.test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read
+- label: "a handoff file of any size is copied"
+  find: "                if copied > HANDOFF_FILE_MAX_BYTES:\n"
+  replace: "                if False:\n"
+  test: tests.test_team.PipelineTests.test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read
+- label: "a handoff directory that is a link is mounted from"
+  find: "        if directory.is_symlink():\n"
+  replace: "        if False:\n"
+  test: tests.test_team.PipelineTests.test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read
+- label: "the staged handoff copies are group-readable"
+  find: "os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600"
+  replace: "os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644"
+  test: tests.test_team.PipelineTests.test_workers_get_copies_of_the_handoff_files_that_only_the_conductor_can_change
+- label: "the staged handoff copies are left behind"
+  find: "        shutil.rmtree(root, ignore_errors=True)\n"
+  replace: "        pass\n"
+  test: tests.test_team.PipelineTests.test_workers_get_copies_of_the_handoff_files_that_only_the_conductor_can_change
+- label: "workers are given the original handoff files again"
+  find: "        yield {name: root / name for name in mounts}\n"
+  replace: "        yield dict(mounts)\n"
+  test: tests.test_team.PipelineTests.test_workers_get_copies_of_the_handoff_files_that_only_the_conductor_can_change
+- label: "staging does not check the free disk space"
+  find: "    if free < need + min_free:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_staging_checks_the_free_disk_space_before_git_writes_a_second_copy
+- label: "staging ignores the free-space reserve"
+  find: "    if free < need + min_free:\n"
+  replace: "    if free < need:\n"
+  test: tests.test_team.PipelineTests.test_staging_checks_the_free_disk_space_before_git_writes_a_second_copy
+- label: "staging counts no changed bytes"
+  find: "            total += info.st_size\n"
+  replace: "            total += 0\n"
+  test: tests.test_team.PipelineTests.test_staging_checks_the_free_disk_space_before_git_writes_a_second_copy
+- label: "a refused staging keeps the worker's files"
+  find: "        discard(repo)\n        raise SystemExit(f\"not enough free disk space"
+  replace: "        raise SystemExit(f\"not enough free disk space"
+  test: tests.test_team.PipelineTests.test_staging_checks_the_free_disk_space_before_git_writes_a_second_copy
+- label: "the tester stage does not pass the free-space reserve"
+  find: "                                  int(cfg[\"TEAM_MIN_FREE_BYTES\"])):"
+  replace: "                                  0):"
+  test: tests.test_team.PipelineTests.test_a_pipeline_stage_stops_when_the_disk_cannot_hold_what_the_worker_wrote
+- label: "the coder stage does not pass the free-space reserve"
+  find: "attempt {attempt + 1} [{model}]\", merge_base(f, state),\n                   int(cfg[\"TEAM_MIN_FREE_BYTES\"]))"
+  replace: "attempt {attempt + 1} [{model}]\", merge_base(f, state),\n                   0)"
+  test: tests.test_team.PipelineTests.test_a_pipeline_stage_stops_when_the_disk_cannot_hold_what_the_worker_wrote
+- label: "a list of changed paths of any size is held in memory"
+  find: "    if cut:\n        raise too_many_paths(args, limit)\n    return [os.fsdecode"
+  replace: "    if False:\n        raise too_many_paths(args, limit)\n    return [os.fsdecode"
+  test: tests.test_team.PipelineTests.test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed
+- label: "the pack lists changed paths without a ceiling"
+  find: "    if cut:\n        raise too_many_paths(args, PATHS_MAX_BYTES)\n    return data.decode"
+  replace: "    if False:\n        raise too_many_paths(args, PATHS_MAX_BYTES)\n    return data.decode"
+  test: tests.test_team.PipelineTests.test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed
+- label: "staging lists changed paths without a ceiling"
+  find: "    if cut:\n        raise too_many_paths(args, PATHS_MAX_BYTES)\n    total, skip"
+  replace: "    if False:\n        raise too_many_paths(args, PATHS_MAX_BYTES)\n    total, skip"
+  test: tests.test_team.PipelineTests.test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed
+- label: "the tree-wide listings share the changed-paths ceiling"
+  find: "\"--name-only\", base, limit=TREE_PATHS_MAX_BYTES)"
+  replace: "\"--name-only\", base)"
+  test: tests.test_team.PipelineTests.test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed

@@ -1451,6 +1451,147 @@ class PipelineTests(Sandbox):
         self.assertIn("diff cut at 300000 bytes", section, "the test files' own diff is capped too")
         self.assertLess(len(section), 301_000)
 
+    def test_a_handoff_file_that_is_a_link_is_never_mounted_into_a_worker(self):
+        # Codex's twenty-fourth review: the feature directory is group-writable and the conductor owns workers.env. A link
+        # called repo-map.txt (or spec.md) pointing at it would make Docker bind the provider keys into a networked worker.
+        f = self.new_feature()
+        leak = textwrap.dedent("""
+            src = handoff.get("/handoff/repo-map.txt")
+            if src:
+                open(work + "/leak.txt", "w").write(open(src).read())
+        """)
+        self.scenario(tester=leak, coder=leak, reviewer=NO_BLOCKERS)
+        (f.dir / "repo-map.txt").unlink(missing_ok=True)
+        (f.dir / "repo-map.txt").symlink_to(self.home / "workers.env")
+        code, out = run_cli("work", "tester", "F1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("repo-map.txt", out)
+        self.assertIn("link", out)
+        self.assertFalse((f.repo / "leak.txt").exists())
+        self.assertEqual([r for r in self.docker_runs() if r["name"].endswith("-tester")], [], "no container was started")
+        (f.dir / "repo-map.txt").unlink()
+        (f.dir / "spec.md").unlink()
+        (f.dir / "spec.md").symlink_to(self.home / "workers.env")
+        self.assertNotEqual(run_cli("work", "tester", "F1")[0], 0, "any handoff file, not only the repo map")
+        (f.out / "feedback.md").unlink(missing_ok=True)
+        (f.out / "feedback.md").symlink_to(self.home / "workers.env")
+        self.assertNotEqual(run_cli("work", "reviewer", "F1")[0], 0)
+
+    def test_workers_get_copies_of_the_handoff_files_that_only_the_conductor_can_change(self):
+        f = self.new_feature()
+        seen = textwrap.dedent("""
+            rows = [name + " " + path for name, path in sorted(handoff.items()) if name.startswith("/handoff/")]
+            open(work + "/seen.txt", "w").write("\\n".join(rows) + "\\n")
+            open(work + "/spec-copy.txt", "w").write(open(handoff["/handoff/spec.md"]).read())
+            import stat
+            open(work + "/mode.txt", "w").write(oct(stat.S_IMODE(os.stat(handoff["/handoff/spec.md"]).st_mode)))
+        """)
+        self.scenario(tester=seen, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(run_cli("work", "tester", "F1")[0], 0)
+        self.assertEqual((f.repo / "spec-copy.txt").read_text(), SPEC)
+        self.assertEqual((f.repo / "mode.txt").read_text(), "0o600")
+        paths = [row.split(" ", 1)[1] for row in (f.repo / "seen.txt").read_text().split("\n") if row]
+        self.assertTrue(paths)
+        for path in paths:
+            self.assertNotIn(str(f.dir), path, "a copy outside the group-writable feature directory, not the original")
+            self.assertTrue(path.startswith(str(self.home)), path)
+        self.assertEqual(list(self.home.glob(".handoff-*")), [], "the copies are removed once the worker is done")
+
+    def test_a_handoff_that_is_a_pipe_or_far_too_big_is_refused_instead_of_read(self):
+        import signal
+        f = self.new_feature()
+        fifo = f.dir / "pipe.md"
+        os.mkfifo(fifo)
+
+        def alarm(signum, frame):
+            raise AssertionError("reading a named pipe blocked")
+        previous = signal.signal(signal.SIGALRM, alarm)
+        signal.alarm(20)
+        try:
+            with self.assertRaises(SystemExit) as raised:
+                team.stage_file(fifo, self.tmp / "staged-pipe")
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
+        self.assertIn("not a plain file", str(raised.exception))
+        with mock.patch.object(team, "HANDOFF_FILE_MAX_BYTES", 10):
+            with self.assertRaises(SystemExit) as raised:
+                team.stage_file(f.file("spec.md"), self.tmp / "staged-big")
+        self.assertIn("larger than", str(raised.exception))
+        self.assertFalse((self.tmp / "staged-big").exists(), "nothing half-copied is left")
+        # a link in the path to the file, not only as the file itself
+        real = self.tmp / "real-dir"
+        real.mkdir()
+        (real / "spec.md").write_text("x")
+        (self.tmp / "link-dir").symlink_to(real)
+        with self.assertRaises(SystemExit) as raised:
+            with team.staged_mounts(f, {"spec.md": self.tmp / "link-dir" / "spec.md"}):
+                pass
+        self.assertIn("is a link", str(raised.exception))
+
+    def test_a_pipeline_stage_stops_when_the_disk_cannot_hold_what_the_worker_wrote(self):
+        # the reserve reaches commit_all from both stages that stage a worker's files
+        f = self.new_feature()
+        self.write_env({**MODELS, "TEAM_MIN_FREE_BYTES": str(10**15)})
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        for stage in ("tester", "coder"):
+            code, out = run_cli("work", stage, "F1")
+            self.assertNotEqual(code, 0, stage)
+            self.assertIn("free disk space", out, stage)
+
+    def test_staging_checks_the_free_disk_space_before_git_writes_a_second_copy(self):
+        # Codex's twenty-fourth review: `git add -A` writes a loose object per changed file, so a worker output just inside
+        # the workspace allowance costs about that much again, and nothing checked there was room.
+        import collections
+        usage = collections.namedtuple("usage", "total used free")
+        f = self.new_feature()
+        big = f.repo / "big.bin"
+        big.write_bytes(os.urandom(5_000_000))
+        before = team.head(f.repo)
+        for free in (4_000_000, 5_200_000):  # less than the file, then less than the file plus the reserve
+            with mock.patch.object(team.shutil, "disk_usage", lambda path, free=free: usage(10**12, 10**12 - free, free)):
+                with self.assertRaises(SystemExit) as raised:
+                    team.commit_all(f.repo, "msg", "main", min_free=1_000_000)
+            self.assertIn("free disk space", str(raised.exception))
+            self.assertFalse(big.exists(), "the attempt is discarded, which gives the space back")
+            self.assertEqual(team.head(f.repo), before, "nothing was staged or committed")
+            big.write_bytes(os.urandom(5_000_000))
+        with mock.patch.object(team.shutil, "disk_usage", lambda path: usage(10**12, 0, 10**12)):
+            self.assertTrue(team.commit_all(f.repo, "msg", "main", min_free=1_000_000))
+        self.assertNotEqual(team.head(f.repo), before)
+
+    def test_a_change_touching_a_huge_number_of_paths_is_refused_before_it_is_listed(self):
+        # Codex's twenty-fourth review: empty files cost almost nothing against the workspace allowance, yet their names
+        # were captured whole by `git diff --name-only` and held in memory during `team pack`.
+        f = self.new_feature()
+        (f.repo / "d").mkdir()
+        for i in range(600):
+            (f.repo / "d" / f"{'p' * 200}{i:05d}").write_text("x")
+        self.assertTrue(team.commit_all(f.repo, "many", "main", min_free=0))
+        with mock.patch.object(team, "PATHS_MAX_BYTES", 50_000):
+            with self.assertRaises(SystemExit) as raised:
+                team.git_paths(f.repo, "diff", "-z", "--name-only", "main..HEAD")
+            self.assertIn("too many paths", str(raised.exception))
+            cfg = {**team.DEFAULTS, **MODELS}
+            with mock.patch.object(team, "gates_problem", lambda feature: None):
+                with self.assertRaises(SystemExit) as raised:
+                    team.build_pack(f, cfg, f.load_state())
+            self.assertIn("too many paths", str(raised.exception))
+            self.assertFalse(f.file("audit-pack.md").exists())
+        self.assertEqual(len(team.git_paths(f.repo, "diff", "-z", "--name-only", "main..HEAD")), 600, "under the ceiling it lists them all")
+        # staging lists what changed, with the same ceiling; the tree-wide listings it makes have a much larger one
+        (f.repo / "next.txt").write_text("y")
+        many = team.head(f.repo)
+        with mock.patch.object(team, "PATHS_MAX_BYTES", 50_000):
+            self.assertTrue(team.commit_all(f.repo, "more", many, min_free=0), "600 tracked paths at base are fine tree-wide")
+            for i in range(600):
+                (f.repo / "d" / f"{'q' * 200}{i:05d}").write_text("z")
+            with self.assertRaises(SystemExit) as raised:
+                team.commit_all(f.repo, "too many", many, min_free=0)
+            self.assertIn("too many paths", str(raised.exception))
+            self.assertEqual(sorted(path.name for path in (f.repo / "d").iterdir() if path.name.startswith("q")), [],
+                             "the attempt is discarded")
+
     def test_a_worker_that_fills_the_checkout_fails_and_its_files_are_discarded(self):
         f = self.new_feature()
         self.write_env({**MODELS, "TEAM_WORKSPACE_GROWTH_BYTES": "5000000"})
@@ -1482,8 +1623,9 @@ class PipelineTests(Sandbox):
     def test_the_output_cap_is_configurable_and_documented(self):
         self.assertEqual(int(team.DEFAULTS["TEAM_LOG_MAX_BYTES"]), 20_000_000)
         self.assertEqual(int(team.DEFAULTS["TEAM_WORKSPACE_GROWTH_BYTES"]), 3_000_000_000)
+        self.assertEqual(int(team.DEFAULTS["TEAM_MIN_FREE_BYTES"]), 1_000_000_000)
         for name in ("team.env.example", "team.env.video.example"):
-            for key in ("TEAM_LOG_MAX_BYTES", "TEAM_WORKSPACE_GROWTH_BYTES"):
+            for key in ("TEAM_LOG_MAX_BYTES", "TEAM_WORKSPACE_GROWTH_BYTES", "TEAM_MIN_FREE_BYTES"):
                 self.assertIn(key, (ROOT / "scripts" / "team" / name).read_text(), (name, key))
 
     def test_a_pack_is_refused_when_the_gates_ran_on_other_code(self):
