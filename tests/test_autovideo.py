@@ -515,6 +515,24 @@ class CliTests(FakeMptCase):
             self.assertIn(bad[0], err)
         self.assertEqual(self.call("run", str(path), *base, "--retries", "0", "--timeout", "60")[0], 0)  # the same setup works with sane values
 
+    def test_plan_with_no_usable_mpt_is_not_ready(self):
+        path = write_pack(self.root, [video()])
+        code, out, err = self.call("plan", str(path), "--json", "--mpt-home", str(self.root / "no-mpt-here"))
+        self.assertEqual(code, 1)
+        self.assertIn("no MoneyPrinterTurbo checkout", json.loads(out)["videos"][0]["problem"])  # the reason is in the answer, not only on stderr
+        code, _, _ = self.call("plan", str(path), "--mpt-home", str(self.env.home), "--mpt-python", str(self.root / "no-python"))
+        self.assertEqual(code, 1)
+
+    def test_json_is_offered_only_by_the_commands_that_print_it(self):
+        path = write_pack(self.root, [video()])
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        for command in ("validate", "qa"):
+            self.assertEqual(self.call(command, str(path), "--json", *base)[0], 2, command)  # the option does not exist there
+        self.assertEqual(self.call("doctor", "--json", "--mpt-home", str(self.env.home))[0], 2)
+        for command in ("plan", "status"):
+            code, out, _ = self.call(command, str(path), "--json", *base)
+            json.loads(out)  # these do print JSON
+
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)
         self.assertEqual(code, 0)
@@ -535,6 +553,17 @@ class QaTests(unittest.TestCase):
             self.assertTrue(checks["subtitle_order"].ok)
             self.assertFalse(checks["subtitle_inside_video"].ok)
             self.assertIn("100.0", checks["subtitle_inside_video"].detail)
+
+    def test_no_voice_and_silent_music_expects_no_sound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "video.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=108x192:d=3:r=10", "-f", "lavfi",
+                            "-i", "anullsrc=r=22050:cl=mono", "-t", "3", "-pix_fmt", "yuv420p", str(media)], check=True)  # a silent track, as MPT makes for no-voice
+            silent = packmod.load_pack(write_pack(Path(tmp), [video(voice="no-voice", bgm="random", bgm_volume=0, subtitles=False)])).jobs[0]
+            self.assertTrue(qa.passed(qa.check_video(silent, media, None, [])))  # asked for a silent video, got one
+            music = packmod.load_pack(write_pack(Path(tmp), [video(voice="no-voice", bgm="random", bgm_volume=0.2, subtitles=False)])).jobs[0]
+            failed = [c.name for c in qa.check_video(music, media, None, []) if not c.ok]
+            self.assertIn("audible", failed)  # with the music on, silence is a defect
 
     def test_unreadable_file_fails_first_check(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -78,7 +78,8 @@ def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) 
     vstreams = [s for s in streams if s.get("codec_type") == "video"]
     astreams = [s for s in streams if s.get("codec_type") == "audio"]
     add("video_stream", len(vstreams) == 1, f"{len(vstreams)} video stream(s)")
-    expects_audio = job.reads_aloud or job.audio_file is not None or job.bgm != "none"
+    music = job.bgm != "none" and job.bgm_volume > 0  # MPT skips the music when its volume is zero
+    expects_audio = job.reads_aloud or job.audio_file is not None or music
     add("audio_stream", bool(astreams) or not expects_audio, f"{len(astreams)} audio stream(s)")
 
     if vstreams:

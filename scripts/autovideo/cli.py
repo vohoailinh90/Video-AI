@@ -8,7 +8,8 @@
   python3 scripts/autovideo/main.py doctor            ffmpeg, ffprobe, the MPT checkout and which of its keys are set (never their values)
 
 <pack> is a JSON file or a directory (pack.json + videos/<id>.json). Output goes to build/autovideo/<batch>/ (gitignored).
-Exit codes: 0 all good, 1 a video failed, failed QA, is missing or stale (rendered from an older version of the pack), 2 the pack or the arguments are wrong.
+Exit codes: 0 all good, 1 a video failed, failed QA, is missing or stale (rendered from an older version of the pack), or `plan` finds a setup that
+cannot run; 2 the pack or the arguments are wrong. --json (plan, run, status) prints machine-readable output.
 """
 from __future__ import annotations
 
@@ -69,18 +70,18 @@ def cmd_validate(args) -> int:
 
 def cmd_plan(args) -> int:
     pack = _load(args)
+    setup_problem = None
     try:
         env = engine_mpt.locate(args.mpt_home, args.mpt_python)
     except engine_mpt.MptError as exc:
-        env = None
-        print(f"note: setup not checked: {exc}", file=sys.stderr)
+        env, setup_problem = None, str(exc)  # `run` cannot start either, so the plan is not ready; the reason is part of the answer
     plan = []
     for job in pack.jobs:
         plan.append({
             "id": job.id, "title": job.title, "scenes": len(job.scenes), "estimated_seconds": job.estimate_seconds(),
             "target_seconds": [job.min_seconds, job.max_seconds], "aspect": job.aspect, "language": job.language,
             "voice": job.audio_file or job.voice, "source": job.material_source, "terms": list(job.terms),
-            "problem": runner.preflight(env, job) if env else None,
+            "problem": runner.preflight(env, job) if env else setup_problem,
             "mpt_params": engine_mpt.video_params(job),
         })
     blocked = any(p["problem"] for p in plan)
@@ -164,20 +165,21 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="autovideo", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    def common(p, pack=True):
+    def common(p, pack=True, json_output=False):
         if pack:
             p.add_argument("pack", help="pack JSON file, or directory with pack.json and videos/")
         p.add_argument("--out", default=str(DEFAULT_OUT), help="output root (default: %(default)s)")
         p.add_argument("--mpt-home", help="MoneyPrinterTurbo checkout (default: $MPT_HOME, then ~/MoneyPrinterTurbo)")
         p.add_argument("--mpt-python", help="Python that runs MPT's cli.py (default: $MPT_PYTHON, then <mpt-home>/.venv, then uv run)")
-        p.add_argument("--json", action="store_true", help="print machine-readable output")
+        if json_output:
+            p.add_argument("--json", action="store_true", help="print machine-readable output")
 
     for name, fn, text in (
         ("validate", cmd_validate, "check a pack"), ("plan", cmd_plan, "show what would run"), ("run", cmd_run, "render the jobs"),
         ("status", cmd_status, "show how far each job got"), ("qa", cmd_qa, "run QA again on rendered folders"),
     ):
         p = sub.add_parser(name, help=text)
-        common(p)
+        common(p, json_output=name in ("plan", "run", "status"))
         p.set_defaults(fn=fn)
         if name in ("run", "qa"):
             p.add_argument("--only", help="comma-separated video ids")

@@ -57,13 +57,13 @@ Ví dụ đặt gói ở `batches/<batch>/` (thư mục này chưa có; tạo kh
 
 ```bash
 python3 scripts/autovideo/main.py validate batches/meo-lam-video      # kiểm gói, không cần mạng và không cần MPT
-python3 scripts/autovideo/main.py plan     batches/meo-lam-video      # từng video: thời lượng ước tính, tham số MPT, thiếu khóa/font/nhạc nào (--json)
+python3 scripts/autovideo/main.py plan     batches/meo-lam-video      # từng video: thời lượng ước tính, tham số MPT, thiếu khóa/font/nhạc nào (`--json` có ở plan, run, status)
 python3 scripts/autovideo/main.py run      batches/meo-lam-video      # render lần lượt; --only 01-ba-meo, --force, --retries 1, --timeout 1800
 python3 scripts/autovideo/main.py status   batches/meo-lam-video      # pending / done / failed / qa_failed / stale (gói đã đổi) / missing (mất video) / unchecked (đổi ngưỡng QA, chưa kiểm lại)
 python3 scripts/autovideo/main.py qa       batches/meo-lam-video      # chạy lại QA trên video đã có, không render
 ```
 
-Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`, tính cả file thật và ngưỡng QA hiện tại), 1 có video lỗi, không qua QA, chưa render, mất file, hoặc là bản cũ so với gói (`stale`), 2 gói hoặc tham số sai (kể cả `--retries` âm, `--timeout` không dương). Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
+Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`, tính cả file thật và ngưỡng QA hiện tại), 1 có video lỗi, không qua QA, chưa render, mất file, hoặc là bản cũ so với gói (`stale`) (với `plan`: không tìm thấy MPT, hoặc thiếu khóa/font/nhạc khiến `run` không chạy được), 2 gói hoặc tham số sai (kể cả `--retries` âm, `--timeout` không dương). Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
 
 ```
 state.json  summary.json  summary.md
