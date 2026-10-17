@@ -55,7 +55,7 @@ ffprobe/ffmpeg:
 | audio dài ≥ 90% video | `audio.min_coverage` |
 | loudness tích hợp | −30…−10 LUFS (nên đặt quanh −16 theo spec) |
 | true peak (méo/clipping) | ≤ −0,1 dBFS |
-| khoảng im lặng dài nhất | ≤ 4 s |
+| khoảng im lặng dài nhất (đoạn lặng ở cuối audio cộng phần video không còn audio tính là một) | ≤ 4 s |
 
 Đây là heuristic, không phải thính giác: loudness dùng gating tương đối của EBU R128 và
 `silence gap` chỉ đếm quãng im lặng dài hơn ngưỡng, nên một video chỉ có vài giây tiếng to xen

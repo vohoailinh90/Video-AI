@@ -27,8 +27,8 @@ mutations:
   replace: 'check(True, "silence gap",'
   test: tests.test_video_gates.EvaluateTests.test_a_long_silence_fails
 - label: a dead tail is not counted as silence
-  find: "    if start is not None:\n        gaps.append(audio_length - start)\n"
-  replace: "    if False:\n        gaps.append(audio_length - start)\n"
+  find: "    if start is not None:\n        trailing = audio_length - start\n"
+  replace: "    if False:\n        trailing = audio_length - start\n"
   test: tests.test_video_gates.ParserTests.test_a_silence_that_never_ends_runs_to_the_end_of_the_audio
 - label: a short audio track passes
   find: 'check(coverage >= opts.get("min_coverage", 0.9), "audio coverage",'
@@ -59,8 +59,8 @@ mutations:
   replace: "    except KeyError:\n        return 0.0\n"
   test: tests.test_video_gates.FrameRateTests.test_fractions_whole_numbers_and_unknowns
 - label: the silent tail after the audio stream is not counted
-  find: "    longest = max(max(gaps, default=0.0), tail)\n"
-  replace: "    longest = max(gaps, default=0.0)\n"
+  find: "    longest = max(max(gaps, default=0.0), trailing + tail)\n"
+  replace: "    longest = max(max(gaps, default=0.0), trailing)\n"
   test: tests.test_video_gates.EvaluateTests.test_a_silent_tail_after_the_audio_stream_ends_counts_as_silence
 - label: "a picture that stops before the sound passes"
   find: "abs(picture_length - expected[\"duration_s\"]) <= tolerance, \"video duration\""
@@ -74,3 +74,23 @@ mutations:
   find: "if picture not in (None, \"N/A\") else None"
   replace: "if picture is not None else None"
   test: tests.test_video_gates.EvaluateTests.test_a_video_stream_that_reports_no_duration_is_unmeasured_not_passed
+- label: "the trailing silence and the missing tail are compared instead of added"
+  find: "    longest = max(max(gaps, default=0.0), trailing + tail)\n"
+  replace: "    longest = max(max(gaps, default=0.0), trailing, tail)\n"
+  test: tests.test_video_gates.EvaluateTests.test_trailing_silence_and_the_missing_audio_tail_are_one_silence
+- label: "the missing tail is added to a silence inside the audio"
+  find: "    longest = max(max(gaps, default=0.0), trailing + tail)\n"
+  replace: "    longest = max(gaps, default=0.0) + tail\n"
+  test: tests.test_video_gates.EvaluateTests.test_the_tail_does_not_add_to_a_silence_inside_the_audio
+- label: "a silence closed at the end of the stream is filed with the inner ones"
+  find: "            if end >= audio_length - EOF_EDGE_S:\n"
+  replace: "            if False:\n"
+  test: tests.test_video_gates.ParserTests.test_a_silence_ffmpeg_closes_at_the_end_of_the_stream_is_the_trailing_one
+- label: "a silence that ends just short of the stream's end is not trailing"
+  find: "            if end >= audio_length - EOF_EDGE_S:\n"
+  replace: "            if end >= audio_length:\n"
+  test: tests.test_video_gates.ParserTests.test_a_silence_ffmpeg_closes_at_the_end_of_the_stream_is_the_trailing_one
+- label: "only silences as long as the limit are reported, so a short trailing one is invisible"
+  find: "SILENCE_MIN_S = 0.2"
+  replace: "SILENCE_MIN_S = 4.0"
+  test: tests.test_video_gates.RenderedClipTests.test_silence_at_the_end_of_a_short_audio_stream_adds_to_the_missing_tail

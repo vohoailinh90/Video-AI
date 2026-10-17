@@ -74,9 +74,21 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(gates.parse_loudness("nothing here"), (None, None))
 
     def test_a_silence_that_never_ends_runs_to_the_end_of_the_audio(self):
-        gaps = gates.parse_silences(SILENCE, audio_length=12.0)
+        gaps, trailing = gates.parse_silences(SILENCE, audio_length=12.0)
+        self.assertEqual(len(gaps), 1)
         self.assertAlmostEqual(gaps[0], 5.01401, places=3)
-        self.assertAlmostEqual(gaps[1], 3.5, places=3)
+        self.assertAlmostEqual(trailing, 3.5, places=3)
+
+    def test_a_silence_ffmpeg_closes_at_the_end_of_the_stream_is_the_trailing_one(self):
+        # Codex's twelfth review: newer ffmpeg ends a trailing silence with a silence_end at the stream's last frame,
+        # so it must not be filed with the silences inside the audio.
+        closed = ("[silencedetect @ 0x1] silence_start: 5.0\n"
+                  "[silencedetect @ 0x1] silence_end: 8.99 | silence_duration: 3.99\n"
+                  "[silencedetect @ 0x1] silence_start: 1.0\n[silencedetect @ 0x1] silence_end: 2.5 | silence_duration: 1.5\n")
+        gaps, trailing = gates.parse_silences(closed, audio_length=9.0)
+        self.assertEqual([round(g, 2) for g in gaps], [1.5])
+        self.assertAlmostEqual(trailing, 4.0, places=2)
+        self.assertEqual(gates.parse_silences("", audio_length=9.0), ([], 0.0))
 
 
 class FrameRateTests(unittest.TestCase):
@@ -95,8 +107,8 @@ class FrameRateTests(unittest.TestCase):
 class EvaluateTests(unittest.TestCase):
     GOOD = (-14.0, -3.0)
 
-    def run_checks(self, media=None, loudness=GOOD, gaps=(), expected=None):
-        return gates.evaluate(media or info(), loudness, list(gaps), expected or EXPECT)
+    def run_checks(self, media=None, loudness=GOOD, gaps=(), expected=None, trailing=0.0):
+        return gates.evaluate(media or info(), loudness, list(gaps), expected or EXPECT, trailing)
 
     def test_a_matching_video_with_sound_passes_every_check(self):
         self.assertEqual(failed(self.run_checks()), [])
@@ -127,6 +139,20 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(failed(checks), ["silence gap"])
         detail = next(text for ok, name, text in checks if name == "silence gap")
         self.assertIn("5.0s", detail)
+
+    def test_trailing_silence_and_the_missing_audio_tail_are_one_silence(self):
+        # Codex's twelfth review: 4 s of silence at the end of a 9 s audio stream, in a 10 s video, is 5 s of nothing, not
+        # the larger of 4 and 1.
+        media, expected = info(duration=10.0, audio_duration=9.0), {**EXPECT, "duration_s": 10}
+        checks = self.run_checks(media, expected=expected, trailing=4.0)
+        self.assertEqual(failed(checks), ["silence gap"])
+        self.assertIn("5.0s", next(text for ok, name, text in checks if name == "silence gap"))
+        self.assertEqual(failed(self.run_checks(media, expected=expected, trailing=2.0)), [], "3 s in all")
+        self.assertEqual(failed(self.run_checks(media, expected=expected, trailing=0.0)), [])
+
+    def test_the_tail_does_not_add_to_a_silence_inside_the_audio(self):
+        media, expected = info(duration=10.0, audio_duration=9.0), {**EXPECT, "duration_s": 10}
+        self.assertEqual(failed(self.run_checks(media, expected=expected, gaps=[3.5])), [], "an inner pause and a 1 s tail")
 
     def test_a_short_tail_within_the_limit_is_fine(self):
         checks = self.run_checks(info(duration=50.0, audio_duration=47.0), expected={**EXPECT, "duration_s": 50})
@@ -224,13 +250,20 @@ class RenderedClipTests(unittest.TestCase):
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=1.5",
                         "-f", "lavfi", "-i", "sine=frequency=440:duration=4,volume=3", *encode, "-c:a", "aac",
                         str(cls.dir / "short-picture.mp4")], check=True)
+        # 1.5 s of sound, 2.5 s of digital silence, then the audio stream ends two seconds before the picture does.
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=6",
+                        "-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,1.5)\\,0.2*sin(2*PI*440*t)\\,0):d=4:s=44100", *encode,
+                        "-c:a", "aac", str(cls.dir / "dead-ending.mp4")], check=True)
+        cls.expect_dead = cls.dir / "expected-dead.json"
+        cls.expect_dead.write_text(json.dumps({"duration_s": 6, "width": 640, "height": 360, "fps": 25,
+                                               "audio": {"min_coverage": 0.5}}))
         cls.expect = cls.dir / "expected.json"
         cls.expect.write_text(json.dumps({"duration_s": 4, "width": 640, "height": 360, "fps": 25}))
 
-    def verdict(self, name):
+    def verdict(self, name, expect=None):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = gates.main([str(self.dir / name), "--expect", str(self.expect)])
+            code = gates.main([str(self.dir / name), "--expect", str(expect or self.expect)])
         return code, json.loads(out.getvalue().splitlines()[-1])
 
     def test_a_clip_with_sound_passes(self):
@@ -249,6 +282,11 @@ class RenderedClipTests(unittest.TestCase):
     def test_a_picture_that_ends_before_the_sound_is_rejected(self):
         code, summary = self.verdict("short-picture.mp4")
         self.assertEqual((code, summary["failed"]), (1, ["video duration"]))
+
+    def test_silence_at_the_end_of_a_short_audio_stream_adds_to_the_missing_tail(self):
+        # 2.5 s of silence inside the audio stream plus 2 s with no audio at all: neither passes the 4 s limit alone.
+        code, summary = self.verdict("dead-ending.mp4", self.expect_dead)
+        self.assertEqual((code, summary["failed"]), (1, ["silence gap"]))
 
     def test_a_missing_render_is_rejected(self):
         code, summary = self.verdict("never-rendered.mp4")
