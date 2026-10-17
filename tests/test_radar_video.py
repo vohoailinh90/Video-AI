@@ -893,6 +893,24 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(numbers_vi.speak_text("-19%"), "âm mười chín phần trăm")
         self.assertEqual(check_facts.numbers("âm 19%"), check_facts.numbers("-19%"))
 
+    def test_a_sign_one_space_before_its_digits_is_still_the_sign(self):
+        for text, value in (("- 19%", "-19%"), ("(− 3)", "-3"), ("x: - 5", "-5"), ("= - 5", "-5"), ("Δ: + 2,5%", "+2.5%"), ("－ 7", "-7"), ("➖ 7", "-7")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        positive = check_facts.blob({"fact": "tăng 19%"})
+        self.assertEqual(check_facts.untraced("- 19%", positive, set()), ["number -19%"])
+        self.assertEqual(check_facts.untraced("- 19%", check_facts.blob({"fact": "giảm -19%"}), set()), [])
+        self.assertEqual(check_facts.untraced("-19%", check_facts.blob({"fact": "giảm: - 19%"}), set()), [])       # nor can the source's be missed
+        self.assertEqual(check_facts.untraced("-19%", check_facts.blob({"fact": "giảm - 19%"}), set()), ["number -19%"])   # a dash after a word is no sign
+        # the voice says it
+        self.assertEqual(numbers_vi.speak_text("- 19%"), "âm mười chín phần trăm")
+        self.assertEqual(numbers_vi.speak_text("tăng: + 2,5%"), "tăng: cộng hai phẩy năm phần trăm")
+        # after a word or a number the same characters are a dash, an addition or a range
+        for text, values in (("Stars - 62.958", {"62958"}), ("tăng + 19%", {"19%"}), ("1 + 1", {"1"}), ("a - 5", {"5"}), ("5 - 10 phút", {"5", "10"}),
+                             ("10 % - 5", {"10%", "5"}), ("Python 3.10 - 3.12", {"3.10", "3.12"})):
+            self.assertEqual(check_facts.numbers(text), values, text)
+        self.assertEqual(numbers_vi.speak_text("Stars - 62.958"), "Stars - sáu mươi hai nghìn chín trăm năm mươi tám")
+        self.assertEqual(numbers_vi.speak_text("5 - 10 phút"), "năm - mười phút")
+
     def test_letters_apart_by_a_new_line_inside_a_value_are_a_row_but_not_across_values(self):
         source = check_facts.blob({"fact": "VoiceStudio chạy cục bộ"})
         for text in ("G\nP\nT", "G\r\nP\r\nT", "G \n P\t\tT"):
