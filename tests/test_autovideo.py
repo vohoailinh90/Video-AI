@@ -5,13 +5,15 @@
 import contextlib
 import hashlib
 import io
-import os
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -681,6 +683,54 @@ class CliTests(FakeMptCase):
             self.assertEqual(self.call("qa", str(path), *mpt)[0], 3)
             self.assertIn(self.call("status", str(path), "--json", *mpt)[0], (0, 1))  # status only reads
         self.assertEqual(self.call("run", str(path), *mpt)[0], 0)
+
+    def _alive(self, pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def _interrupt_a_running_cli(self, sig):
+        """Start the CLI as a real process against an MPT that never finishes, send it `sig`, and return the pid of that MPT."""
+        (self.env.home / "cli.py").write_text("import os, sys, time\nopen('mpt.pid', 'w').write(str(os.getpid()))\ntime.sleep(120)\n")
+        pidfile = self.env.home / "mpt.pid"
+        path = write_pack(self.root, [video()])
+        main = Path(__file__).resolve().parents[1] / "scripts" / "autovideo" / "main.py"
+        cli_process = subprocess.Popen(
+            [sys.executable, "-I", str(main), "run", str(path), "--out", str(self.out), "--mpt-home", str(self.env.home),
+             "--mpt-python", sys.executable, "--retries", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        pid = None
+        try:
+            for _ in range(300):  # the child is up when it has written its pid
+                if pidfile.exists() and pidfile.read_text():
+                    pid = int(pidfile.read_text())
+                    break
+                time.sleep(0.1)
+            self.assertIsNotNone(pid, "the fake MPT never started")
+            cli_process.send_signal(sig)
+            cli_process.wait(timeout=30)
+            for _ in range(50):  # the kill is sent before the CLI exits, but give the system a moment to reap
+                if not self._alive(pid):
+                    break
+                time.sleep(0.1)
+            return pid
+        finally:
+            if cli_process.poll() is None:
+                cli_process.kill()
+            if pid and self._alive(pid):
+                os.kill(pid, signal.SIGKILL)  # never leave the fake MPT behind, whatever the test found
+
+    def test_ctrl_c_stops_mpt_too(self):
+        pid = self._interrupt_a_running_cli(signal.SIGINT)
+        self.assertFalse(self._alive(pid), "MPT went on rendering after Ctrl-C")
+
+    def test_sigterm_stops_mpt_too(self):
+        pid = self._interrupt_a_running_cli(signal.SIGTERM)
+        self.assertFalse(self._alive(pid), "MPT went on rendering after SIGTERM")
+        with runner.batch_lock(self.out / "test-batch"):  # and the batch is free for the next run
+            pass
 
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)

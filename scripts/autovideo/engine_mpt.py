@@ -176,6 +176,15 @@ def _path(env: MptEnv, value) -> Path | None:
     return path if path.is_absolute() else (env.home / path).resolve()
 
 
+def _stop(proc: subprocess.Popen) -> tuple[str, str]:
+    """Kill MPT with everything it started (it leads its own process group) and collect what it had printed."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:  # it had just finished
+        pass
+    return proc.communicate()
+
+
 def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResult:
     """Run MPT for one job and wait for it. Never raises for a failed render: the result says what failed."""
     workdir.mkdir(parents=True, exist_ok=True)
@@ -189,9 +198,14 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        stdout, stderr = proc.communicate()
+        _, stderr = _stop(proc)
         return EngineResult(False, failed_stage="timeout", error=f"MPT did not finish within {timeout:g} s", log_tail=_log(env, workdir, stderr))
+    except BaseException:
+        # Ctrl-C, or SIGTERM (the CLI turns it into SystemExit), or anything else that ends the wait. MPT runs in its own session so it
+        # gets no signal from the terminal: left alone it would go on rendering after this process lets go of the batch, and the next run
+        # would start a second MPT beside it. Stop it and reap it, then let the interruption go on.
+        _stop(proc)
+        raise
 
     tail = _log(env, workdir, stderr)
     data = _summary(stdout)

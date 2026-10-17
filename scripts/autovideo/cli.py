@@ -17,7 +17,9 @@ import argparse
 import json
 import math
 import shutil
+import signal
 import sys
+import threading
 from pathlib import Path
 
 from . import engine_mpt, qa, runner
@@ -176,6 +178,10 @@ def cmd_doctor(args) -> int:
     return 0 if ok else 1
 
 
+def _on_sigterm(signum, frame):
+    raise SystemExit(128 + signum)  # unwinds like Ctrl-C does, so the render in progress is stopped and the batch lock is released
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="autovideo", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -207,4 +213,10 @@ def main(argv=None) -> int:
     p.set_defaults(fn=cmd_doctor)
 
     args = parser.parse_args(argv)
-    return args.fn(args)
+    if threading.current_thread() is not threading.main_thread():  # signal handlers can only be set there
+        return args.fn(args)
+    previous = signal.signal(signal.SIGTERM, _on_sigterm)
+    try:
+        return args.fn(args)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
