@@ -389,6 +389,19 @@ def shown(text: str) -> str:
     return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
+def compat_problems(text: str) -> list:
+    """The characters of a text that NFKC changes: a full-width or mathematical letter, a superscript or circled digit, a Roman numeral, a
+    fraction, a ligature, a trademark sign ... Each is a different character that looks like a plain one (or like several), and a name, a
+    number or an address made of them would be read by the voice and the viewer but not by this check. The text of a video has to use
+    the plain characters. Punctuation (full-width brackets and colons around a name in another script, the ellipsis) and spaces of any
+    width are left: they are a break or a mark, not a letter or a digit."""
+    found = {}
+    for c in unicodedata.normalize("NFC", text):
+        if unicodedata.normalize("NFKC", c) != c and unicodedata.category(c)[0] not in "PZ":
+            found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
+    return list(found.values())
+
+
 # the words speak_text says for a sign, and their kin, up to three spaces, colons, equals signs, dashes, opening brackets or quotes before the
 # number; not a full stop, comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
 SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=\d)", re.I)
@@ -522,6 +535,11 @@ def main() -> int:
             print(f"{line['id']}: `speak` is what the viewer hears and must be the spelled-out form of `text` "
                   f"(numbers_vi.speak_text), not other words; reword `text` instead")
             failures += 1
+        plain = compat_problems(line["text"])
+        if plain:
+            print(f"{line['id']}: the text uses {', '.join(plain)}, which only look like other characters (NFKC turns them into something else); "
+                  f"write the plain letters, digits and signs")
+            failures += 1
         problems = untraced(line["text"], blob(fields), allow)
         if problems:
             print(f"{line['id']}: not in the cited fields {cited}: {', '.join(problems)}")
@@ -548,6 +566,11 @@ def main() -> int:
               f"{'; '.join(sorted(set(parser.code)))}")
         failures += 1
     screen = VALUE_BREAK.join(parser.parts + parser.glued)
+    plain = compat_problems(screen)
+    if plain:
+        print(f"{args.html}: the page's text uses {', '.join(plain)}, which only look like other characters (NFKC turns them into something "
+              f"else); write the plain letters, digits and signs")
+        failures += 1
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)
     if problems:

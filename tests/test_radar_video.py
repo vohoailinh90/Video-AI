@@ -887,6 +887,32 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.untraced("½%", check_facts.blob({"fact": "tăng 1/2%"}), set()), [])
         self.assertEqual(numbers_vi.speak_text("½%").strip(), "một/hai phần trăm")
 
+    def test_a_character_that_nfkc_changes_is_refused_in_the_text_of_a_video(self):
+        for char in ("Ｏ", "𝐎", "ⓞ", "¹", "⑲", "²", "Ⅹ", "½", "ﬁ", "™", "µ", "ª", "ｱ", "ㄱ", "㈱"):
+            problems = check_facts.compat_problems(f"dùng {char}")
+            self.assertEqual(len(problems), 1, char)
+            self.assertIn(f"U+{ord(char):04X}", problems[0], char)
+        # what is left alone: the Vietnamese alphabet (also decomposed), ASCII, signs NFKC keeps, punctuation, spaces
+        for text in ("Việt Nam, Hồ-Chí-Minh, nghiêng, Đức, ư ơ ê ô â ă", "Việt", "WeChat（微信）：ok，ok", "chờ… xong", "a b　c d",
+                     "© ® ° × → ← · • – — € $5 50% C++ C# 1/2"):
+            self.assertEqual(check_facts.compat_problems(text), [], text)
+        # end to end, in the narration and on the page
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        for char in ("½", "ⅩⅨ", "ＯｐｅｎＡＩ", "¹⁹"):
+            spoken = json.loads(json.dumps(doc))
+            spoken["lines"][0]["text"] += f" {char}"
+            spoken["lines"][0]["speak"] = numbers_vi.speak_text(spoken["lines"][0]["text"])        # so that only the characters are wrong
+            status, output = run_gate(digest, spoken, html)
+            self.assertEqual(status, 1, char)
+            self.assertIn("NFKC", output, char)
+            status, output = run_gate(digest, doc, html.replace(">Python<", f">Python {char}<", 1))
+            self.assertEqual(status, 1, char)
+            self.assertIn("NFKC", output, char)
+
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):
             self.assertEqual(check_facts.numbers(text), {value}, text)
