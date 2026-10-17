@@ -210,9 +210,10 @@ def _run(
             status = state["jobs"][job.id]["status"]
             log(f"{label}: QA limits changed, checked again: {status}")
         if status == "qa_failed":
-            # It already used its 1 + retries attempts on this job as it is now, and nothing that goes into the render has changed, so
-            # another render would most likely give the same video. Report it and go on. The ways to try again: edit the pack, give
-            # `run` more --retries, or `run --force --only <id>`. (A `failed` job, one the engine could not render, is tried again.)
+            # It already used its attempts (--retries counts them within one run) on this job as it is now, and nothing that goes into
+            # the render has changed, so another render would most likely give the same video. Report it and go on. The ways to try
+            # again: edit the pack, or `run --force --only <id>` (with --retries for more attempts in that run). A `failed` job, one
+            # the engine could not render, is tried again.
             failures = failed_checks(dest)
             log(f"{label}: failed QA before ({', '.join(failures) or 'see report.json'}); not rendered again: edit the pack, or use --force --only {job.id}")
             rows.append({"id": job.id, "status": "qa_failed", "seconds": entry.get("seconds"), "qa_failures": failures})
@@ -224,13 +225,15 @@ def _run(
 
         attempts = (entry or {}).get("attempts", 0) if not force else 0
         started = time.monotonic()
-        state["jobs"][job.id] = {"status": "running", "fingerprint": job.fingerprint(), "attempts": attempts, "started": now()}
-        write_json(batch_dir / "state.json", state)
         dest.mkdir(parents=True, exist_ok=True)
         # job.json is written last, and says "this folder holds a finished render of this job". A new render (also a forced one, whose
         # fingerprint is unchanged) starts by taking that away, so a render that fails or is interrupted cannot leave the old video
-        # looking like the finished one. The old video stays on disk until the new one replaces it.
+        # looking like the finished one. It goes BEFORE the state says `running`: interrupted between the two, the state still says
+        # `done` but the folder no longer backs it, which reads as stale; the other way round, `qa` could pass the old render again.
+        # The old video stays on disk until the new one replaces it.
         (dest / "job.json").unlink(missing_ok=True)
+        state["jobs"][job.id] = {"status": "running", "fingerprint": job.fingerprint(), "attempts": attempts, "started": now()}
+        write_json(batch_dir / "state.json", state)
 
         problem = preflight(env, job)
         outcome: dict

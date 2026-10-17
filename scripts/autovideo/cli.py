@@ -206,7 +206,7 @@ def main(argv=None) -> int:
             p.add_argument("--only", help="comma-separated video ids")
         if name == "run":
             p.add_argument("--force", action="store_true", help="render again even when a job is done and unchanged")
-            p.add_argument("--retries", type=_retries, default=1, help="extra attempts for a job that fails or fails QA (default: %(default)s)")
+            p.add_argument("--retries", type=_retries, default=1, help="extra attempts, within this run only, for a job that fails or fails QA (default: %(default)s)")
             p.add_argument("--timeout", type=_seconds, default=1800, help="seconds MPT may take for one job (default: %(default)s)")
     p = sub.add_parser("doctor", help="check the setup")
     common(p, pack=False)

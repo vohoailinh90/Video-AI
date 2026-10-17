@@ -419,6 +419,24 @@ class RunnerTests(FakeMptCase):
         self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "stale")  # but it no longer counts as this job's finished render
         self.assertEqual(self.state()["01-first"]["status"], "failed")
 
+    def test_an_interruption_between_the_state_write_and_the_old_marker_leaves_nothing_to_bless(self):
+        self.run_pack([video()])
+        pack = packmod.load_pack(write_pack(self.root, [video()]))
+        real_write = runner.write_json
+
+        def interrupted_when_the_job_is_marked_running(path, data):
+            real_write(path, data)
+            if path.name == "state.json" and data["jobs"].get("01-first", {}).get("status") == "running":
+                raise KeyboardInterrupt  # Ctrl-C right after `running` reached the disk, and before anything else is done
+
+        with mock.patch.object(runner, "write_json", interrupted_when_the_job_is_marked_running):
+            with self.assertRaises(KeyboardInterrupt):
+                runner.run(pack, self.env, self.out, force=True, log=self.logs.append)  # forced: the fingerprint is the same as the done render
+        folder = self.out / "test-batch" / "01-first"
+        self.assertIsNone(runner.rendered_fingerprint(folder))  # the old render no longer says it is finished, even at that moment
+        self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "stale")
+        self.assertEqual(self.state()["01-first"]["status"], "running")
+
     def test_skip_needs_the_folder_to_hold_this_jobs_render(self):
         self.run_pack([video()])
         job_file = self.out / "test-batch" / "01-first" / "job.json"
