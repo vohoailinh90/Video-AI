@@ -175,6 +175,17 @@ class PackTests(unittest.TestCase):
         self.assertIn(".audio_file: cannot read", text)
         self.assertIn("Permission denied", text)
 
+    def test_music_and_narration_formats_follow_what_mpt_accepts(self):
+        # MPT's SUPPORTED_BGM_EXTENSIONS: mp3 m4a aac wav flac ogg opus wma, compared in lower case (app/services/bgm.py)
+        for name in ("song.mp3", "song.opus", "song.wma", "Song.OPUS", "Track 01 (live).WMA"):
+            packmod.load_pack(write_pack(self.root, [video()], {"bgm": name}))
+        for name in ("song.mp4", "song.txt", "song", "../song.mp3", "dir/song.mp3"):
+            self.assertIn("bgm: must be none, random or a music file name", self.problems([video()], {"bgm": name}), name)
+        (self.root / "voice.opus").write_bytes(b"x")
+        (self.root / "voice.WMA").write_bytes(b"x")
+        for name in ("voice.opus", "voice.WMA"):
+            packmod.load_pack(write_pack(self.root, [video()], {"audio_file": name, "subtitles": False}))
+
     def test_tts_unfriendly_text_is_a_warning_not_an_error(self):
         scenes = [{"narration": "Xem tại https://example.com **ngay**", "terms": ["a"]}]
         pack = packmod.load_pack(write_pack(self.root, [{"id": "01-a", "title": "T", "scenes": scenes}]))

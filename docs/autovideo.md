@@ -46,7 +46,7 @@ Một file JSON, hoặc một thư mục `pack.json` + `videos/<id>.json` (mỗi
 
 - Mỗi video có `scenes[]` (lời đọc + từ khóa tìm clip). Từ khóa viết **tiếng Anh** cho kho clip. Lời đọc ghép thành `video_script`, từ khóa gộp thành `video_terms`.
 - Cài đặt (đặt trong `defaults` hoặc ghi đè trong từng video): `language`, `aspect` (`9:16`, `16:9`, `1:1`), `voice`, `voice_rate`, `voice_volume`,
-  `material_source` + `materials` (clip local), `audio_file` (tiếng có sẵn, ví dụ từ `scripts/vo/`), `bgm` (`none`, `random` hoặc tên file nhạc), `bgm_volume`,
+  `material_source` + `materials` (clip local), `audio_file` (tiếng có sẵn, ví dụ từ `scripts/vo/`), `bgm` (`none`, `random` hoặc tên file nhạc đuôi mp3, m4a, aac, wav, flac, ogg, opus hay wma, như MPT; `audio_file` cũng nhận các đuôi này), `bgm_volume`,
   `subtitles`, `font`, `font_size`, `clip_seconds`, `target_seconds` (ngưỡng độ dài cho QA).
 - Tiếng Việt mặc định dùng font `BeVietnamPro-Bold.ttf` (font mặc định của MPT là chữ Hán và không hợp tiếng Việt). Giọng phải cùng ngôn ngữ với `language`.
 - Khóa lạ, giọng sai ngôn ngữ, thiếu từ khóa, trùng id, clip hoặc file tiếng local không có hoặc không đọc được... đều báo **một lần cho tất cả lỗi** (`path: message`). Đường link, ký hiệu markdown, emoji trong lời đọc chỉ cảnh báo.

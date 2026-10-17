@@ -25,7 +25,10 @@ ASPECTS = ("9:16", "16:9", "1:1")
 # confirmation flag there, and this tool never sets one.
 SOURCES = ("pexels", "pixabay", "coverr", "local")
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".flv", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".bmp")
-AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
+# The audio formats MPT takes (SUPPORTED_BGM_EXTENSIONS in its app/services/bgm.py; it compares the suffix in lower case). Used for the music
+# file and for a narration audio_file: MPT decodes both with ffmpeg and puts no list of its own on the narration.
+AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus", ".wma")
+MUSIC_NAME = re.compile(r"[\w .()-]+(" + "|".join(re.escape(e) for e in AUDIO_EXTENSIONS) + ")", re.IGNORECASE)
 NO_VOICE = "no-voice"
 
 SETTINGS = (
@@ -333,7 +336,7 @@ def _video(raw, index: int, defaults: dict, root: Path, problems: list[str], war
         problems.append(f"{where}: give search terms (scene terms or terms); without them MPT would ask an LLM for them")
     if cfg["audio_file"] and cfg["subtitles"]:
         warnings.append(f"{where}: audio_file with subtitles needs subtitle_provider = \"whisper\" in MPT's config.toml, or no subtitles are made")
-    if cfg["bgm"] not in ("none", "random") and not re.fullmatch(r"[\w .()-]+\.(mp3|wav|m4a|aac|flac|ogg)", cfg["bgm"]):
+    if cfg["bgm"] not in ("none", "random") and not MUSIC_NAME.fullmatch(cfg["bgm"]):
         problems.append(f"{where}.bgm: must be none, random or a music file name")
 
     if vid is None or not scenes:
