@@ -212,6 +212,11 @@ class PackTests(unittest.TestCase):
         self.assertNotIn("voice_name", params)
         self.assertNotIn("video_terms", params)
 
+    def test_font_extension_matches_what_mpt_accepts(self):
+        self.assertIn("font", self.problems([video()], {"font": "Some-Font.otf"}))  # MPT's batch check: .ttf or .ttc only
+        job = packmod.load_pack(write_pack(self.root, [video()], {"font": "STHeitiMedium.ttc"})).jobs[0]
+        self.assertEqual(job.font, "STHeitiMedium.ttc")
+
     def test_paid_sources_are_not_available(self):
         self.assertIn("material_source", self.problems([video()], {"material_source": "wavespeed"}))
 
@@ -336,6 +341,15 @@ class RunnerTests(FakeMptCase):
         self.assertEqual(rows[0]["status"], "stale")
         self.assertEqual(self.state()["01-first"]["status"], "failed")
 
+    def test_a_failed_forced_render_leaves_nothing_that_qa_can_call_done(self):
+        self.run_pack([video()])
+        (self.env.home / "cli.py").write_text("import sys\nsys.exit(1)\n")  # the next render fails; the job itself is unchanged
+        summary, pack = self.run_pack([video()], force=True, retries=0)
+        self.assertEqual(summary["failed"], 1)
+        self.assertTrue((self.out / "test-batch" / "01-first" / "video.mp4").is_file())  # the old video is kept on disk
+        self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "stale")  # but it no longer counts as this job's finished render
+        self.assertEqual(self.state()["01-first"]["status"], "failed")
+
     def test_skip_needs_the_folder_to_hold_this_jobs_render(self):
         self.run_pack([video()])
         job_file = self.out / "test-batch" / "01-first" / "job.json"
@@ -413,6 +427,7 @@ class CliTests(FakeMptCase):
         self.assertEqual((code, plan["problem"], plan["mpt_params"]["video_aspect"]), (0, None, "9:16"))
         nokey = fake_mpt(self.root / "nokey", pexels_key=False) if (self.root / "nokey").mkdir() is None else None
         code, out, _ = self.call("plan", str(path), "--json", "--mpt-home", str(nokey.home), "--mpt-python", sys.executable)
+        self.assertEqual(code, 1)  # a batch that cannot run is not "ready", with --json as without it
         self.assertIn("pexels_api_keys", json.loads(out)["videos"][0]["problem"])
 
     def test_run_then_status_then_qa(self):

@@ -187,6 +187,10 @@ def run(
         state["jobs"][job.id] = {"status": "running", "fingerprint": job.fingerprint(), "attempts": attempts, "started": now()}
         write_json(batch_dir / "state.json", state)
         dest.mkdir(parents=True, exist_ok=True)
+        # job.json is written last, and says "this folder holds a finished render of this job". A new render (also a forced one, whose
+        # fingerprint is unchanged) starts by taking that away, so a render that fails or is interrupted cannot leave the old video
+        # looking like the finished one. The old video stays on disk until the new one replaces it.
+        (dest / "job.json").unlink(missing_ok=True)
 
         problem = preflight(env, job)
         outcome: dict

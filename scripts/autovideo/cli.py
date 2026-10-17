@@ -83,14 +83,15 @@ def cmd_plan(args) -> int:
             "problem": runner.preflight(env, job) if env else None,
             "mpt_params": engine_mpt.video_params(job),
         })
+    blocked = any(p["problem"] for p in plan)
     if args.json:
         print(json.dumps({"batch": pack.batch, "videos": plan}, ensure_ascii=False, indent=2))
-        return 0
+        return 1 if blocked else 0
     print(f"batch {pack.batch}: {len(plan)} video(s), rendered one at a time into {Path(args.out) / pack.batch}")
     for p in plan:
         print(f"  {p['id']}: {p['title']} | {p['scenes']} scenes, ~{p['estimated_seconds']:g} s (target {p['target_seconds'][0]:g}-{p['target_seconds'][1]:g}) "
               f"| {p['aspect']} | {p['voice']} | {p['source']}" + (f" | CANNOT RUN: {p['problem']}" if p["problem"] else ""))
-    return 1 if any(p["problem"] for p in plan) else 0
+    return 1 if blocked else 0
 
 
 def cmd_run(args) -> int:

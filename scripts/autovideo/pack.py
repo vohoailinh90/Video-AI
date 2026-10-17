@@ -18,7 +18,7 @@ from pathlib import Path
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")
 VOICE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z0-9-]+$")
-FONT = re.compile(r"^[\w .-]+\.(ttf|ttc|otf)$")
+FONT = re.compile(r"^[\w .-]+\.(ttf|ttc)$")  # MPT's batch check refuses any other subtitle font extension
 
 ASPECTS = ("9:16", "16:9", "1:1")
 # Only sources that cost nothing per request. MPT also has paid generators (WaveSpeed, Seedance, OFox, ...); each needs its own
@@ -226,7 +226,7 @@ def _settings(raw: dict, root: Path, where: str, problems: list[str], check_file
     pick("bgm", lambda v: isinstance(v, str) and v.strip() != "", "must be none, random, or the name of a music file known to MPT")
     pick("bgm_volume", lambda v: _is_number(v) and 0 <= v <= 1, "must be a number from 0 to 1")
     pick("subtitles", lambda v: isinstance(v, bool), "must be true or false")
-    pick("font", lambda v: v is None or (isinstance(v, str) and FONT.match(v)), "must be a font file name such as BeVietnamPro-Bold.ttf")
+    pick("font", lambda v: v is None or (isinstance(v, str) and FONT.match(v)), "must be a .ttf or .ttc font file name such as BeVietnamPro-Bold.ttf")
     pick("font_size", lambda v: isinstance(v, int) and not isinstance(v, bool) and 20 <= v <= 200, "must be a whole number from 20 to 200")
     pick("clip_seconds", lambda v: isinstance(v, int) and not isinstance(v, bool) and 2 <= v <= 15, "must be a whole number from 2 to 15")
     if "target_seconds" in raw:
