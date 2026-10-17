@@ -5,8 +5,9 @@ A script decides, not a model, the way github-radar's gates do:
 
   * every line of voiceover.json cites the draft fields it comes from (`source`: ["draft.hook", "draft.steps[0]", ...]); each
     path must exist;
-  * every number and every Latin-letter token (a name, an acronym, a command) in a line's text must occur in the fields that line
-    cites; Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
+  * every number and every Latin-letter token (a name, an acronym, a command) in a line's text must occur in the values of the
+    fields that line cites (a number as a value, a token as a whole name: npm is not found in pnpm, and a key such as `license` is
+    not a value); Vietnamese words are not compared, because a narration is a shortened rewording, not a copy;
   * the same two checks run on the text a viewer reads in index.html (script, style and elements marked data-label, the template's
     fixed labels, are skipped), against the whole source;
   * a line's `speak` (the text the synthesizer reads) must be exactly the spelled-out form of its `text`, so what is heard is what is
@@ -126,7 +127,28 @@ def normalize(text) -> str:
 
 
 def blob(value) -> str:
-    return json.dumps(value, ensure_ascii=False).lower()
+    """The text a source holds, lowercased, one value per line: every string and number in it, not its keys (`license` or `commands`
+    as a key is structure, not a fact the video may state)."""
+    parts = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+        elif node is not None and not isinstance(node, bool):
+            parts.append(str(node))
+
+    walk(value)
+    return "\n".join(parts).lower()
+
+
+def has_word(token: str, source_blob: str) -> bool:
+    """The token occurs in the source as a whole name: not inside a longer one (npm is not in pnpm), though it may sit next to
+    punctuation (AGPL in AGPL-3.0, bun.sh in https://bun.sh/install)."""
+    return re.search(rf"(?<![a-z0-9_]){re.escape(token.lower())}(?![a-z0-9_])", source_blob) is not None
 
 
 def canonical(number: str) -> str:
@@ -165,7 +187,7 @@ def untraced(text: str, source_blob: str, allow: set) -> list:
         if number not in known:
             problems.append(f"number {number}")
     for token in latin_tokens(text, allow):
-        if token.lower() not in source_blob:
+        if not has_word(token, source_blob):
             problems.append(f"token {token!r}")
     return problems
 

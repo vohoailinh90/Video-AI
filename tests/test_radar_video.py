@@ -524,6 +524,39 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(run_gate(digest, doc, html.replace("</head>", "", 1))[0], 0)
         self.assertEqual(run_gate(digest, doc, html.replace("</head>", "", 1).replace("</body>", "<p>ElevenLabs nhanh gấp 99999 lần</p></body>", 1))[0], 1)
 
+    def test_a_name_must_be_found_as_a_whole_word_in_the_values_of_the_source(self):
+        source = check_facts.blob({"field": "Cài bằng pnpm install, giấy phép AGPL-3.0, tải ở https://bun.sh/install"})
+        self.assertEqual(check_facts.untraced("npm install", source, set()), ["token 'npm'"])          # npm is inside pnpm only
+        self.assertEqual(check_facts.untraced("pnpm install", source, set()), [])
+        self.assertEqual(check_facts.untraced("AGPL và AGPL-3.0", source, set()), [])                  # a part of a name, cut at a hyphen
+        self.assertEqual(check_facts.untraced("bun.sh", source, set()), [])                            # a name inside an address
+        self.assertEqual(check_facts.untraced("pn", source, set()), ["token 'pn'"])
+        self.assertEqual(check_facts.untraced("installer", source, set()), ["token 'installer'"])
+        # the keys of the source are its structure, not facts
+        structure = check_facts.blob({"license": "MIT", "commands": ["bun run dev"], "stars": 62958})
+        self.assertEqual(check_facts.untraced("license commands", structure, set()), ["token 'license'", "token 'commands'"])
+        self.assertEqual(check_facts.untraced("MIT, bun run dev", structure, set()), [])
+        self.assertEqual(check_facts.untraced("62.958", structure, set()), [])                         # numbers count as values
+        # and through the gate: a line reworded from pnpm to npm is refused
+        digest = digest_with(lambda d: d["draft"].update(hook="Cài bằng pnpm install là xong"))
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        doc["lines"][0]["text"] = doc["lines"][0]["text"].replace("pnpm", "npm")
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("token 'npm'", output)
+
+    def test_a_digest_without_its_url_is_refused_not_given_an_invented_one(self):
+        def drop_url(d):
+            d["facts"].pop("url")
+        with self.assertRaises(ValueError) as caught:
+            digest_with(drop_url)
+        self.assertIn("facts.url", str(caught.exception))
+        plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
+        self.assertEqual(plan["url_text"], "github.com/debpalash/VoiceStudio")                      # the address of the digest itself
+
     def test_a_percent_sign_after_a_space_is_read_like_one_without(self):
         self.assertEqual(numbers_vi.speak_text("giảm 19% và 19 % và -3 %"), "giảm mười chín phần trăm và mười chín phần trăm và âm ba phần trăm")
         self.assertEqual(numbers_vi.speak_text("tăng 2,5\u00a0%"), "tăng hai phẩy năm phần trăm")

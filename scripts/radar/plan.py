@@ -74,6 +74,8 @@ def load_digest(path) -> dict:
             raise ValueError(f"the digest has no `{key}`")
     if not digest["facts"].get("full_name") or "/" not in digest["facts"]["full_name"]:
         raise ValueError("facts.full_name (owner/repo) is missing")
+    if not re.match(r"https?://\S+$", clean(digest["facts"].get("url"))):
+        raise ValueError("facts.url (the repository address, set by github-radar) is missing; the video shows it and does not make one up")
     return digest
 
 
@@ -205,7 +207,7 @@ def build_plan(digest, selection=None, speech_seconds=60.0) -> dict:
         "subtitle": subtitle,
         "chips": chips,
         "scan": clean(facts.get("scanned")),
-        "url_text": re.sub(r"^https?://", "", clean(facts.get("url"))).rstrip("/") or f"github.com/{facts['full_name']}",
+        "url_text": re.sub(r"^https?://", "", clean(facts.get("url"))).rstrip("/"),
         "problem": items("problem"),
         "steps": [{"uid": u["id"], "title": u["title"] or u["text"]} for u in units if u["scene"] == "how"],
         "components": [{"name": clean(c.get("name")), "evidence": clean(c.get("evidence"))}
