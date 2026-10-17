@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import types
 import unittest
 from pathlib import Path
@@ -424,10 +426,17 @@ class DoctorTests(Sandbox):
     def problems(self, ping: bool = False) -> tuple[list[str], list[str]]:
         return team.doctor(self.home, team.load_config(self.home), ping)
 
-    def egress_with(self, unit_state: int | None, systemd: bool = True):
-        """team.egress_problem() on a host whose team-egress unit exits `unit_state` (None: no systemctl at all)."""
+    def egress_with(self, unit_state: int | None, systemd: bool = True, proof: str | None = "team-net",
+                    age: float = 5, network: str = "team-net"):
+        """team.egress_problem(network) on a host whose team-egress unit exits `unit_state` (None: no systemctl at all)
+        and whose rule check last wrote `proof` (None: it never wrote one) `age` seconds ago."""
         runtime = self.tmp / "systemd-runtime"
         runtime.mkdir(exist_ok=True)
+        ok = self.tmp / "egress.ok"
+        ok.unlink(missing_ok=True)
+        if proof is not None:
+            ok.write_text(proof + "\n")
+            os.utime(ok, (time.time() - age, time.time() - age))
         real_which = shutil.which
         which = lambda n, *a, **k: ("/bin/systemctl" if unit_state is not None else None) if n == "systemctl" else real_which(n, *a, **k)  # noqa: E731
         calls = []
@@ -436,8 +445,9 @@ class DoctorTests(Sandbox):
             calls.append(argv)
             return types.SimpleNamespace(returncode=unit_state if argv[0] == "systemctl" else 0, stdout="", stderr="")
         with mock.patch.object(team, "SYSTEMD_RUNTIME", runtime if systemd else self.tmp / "no-systemd"), \
+                mock.patch.object(team, "EGRESS_OK", ok), \
                 mock.patch.object(team.shutil, "which", which), mock.patch.object(team.subprocess, "run", fake_run):
-            return team.egress_problem(), calls
+            return team.egress_problem(network), calls
 
     def test_an_inactive_egress_unit_is_a_problem_on_a_systemd_host(self):
         # Codex's seventh review: without the iptables rules every worker reaches the host, private ranges and cloud metadata.
@@ -446,13 +456,31 @@ class DoctorTests(Sandbox):
         self.assertIn(["systemctl", "is-active", "--quiet", "team-egress.service"], calls)
         self.assertIsNone(self.egress_with(0)[0])
 
+    def test_an_active_egress_unit_is_not_proof_that_its_rules_are_still_there(self):
+        # Codex's eighth review: the unit is a oneshot that stays "active" after `iptables -F`, and it only covers team-net.
+        # The proof is a file the root-owned team-egress check writes after asking iptables about every rule.
+        self.assertIsNone(self.egress_with(0)[0])
+        for kwargs, expect in (({"proof": None}, "never verified"),
+                               ({"age": 3600}, "last verified"),
+                               ({"proof": "other-net"}, "other-net"),
+                               ({"network": "bridge"}, "bridge")):
+            problem, _ = self.egress_with(0, **kwargs)
+            self.assertIn(expect, problem or "", kwargs)
+
     def test_the_egress_check_is_skipped_where_there_is_no_systemd(self):
         self.assertIsNone(self.egress_with(3, systemd=False)[0])
         self.assertIsNone(self.egress_with(None)[0])
+        self.assertIsNone(self.egress_with(0, systemd=False, proof=None)[0])
 
     def test_doctor_reports_the_egress_problem(self):
-        with mock.patch.object(team, "egress_problem", lambda: "team-egress.service is not active: test"):
+        asked = []
+
+        def down(network=None):
+            asked.append(network)
+            return "team-egress.service is not active: test"
+        with mock.patch.object(team, "egress_problem", down):
             self.assertIn("team-egress.service is not active: test", self.problems()[0])
+        self.assertEqual(asked, ["team-net"], "doctor checks the network the workers are configured to use")
 
     def test_world_readable_keys_are_a_problem(self):
         (self.home / "workers.env").chmod(0o644)
@@ -755,7 +783,7 @@ class PipelineTests(Sandbox):
         # the whole LAN and metadata endpoint, so no worker may start; doctor reporting it is not enough.
         f = self.new_feature()
         self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
-        with mock.patch.object(team, "egress_problem", lambda: "team-egress.service is not active: test"):
+        with mock.patch.object(team, "egress_problem", lambda network=None: "team-egress.service is not active: test"):
             code, out = run_cli("run", "F1")
         self.assertEqual(code, 2, out)
         self.assertIn("team-egress.service is not active: test", out)
@@ -769,7 +797,7 @@ class PipelineTests(Sandbox):
         # The pre-stage check can be raced (the unit stops mid-run) and `team work` skips it: the launch itself refuses.
         self.new_feature()
         self.scenario(tester=WRITE_TEST)
-        with mock.patch.object(team, "egress_problem", lambda: "team-egress.service is not active: test"):
+        with mock.patch.object(team, "egress_problem", lambda network=None: "team-egress.service is not active: test"):
             code, out = run_cli("work", "tester", "F1")
             self.assertNotEqual(code, 0)
             self.assertIn("team-egress.service is not active: test", out)
@@ -787,6 +815,87 @@ class PipelineTests(Sandbox):
             self.assertEqual(self.docker_runs(), [])
             self.assertEqual(launch("none"), 0)  # no network, nothing to escape through
             self.assertEqual(len(self.docker_runs()), 1)
+
+    def test_a_container_may_only_use_the_network_whose_egress_rules_were_verified(self):
+        # Codex's eighth review: the rules cover team-net's subnet only, so a worker on any other network is unrestricted
+        # even though the egress unit is active.
+        self.new_feature()
+        asked = []
+
+        def verified(network=None):
+            asked.append(network)
+            return None if network == "team-net" else f"network {network} is not covered by the egress rules"
+        work = self.tmp / "gate-work"
+        work.mkdir()
+
+        def launch(network: str) -> int:
+            argv = ["docker", "run", "--rm", "--name", "t-gates", "--network", network, "-v", f"{work}:/work",
+                    "IMAGE", "bash", "-lc", "true"]
+            return team.run_docker(argv, "t-gates", 30, team.base_env(), self.tmp / "launch.log")[0]
+        with mock.patch.object(team, "egress_problem", verified):
+            self.assertEqual(launch("team-net"), 0)
+            with self.assertRaises(SystemExit) as refused:
+                launch("bridge")
+            self.assertIn("network bridge is not covered", str(refused.exception))
+            self.assertEqual(launch("none"), 0)
+        self.assertEqual(asked, ["team-net", "bridge"], "a container without a network is not asked about")
+
+    def test_the_pipeline_asks_about_the_configured_worker_network(self):
+        f = self.new_feature()
+        self.write_env({**MODELS, "TEAM_WORKER_NETWORK": "my-net"})
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        asked = []
+
+        def verified(network=None):
+            asked.append(network)
+            return None if network == "team-net" else f"network {network} is not covered by the egress rules"
+        with mock.patch.object(team, "egress_problem", verified):
+            code, out = run_cli("run", "F1")
+        self.assertEqual(code, 2, out)
+        self.assertIn("network my-net is not covered", f.load_state()["stage"])
+        self.assertEqual(self.docker_runs(), [])
+        self.assertEqual(asked[0], "my-net")
+
+    def test_gates_run_for_other_acceptance_commands_do_not_vouch_for_the_pack(self):
+        # Codex's eighth review: acceptance.md is not in the git checkout, so editing its commands after a gate run leaves
+        # HEAD unchanged. The pack must not show the new Acceptance section beside the old commands' results.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(run_cli("run", "F1")[0], 0)
+        acceptance = f.file("acceptance.md")
+        acceptance.write_text(ACCEPTANCE + "\nA sentence that changes no command.\n")
+        self.assertEqual(run_cli("pack", "F1")[0], 0, "prose around the commands is not a different suite")
+        acceptance.write_text(ACCEPTANCE.replace("check_feature.py", "check_feature.py --also"))
+        code, out = run_cli("pack", "F1")
+        self.assertEqual(code, 1, out)
+        self.assertIn("acceptance commands", out)
+        self.assertIn("team gates F1", out)
+        self.assertFalse(f.file("audit-pack.md").exists(), "an old pack must not stay behind looking current")
+        acceptance.write_text(ACCEPTANCE)
+        self.assertEqual(run_cli("pack", "F1")[0], 0, "back to the commands the gates ran")
+
+    def test_a_review_of_older_code_is_flagged_in_the_pack(self):
+        # Codex's eighth review: `team work coder` commits a new HEAD without touching prereview.md, and the following
+        # pack passed the gate check while quoting a clean review of the code before.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        self.assertEqual(run_cli("run", "F1")[0], 0)
+        self.assertNotIn("older code", f.file("audit-pack.md").read_text())
+        reviewed = team.head(f.repo)
+        self.assertEqual(f.load_state()["reviewed_head"], reviewed)
+        more = 'with open(work + "/feature.py", "a") as fh:\n    fh.write("\\n# touched again\\n")'
+        self.scenario(tester=WRITE_TEST, coder=more, reviewer=NO_BLOCKERS)
+        code, out = run_cli("work", "coder", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertNotEqual(team.head(f.repo), reviewed)
+        self.assertEqual(run_cli("pack", "F1")[0], 0)
+        pack = f.file("audit-pack.md").read_text()
+        self.assertIn(f"read commit {reviewed[:12]}", pack)
+        self.assertIn(f"HEAD is {team.head(f.repo)[:12]}", pack)
+        self.assertIn("describes older code", pack)
+        self.assertEqual(run_cli("work", "reviewer", "F1")[0], 0)
+        self.assertEqual(run_cli("pack", "F1")[0], 0)
+        self.assertNotIn("older code", f.file("audit-pack.md").read_text(), "reviewed again, so no flag")
 
     def test_reviewer_blockers_get_one_fix_round(self):
         f = self.new_feature()
@@ -1436,6 +1545,87 @@ class CodexTeamTests(Sandbox):
         section = pack.split("## Sensitive paths changed", 1)[1].split("\n## ", 1)[0]
         for path in (".codex/config.toml", "AGENTS.override.md", ".agents/skills/x/SKILL.md", "sub/AGENTS.override.md"):
             self.assertIn(path, section)
+
+
+class EgressScriptTests(unittest.TestCase):
+    """The root-owned /usr/local/sbin/team-egress that setup-vps-team.sh writes, run against a fake iptables and docker."""
+
+    SETUP = ROOT / "scripts" / "team" / "setup-vps-team.sh"
+    RULES = ["DOCKER-USER -s 172.30.99.0/24 -d " + dest + " -j DROP"
+             for dest in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10")] + \
+            ["INPUT -s 172.30.99.0/24 -j DROP"]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        text = self.SETUP.read_text()
+        start = text.index("cat > /usr/local/sbin/team-egress <<EGRESS\n") + len("cat > /usr/local/sbin/team-egress <<EGRESS\n")
+        body = text[start:text.index("\nEGRESS\n", start)]
+        rendered = subprocess.run(["bash", "-c", f"WORKER_SUBNET=172.30.99.0/24\ncat <<EGRESS\n{body}\nEGRESS\n"],
+                                  capture_output=True, text=True, check=True).stdout
+        self.script = self.tmp / "team-egress"
+        self.script.write_text(rendered)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        self.rules, self.subnet, self.ok = self.tmp / "rules", self.tmp / "subnet", self.tmp / "egress.ok"
+        (self.bin / "iptables").write_text(
+            '#!/bin/sh\ncase "$1" in\n  -C) shift; grep -qxF -- "$*" "$FAKE_RULES" ;;\n  -I) shift; echo "$*" >> "$FAKE_RULES" ;;\nesac\n')
+        (self.bin / "docker").write_text('#!/bin/sh\ncat "$FAKE_SUBNET"\n')
+        for fake in self.bin.iterdir():
+            fake.chmod(0o755)
+        self.set_state(self.RULES, "172.30.99.0/24")
+
+    def set_state(self, rules: list[str], subnet: str) -> None:
+        self.rules.write_text("".join(rule + "\n" for rule in rules))
+        self.subnet.write_text(subnet + "\n")
+
+    def run_script(self, *args: str) -> subprocess.CompletedProcess:
+        env = {**os.environ, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "FAKE_RULES": str(self.rules),
+               "FAKE_SUBNET": str(self.subnet), "TEAM_EGRESS_OK": str(self.ok)}
+        # umask 077: without the chmod in the script the proof would be unreadable to the team user.
+        return subprocess.run(["bash", "-c", 'umask 077; exec bash "$0" "$@"', str(self.script), *args],
+                              capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
+
+    def test_check_writes_the_proof_the_conductor_reads_when_every_rule_is_live(self):
+        result = self.run_script("--check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.ok.read_text(), "team-net\n")
+        self.assertEqual(stat.S_IMODE(self.ok.stat().st_mode), 0o644, "the team user must be able to read it")
+
+    def test_check_removes_the_proof_when_a_rule_is_gone(self):
+        self.assertEqual(self.run_script("--check").returncode, 0)
+        for gone in self.RULES:
+            self.set_state([rule for rule in self.RULES if rule != gone], "172.30.99.0/24")
+            self.ok.write_text("team-net\n")
+            result = self.run_script("--check")
+            self.assertNotEqual(result.returncode, 0, gone)
+            self.assertFalse(self.ok.exists(), f"stale proof left behind after {gone} went missing")
+            self.assertIn("missing", result.stderr, gone)
+
+    def test_check_refuses_a_worker_network_the_rules_do_not_match(self):
+        self.set_state(self.RULES, "10.5.0.0/24")
+        self.ok.write_text("team-net\n")
+        result = self.run_script("--check")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.ok.exists())
+        self.assertIn("10.5.0.0/24", result.stderr)
+
+    def test_applying_the_rules_does_not_depend_on_the_proof(self):
+        self.set_state([], "172.30.99.0/24")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(self.rules.read_text().splitlines()), sorted(self.RULES))
+
+    def test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops(self):
+        script = self.SETUP.read_text()
+        self.assertIn("ExecStartPost=/usr/local/sbin/team-egress --check", script)
+        self.assertIn("ExecStop=/bin/rm -f /run/team-egress.ok", script)
+        self.assertIn("/etc/systemd/system/team-egress-check.timer", script)
+        self.assertIn("ExecStart=/usr/local/sbin/team-egress --check", script)
+        self.assertIn("systemctl enable --now team-egress-check.timer", script)
+        self.assertRegex(script, r"OnUnitActiveSec=\d+")
+        timer_seconds = int(re.search(r"OnUnitActiveSec=(\d+)", script)[1])
+        self.assertLess(timer_seconds * 2, team.EGRESS_OK_MAX_AGE_S, "a missed run must not make the proof stale")
 
 
 class CodexTeamInstallTests(unittest.TestCase):

@@ -38,3 +38,43 @@ mutations:
   find: "command -v iptables >/dev/null || { echo \"iptables is required to limit worker egress and could not be installed\" >&2; exit 1; }\n"
   replace: ""
   test: tests.test_team.CodexTeamInstallTests.test_setup_cannot_finish_without_iptables
+- label: "the check leaves an earlier proof in place"
+  find: "  rm -f \"\\${ok}\"\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
+- label: "the check does not compare the network's subnet"
+  find: "  [ \"\\${actual}\" = \"\\${subnet}\" ] ||"
+  replace: "  true ||"
+  test: tests.test_team.EgressScriptTests.test_check_refuses_a_worker_network_the_rules_do_not_match
+- label: "the check does not look for the DOCKER-USER rules"
+  find: "      || { echo \"team-egress: rule missing: DOCKER-USER from \\${subnet} to \\${dest}\" >&2; exit 1; }\n"
+  replace: "      || true\n"
+  test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
+- label: "the check does not look for the INPUT rule"
+  find: "    || { echo \"team-egress: rule missing: INPUT from \\${subnet}\" >&2; exit 1; }\n"
+  replace: "    || true\n"
+  test: tests.test_team.EgressScriptTests.test_check_removes_the_proof_when_a_rule_is_gone
+- label: "the proof does not name the verified network"
+  find: "  printf '%s\\\\n' \"\\${network}\" > \"\\${ok}.tmp\"\n"
+  replace: "  printf 'ok\\\\n' > \"\\${ok}.tmp\"\n"
+  test: tests.test_team.EgressScriptTests.test_check_writes_the_proof_the_conductor_reads_when_every_rule_is_live
+- label: "the proof is unreadable to the team user"
+  find: "  chmod 644 \"\\${ok}.tmp\"\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_check_writes_the_proof_the_conductor_reads_when_every_rule_is_live
+- label: "the unit no longer proves its rules after installing them"
+  find: "ExecStartPost=/usr/local/sbin/team-egress --check\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "the proof outlives the unit"
+  find: "ExecStop=/bin/rm -f /run/team-egress.ok\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "the proof is checked less often than it can stay valid"
+  find: "OnUnitActiveSec=20\n"
+  replace: "OnUnitActiveSec=60\n"
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "the check timer is never started"
+  find: "systemctl enable --now team-egress-check.timer >/dev/null\n"
+  replace: ""
+  test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops

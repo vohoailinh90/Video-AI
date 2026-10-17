@@ -169,9 +169,32 @@ echo "== worker network team-net (internet only)"
 docker network inspect team-net >/dev/null 2>&1 || docker network create --subnet "${WORKER_SUBNET}" team-net >/dev/null
 cat > /usr/local/sbin/team-egress <<EGRESS
 #!/usr/bin/env bash
+# team-egress          install the rules (the team-egress unit runs this at boot)
+# team-egress --check  prove they are live: ask iptables about every rule and docker about the subnet, then write the
+#                      name of the verified network to \${ok}, which the conductor reads before it starts a worker.
+#                      Any miss removes that proof. A oneshot unit stays "active" after its rules are flushed, which is
+#                      why the unit's state alone is not trusted.
 set -euo pipefail
+network=team-net
 subnet=${WORKER_SUBNET}
-for dest in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10; do
+ok="\${TEAM_EGRESS_OK:-/run/team-egress.ok}"
+dests="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10"
+if [ "\${1:-}" = "--check" ]; then
+  rm -f "\${ok}"
+  actual="\$(docker network inspect "\${network}" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | xargs)"
+  [ "\${actual}" = "\${subnet}" ] || { echo "team-egress: \${network} has subnet '\${actual}', the rules cover '\${subnet}'" >&2; exit 1; }
+  for dest in \${dests}; do
+    iptables -C DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP 2>/dev/null \\
+      || { echo "team-egress: rule missing: DOCKER-USER from \${subnet} to \${dest}" >&2; exit 1; }
+  done
+  iptables -C INPUT -s "\${subnet}" -j DROP 2>/dev/null \\
+    || { echo "team-egress: rule missing: INPUT from \${subnet}" >&2; exit 1; }
+  printf '%s\\n' "\${network}" > "\${ok}.tmp"
+  chmod 644 "\${ok}.tmp"
+  mv -f "\${ok}.tmp" "\${ok}"
+  exit 0
+fi
+for dest in \${dests}; do
   iptables -C DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP 2>/dev/null \\
     || iptables -I DOCKER-USER -s "\${subnet}" -d "\${dest}" -j DROP
 done
@@ -187,15 +210,41 @@ Requires=docker.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/team-egress
+ExecStartPost=/usr/local/sbin/team-egress --check
+ExecStop=/bin/rm -f /run/team-egress.ok
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 UNIT
+# The unit above only installs the rules. This one re-proves them every 20 s, so a flush after boot (iptables -F, a
+# firewall reload) stops the conductor from starting workers within the minute (EGRESS_OK_MAX_AGE_S in team.py).
+cat > /etc/systemd/system/team-egress-check.service <<'UNIT'
+[Unit]
+Description=Verify the egress limits of team worker containers
+After=team-egress.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/team-egress --check
+UNIT
+cat > /etc/systemd/system/team-egress-check.timer <<'UNIT'
+[Unit]
+Description=Verify the egress limits of team worker containers every 20 seconds
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=20
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+UNIT
 # iptables was required above, so there is no "continue without limits" path: a failure here stops setup (set -e).
 systemctl daemon-reload
 systemctl enable --now team-egress.service >/dev/null
 systemctl restart team-egress.service
+systemctl enable --now team-egress-check.timer >/dev/null
 
 if [ "${BUILD}" -eq 1 ]; then
   echo "== image team-worker:latest (a few minutes the first time)"

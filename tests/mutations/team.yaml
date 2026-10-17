@@ -238,22 +238,6 @@ mutations:
   find: "    with run_lock(home):  # audit-pack.md and state.json are also written by a running pipeline\n        return build_pack(f, cfg, f.load_state(), force=args.force)\n"
   replace: "    return build_pack(f, cfg, f.load_state(), force=args.force)\n"
   test: tests.test_team.PipelineTests.test_a_standalone_pack_or_gates_run_refuses_while_a_pipeline_holds_the_lock
-- label: a container with a network starts although the egress unit is down
-  find: "    if network_of(argv) != \"none\":\n"
-  replace: "    if False:\n"
-  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
-- label: only the team network is checked for egress
-  find: "    if network_of(argv) != \"none\":\n"
-  replace: "    if network_of(argv) == \"team-net\":\n"
-  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
-- label: a container without a network is refused when the egress unit is down
-  find: "    if network_of(argv) != \"none\":\n"
-  replace: "    if True:\n"
-  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
-- label: the pipeline starts a stage although the egress unit is down
-  find: "        problem = None if stage == \"pack\" else egress_problem()\n"
-  replace: "        problem = None\n"
-  test: tests.test_team.PipelineTests.test_the_pipeline_is_blocked_before_any_container_starts_when_the_egress_unit_is_down
 - label: a new review round also drops the warnings other stages raised
   find: "    state[\"warnings\"] = [w for w in state.get(\"warnings\", []) if w not in stale]\n"
   replace: "    state[\"warnings\"] = []\n"
@@ -262,14 +246,6 @@ mutations:
   find: "    if (lines > limit or size > max_bytes) and not force:\n"
   replace: "    if lines > limit and not force:\n"
   test: tests.test_team.PipelineTests.test_a_one_line_diff_cannot_slip_past_the_pack_limit
-- label: the audit pack quotes gates that ran on other code
-  find: "    if not ran or ran[1] != head(f.repo)[:12]:\n"
-  replace: "    if False:\n"
-  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_the_gates_ran_on_other_code
-- label: the audit pack is built without any gates.log
-  find: "    if not ran or ran[1] != head(f.repo)[:12]:\n"
-  replace: "    if ran and ran[1] != head(f.repo)[:12]:\n"
-  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_there_is_no_gates_log
 - label: a renamed tester file is hidden from the weakened-test section
   find: "    changed = git_paths(f.repo, \"diff\", \"-z\", \"--name-only\", \"--no-renames\", f\"{tester_commit}..HEAD\")\n"
   replace: "    changed = git_paths(f.repo, \"diff\", \"-z\", \"--name-only\", f\"{tester_commit}..HEAD\")\n"
@@ -290,3 +266,71 @@ mutations:
   find: "    if egress:\n        problems.append(egress)\n"
   replace: ""
   test: tests.test_team.DoctorTests.test_doctor_reports_the_egress_problem
+- label: "a container with a network starts although the egress unit is down"
+  find: "    if network != \"none\":\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
+- label: "only the team network is checked for egress"
+  find: "    if network != \"none\":\n"
+  replace: "    if network == \"team-net\":\n"
+  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
+- label: "a container without a network is refused when the egress unit is down"
+  find: "    if network != \"none\":\n"
+  replace: "    if True:\n"
+  test: tests.test_team.PipelineTests.test_no_container_with_a_network_starts_while_the_egress_unit_is_down
+- label: "a container is checked against no network at all"
+  find: "        problem = egress_problem(network or \"docker's default bridge\")\n"
+  replace: "        problem = egress_problem()\n"
+  test: tests.test_team.PipelineTests.test_a_container_may_only_use_the_network_whose_egress_rules_were_verified
+- label: "the pipeline starts a stage although the egress unit is down"
+  find: "        problem = None if stage == \"pack\" else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])\n"
+  replace: "        problem = None\n"
+  test: tests.test_team.PipelineTests.test_the_pipeline_is_blocked_before_any_container_starts_when_the_egress_unit_is_down
+- label: "the pipeline checks the wrong worker network"
+  find: "        problem = None if stage == \"pack\" else egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])\n"
+  replace: "        problem = None if stage == \"pack\" else egress_problem(\"team-net\")\n"
+  test: tests.test_team.PipelineTests.test_the_pipeline_asks_about_the_configured_worker_network
+- label: "doctor checks the wrong worker network"
+  find: "    egress = egress_problem(cfg[\"TEAM_WORKER_NETWORK\"])\n"
+  replace: "    egress = egress_problem()\n"
+  test: tests.test_team.DoctorTests.test_doctor_reports_the_egress_problem
+- label: "a missing egress proof is trusted"
+  find: "    try:\n        verified = EGRESS_OK.read_text(encoding=\"utf-8\").strip()\n        age = time.time() - EGRESS_OK.stat().st_mtime\n    except OSError:\n"
+  replace: "    verified, age = (network or \"\"), 0.0\n    if False:\n"
+  test: tests.test_team.DoctorTests.test_an_active_egress_unit_is_not_proof_that_its_rules_are_still_there
+- label: "an old egress proof is trusted"
+  find: "    if age > EGRESS_OK_MAX_AGE_S:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.DoctorTests.test_an_active_egress_unit_is_not_proof_that_its_rules_are_still_there
+- label: "the egress proof is trusted for any network"
+  find: "    if network and network != verified:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.DoctorTests.test_an_active_egress_unit_is_not_proof_that_its_rules_are_still_there
+- label: "the audit pack quotes gates that ran on other code"
+  find: "    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_the_gates_ran_on_other_code
+- label: "the audit pack is built without any gates.log"
+  find: "    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:\n"
+  replace: "    if ran and (ran[1] != head(f.repo)[:12] or ran[2] != commands):\n"
+  test: tests.test_team.PipelineTests.test_a_pack_is_refused_when_there_is_no_gates_log
+- label: "the audit pack quotes gates that ran other acceptance commands"
+  find: "    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:\n"
+  replace: "    if not ran or ran[1] != head(f.repo)[:12]:\n"
+  test: tests.test_team.PipelineTests.test_gates_run_for_other_acceptance_commands_do_not_vouch_for_the_pack
+- label: "the acceptance digest changes on every call"
+  find: "hashlib.sha256(json.dumps(commands).encode(\"utf-8\"))"
+  replace: "hashlib.sha256((json.dumps(commands) + str(time.time())).encode(\"utf-8\"))"
+  test: tests.test_team.PipelineTests.test_gates_run_for_other_acceptance_commands_do_not_vouch_for_the_pack
+- label: "a review of older code is quoted without a flag"
+  find: "    if review.strip() and state.get(\"reviewed_head\") != head(f.repo):\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_review_of_older_code_is_flagged_in_the_pack
+- label: "every review is flagged as older code"
+  find: "    if review.strip() and state.get(\"reviewed_head\") != head(f.repo):\n"
+  replace: "    if review.strip():\n"
+  test: tests.test_team.PipelineTests.test_a_review_of_older_code_is_flagged_in_the_pack
+- label: "the reviewed commit is not recorded"
+  find: "            state[\"reviewed_head\"] = head(f.repo)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_review_of_older_code_is_flagged_in_the_pack

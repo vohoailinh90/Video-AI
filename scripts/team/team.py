@@ -24,6 +24,7 @@ import argparse
 import contextlib
 import datetime as _dt
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -238,14 +239,33 @@ def shipped(directory: Path, name: str) -> Path:
 SYSTEMD_RUNTIME = Path("/run/systemd/system")
 
 
-def egress_problem() -> str | None:
-    """Workers may reach the internet and nothing else because the team-egress unit installed the iptables rules
-    (setup-vps-team.sh). If the unit is not active the rules are gone, and so is that guarantee."""
+EGRESS_OK = Path("/run/team-egress.ok")
+EGRESS_OK_MAX_AGE_S = 90  # the check timer runs every 20 s (setup-vps-team.sh): a miss or two must not read as down
+
+
+def egress_problem(network: str | None = None) -> str | None:
+    """Workers may reach the internet and nothing else because iptables rules, installed by the team-egress unit
+    (setup-vps-team.sh), match the worker network's subnet. The unit is a oneshot that stays "active" after the rules are
+    flushed, so its state proves nothing: the root-owned check (`team-egress --check`, run by a timer) asks iptables about
+    every rule and the network's subnet and writes the name of the network it verified to EGRESS_OK. `network` is the one
+    about to be used."""
     if not SYSTEMD_RUNTIME.is_dir() or not shutil.which("systemctl"):
         return None  # no systemd to ask: a container, CI or a test
+    fix = "rerun setup-vps-team.sh; it needs iptables"
     if subprocess.run(["systemctl", "is-active", "--quiet", "team-egress.service"]).returncode:
-        return ("team-egress.service is not active: worker containers are not limited to the internet "
-                "(rerun setup-vps-team.sh; it needs iptables)")
+        return f"team-egress.service is not active: worker containers are not limited to the internet ({fix})"
+    try:
+        verified = EGRESS_OK.read_text(encoding="utf-8").strip()
+        age = time.time() - EGRESS_OK.stat().st_mtime
+    except OSError:
+        return (f"the egress rules were never verified ({EGRESS_OK} is missing, or `team-egress --check` fails; "
+                f"see journalctl -u team-egress-check): workers may not be limited to the internet ({fix})")
+    if age > EGRESS_OK_MAX_AGE_S:
+        return (f"the egress rules were last verified {age:.0f}s ago (more than {EGRESS_OK_MAX_AGE_S}s): "
+                f"journalctl -u team-egress-check ({fix})")
+    if network and network != verified:
+        return (f"network {network} is not covered by the egress rules (they were verified for {verified}): "
+                f"workers on it are not limited to the internet; use {verified}")
     return None
 
 
@@ -625,9 +645,10 @@ def network_of(argv: list[str]) -> str | None:
 def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path) -> tuple[int, str]:
     """Run a container, streaming its output to `log`; return the exit code and
     the last OUTPUT_TAIL_BYTES of output (a looping model can print gigabytes)."""
-    if network_of(argv) != "none":
+    network = network_of(argv)
+    if network != "none":
         # Whatever a model-written command does, the only thing between it and the LAN is the egress rules.
-        problem = egress_problem()
+        problem = egress_problem(network or "docker's default bridge")
         if problem:
             raise SystemExit(f"{name} not started: {problem}")
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
@@ -668,11 +689,16 @@ def gate_argv(cfg: dict[str, str], work: Path, command: str, network: str, name:
             "-v", f"{work}:/work", "-w", "/work", cfg["TEAM_IMAGE"], "bash", "-lc", command]
 
 
+def commands_digest(commands: list[str]) -> str:
+    """What identifies a gate suite: the commands, not the prose around them in acceptance.md."""
+    return hashlib.sha256(json.dumps(commands).encode("utf-8")).hexdigest()[:12]
+
+
 def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
     """Run acceptance.md's commands on a clean checkout of HEAD, in a container
     with no key and (by default) no network. Writes gates.log."""
     commands = acceptance_commands(read(f.file("acceptance.md")))
-    lines = [f"# gates {f.id} @ {head(f.repo)[:12]} {now()}"]
+    lines = [f"# gates {f.id} @ {head(f.repo)[:12]} acceptance:{commands_digest(commands)} {now()}"]
     timeout = int(cfg["TEAM_GATE_TIMEOUT"])
     name = container_name(f, "gates")
     passed = 0
@@ -803,6 +829,7 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
         if review:
             f.file("prereview.md").write_text(f"<!-- reviewer: {model} -->\n{review}\n", encoding="utf-8")
             state["reviewer_model"] = model
+            state["reviewed_head"] = head(f.repo)
             return review
         say(f"reviewer: {model} returned no review block (exit {rc})")
     warn(state, "no reviewer model returned a review", review=True)
@@ -836,7 +863,7 @@ def test_paths_changed(f: Feature, tester_commit: str) -> list[str]:
     return [path for path in changed if path in written or TEST_PATH_RE.search(path)]
 
 
-GATES_HEAD_RE = re.compile(r"# gates \S+ @ ([0-9a-f]{12})")
+GATES_HEAD_RE = re.compile(r"# gates \S+ @ ([0-9a-f]{12}) acceptance:([0-9a-f]{12})")
 
 
 def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
@@ -844,10 +871,12 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     # The pack quotes gates.log as the verdict on this code. It is one only if the gates ran on this HEAD; --force
     # lifts the size limit, never this.
     ran = GATES_HEAD_RE.match(read(f.file("gates.log")))
-    if not ran or ran[1] != head(f.repo)[:12]:
+    commands = commands_digest(acceptance_commands(read(f.file("acceptance.md"))))
+    if not ran or ran[1] != head(f.repo)[:12] or ran[2] != commands:
         pack.unlink(missing_ok=True)
-        print(f"gates.log is for {ran[1] if ran else 'no run'}, HEAD is {head(f.repo)[:12]}: "
-              f"run `{team_lead().command} gates {f.id}` first", file=sys.stderr)
+        what = (f"gates.log is for {ran[1]}, HEAD is {head(f.repo)[:12]}" if ran and ran[1] != head(f.repo)[:12] else
+                "gates.log ran other acceptance commands than acceptance.md has now" if ran else "gates.log has no run on record")
+        print(f"{what}: run `{team_lead().command} gates {f.id}` first", file=sys.stderr)
         return 1
     base = merge_base(f, state)
     sections = [f"# Audit pack {f.id}",
@@ -860,7 +889,11 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     add("Acceptance", read(f.file("acceptance.md")))
     add("Gates", tail(f.file("gates.log"), 60))
     add("Pipeline warnings", "\n".join(f"- {w}" for w in state.get("warnings", [])))
-    add("Pre-review", read(f.file("prereview.md")))
+    review = read(f.file("prereview.md"))
+    if review.strip() and state.get("reviewed_head") != head(f.repo):
+        review = (f"STALE: this review read commit {(state.get('reviewed_head') or 'unknown')[:12]} and HEAD is "
+                  f"{head(f.repo)[:12]}: it describes older code and says nothing about the commits since.\n\n" + review)
+    add("Pre-review", review)
     tester = state.get("tester_commit")
     if tester:
         paths = test_paths_changed(f, tester)
@@ -935,7 +968,7 @@ def blocked(f: Feature, state: dict, reason: str) -> int:
 
 def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | None) -> int:
     for index, stage in enumerate(STAGES[STAGES.index(start):], STAGES.index(start)):
-        problem = None if stage == "pack" else egress_problem()
+        problem = None if stage == "pack" else egress_problem(cfg["TEAM_WORKER_NETWORK"])
         if problem:
             state["next"] = stage
             return blocked(f, state, problem)
@@ -1217,7 +1250,7 @@ def doctor(home: Path, cfg, ping: bool, run_smoke: bool = False) -> tuple[list[s
     if shutil.which("docker") and subprocess.run(["docker", "network", "inspect", cfg["TEAM_WORKER_NETWORK"]],
                                                  capture_output=True).returncode:
         problems.append(f"docker network {cfg['TEAM_WORKER_NETWORK']} missing: rerun setup-vps-team.sh")
-    egress = egress_problem()
+    egress = egress_problem(cfg["TEAM_WORKER_NETWORK"])
     if egress:
         problems.append(egress)
     if team_lead().name == "codex" and not shutil.which("bwrap"):
