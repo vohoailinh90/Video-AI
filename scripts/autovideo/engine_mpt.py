@@ -122,15 +122,25 @@ def managed_file(env: MptEnv, name: str, folders: tuple[str, ...]) -> Path | Non
     return None
 
 
-MIX_FAILED = "failed to mix background music"  # MPT logs this at ERROR level (app/services/video.py, generate_video) and renders on without the music
+MIX_FAILED = "failed to mix background music: type="  # MPT logs this at ERROR level (app/services/video.py, generate_video) and renders on without the music
+MUSIC_FAILED_TAG = "[autovideo] music mix failed:"  # our own line in the stored log: the verdict, found on the raw text before secrets are hidden
+
+
+def find_music_failure(raw: str) -> str | None:
+    """The line in which MPT reports a song it could not mix (a corrupt or undecodable file), found in what it printed, or None. The video is
+    still made and the narration keeps it audible, so nothing in the file shows the music is missing. Look at the raw text, before any secret
+    is hidden: a short secret can be a word of the message."""
+    for line in raw.splitlines():
+        if MIX_FAILED in line:
+            return line.strip()
+    return None
 
 
 def music_mix_failure(log: str) -> str | None:
-    """MPT's own account of a song it could not mix (a corrupt or undecodable file), from its stored log, or None. The video is still made
-    and the narration keeps it audible, so nothing in the file shows the music is missing."""
+    """The verdict recorded in a stored mpt.log by `_log` (the line after the tag), or None."""
     for line in log.splitlines():
-        if MIX_FAILED in line:
-            return line[line.index(MIX_FAILED):].strip()
+        if line.startswith(MUSIC_FAILED_TAG):
+            return line[len(MUSIC_FAILED_TAG):].strip() or "failed to mix background music"
     return None
 
 
@@ -206,17 +216,10 @@ def config_of(env: MptEnv) -> dict:
 
 
 def redact(text: str, env: MptEnv) -> str:
-    """Replace every secret value of MPT's config.toml in `text`. Logs and error messages go through here before they are stored.
-    MIX_FAILED is public text from MPT's source that QA looks for, so it is kept whole: a secret that is a word of it (a short test
-    value such as "music") must not turn it into something QA no longer recognises. The secret is hidden everywhere else."""
-    secrets = sorted(_secrets(config_of(env)), key=len, reverse=True)
-
-    def hide(part: str) -> str:
-        for secret in secrets:
-            part = part.replace(secret, "***")
-        return part
-
-    return MIX_FAILED.join(hide(part) for part in text.split(MIX_FAILED))
+    """Replace every secret value of MPT's config.toml in `text`. Logs and error messages go through here before they are stored."""
+    for secret in sorted(_secrets(config_of(env)), key=len, reverse=True):
+        text = text.replace(secret, "***")
+    return text
 
 
 def _summary(stdout: str) -> dict | None:
@@ -297,7 +300,11 @@ def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResul
 
 
 def _log(env: MptEnv, workdir: Path, stderr: str) -> str:
-    text = redact(stderr or "", env)
+    raw = stderr or ""
+    failure = find_music_failure(raw)  # on the raw text: hiding a secret must not be able to change the verdict
+    text = redact(raw, env)
+    if failure:  # our own line, added after the redaction, with the detail redacted like the rest
+        text += f"\n{MUSIC_FAILED_TAG} {redact(failure, env)}\n"
     (workdir / "mpt.log").write_text(text, encoding="utf-8")
     return "\n".join(text.strip().splitlines()[-12:])
 

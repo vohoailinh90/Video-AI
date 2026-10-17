@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from autovideo import cli, engine_mpt, pack as packmod, qa, runner, transcript  # noqa: E402
 
 SECRET = "PEXELS-SECRET-KEY-12345"
+MARKER_SECRET = "prefix-private failed to mix background music suffix-private"  # a secret that contains MPT's music-failure message
 
 # Same contract as MPT's cli.py: --batch-file <jsonl> --stop-at video; one JSON summary on stdout, logs on stderr.
 FAKE_CLI = textwrap.dedent('''
@@ -31,7 +32,8 @@ FAKE_CLI = textwrap.dedent('''
     p = json.loads(open(manifest, encoding="utf-8").readline())
     subject, tid = p["video_subject"], str(uuid.uuid4())
     print("log line with key " + "%(secret)s", file=sys.stderr)
-    if "MIXERR" in subject:  # what MPT logs at ERROR level when it cannot mix the music, and then renders without it
+    if "MIXERR" in subject:
+        print("echoed by MPT: %(marker_secret)s", file=sys.stderr)  # what MPT logs at ERROR level when it cannot mix the music, and then renders without it
         print('2026-10-17 13:43:35 | ERROR    | "./app/services/video.py:1856": generate_video - failed to mix background music: type=custom, file=./storage/bgm/x.mp3', file=sys.stderr)
     entry = {"index": 1, "task_id": tid, "status": "succeeded", "result": None, "failed_stage": None, "error": None}
     if "FAIL" in subject:
@@ -61,7 +63,7 @@ FAKE_CLI = textwrap.dedent('''
     entry["result"] = {"videos": [str(d / "final-1.mp4")], "audio_file": "" if "NONARRATION" in subject else str(d / "audio.mp3"), "audio_duration": float(dur),
                        "subtitle_path": str(d / "subtitle.srt") if srt else "", "warnings": None}
     print(json.dumps({"total": 1, "succeeded": 1, "failed": 0, "tasks": [entry]}))
-''') % {"secret": SECRET}
+''') % {"secret": SECRET, "marker_secret": MARKER_SECRET}
 
 SCENES = [
     {"narration": "Xin chào các bạn, hôm nay mình giới thiệu một công cụ làm video.", "terms": ["laptop", "coding"]},
@@ -699,17 +701,24 @@ class RunnerTests(FakeMptCase):
             log.write_bytes(original)
         self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "qa_failed")  # the real log gives the real answer again
 
-    def test_hiding_a_short_secret_does_not_hide_the_music_failure_from_qa(self):
-        # MPT's marker is public text from its source, and QA needs it whole; a secret that happens to be a word of it must not break it
-        (self.env.home / "config.toml").write_text(
-            f'[app]\npexels_api_keys = ["{SECRET}"]\ntest_secret = "music"\nsubtitle_provider = "edge"\n', encoding="utf-8")
-        summary, _ = self.run_pack([video(title="MIXERR")], retries=0)
-        self.assertEqual(summary["videos"][0]["status"], "qa_failed")
-        self.assertIn("music_mixed", summary["videos"][0]["qa_failures"])
-        self.assertIn("failed to mix background music", (self.out / "test-batch" / "01-first" / "mpt.log").read_text())
-        # the secret is still hidden wherever it appears outside that marker
-        text = engine_mpt.redact("failed to mix background music: file=music.mp3; some music", self.env)
-        self.assertEqual(text, "failed to mix background music: file=***.mp3; some ***")
+    def test_hiding_secrets_neither_hides_the_music_failure_from_qa_nor_lets_a_secret_out(self):
+        # a short secret that is a word of MPT's message ("music") would turn it into text QA no longer recognises, and a secret that
+        # contains the message would be cut in pieces by any special handling of it: so the log is redacted plainly, and the verdict is
+        # taken from the raw text and recorded in a line of our own
+        for secret, hidden in (("music", ["music"]), (MARKER_SECRET, ["prefix-private", "suffix-private"])):
+            (self.env.home / "config.toml").write_text(
+                f'[app]\npexels_api_keys = ["{SECRET}"]\ntest_secret = "{secret}"\nsubtitle_provider = "edge"\n', encoding="utf-8")
+            summary, _ = self.run_pack([video(title="MIXERR")], retries=0, force=True)
+            self.assertEqual(summary["videos"][0]["status"], "qa_failed", secret)
+            self.assertIn("music_mixed", summary["videos"][0]["qa_failures"], secret)
+            folder = self.out / "test-batch" / "01-first"
+            for name in ("mpt.log", "report.json"):
+                text = (folder / name).read_text()
+                for word in hidden:
+                    self.assertNotIn(word if word != "music" else "background music", text, f"{secret!r} in {name}")
+            self.assertIn(engine_mpt.MUSIC_FAILED_TAG, (folder / "mpt.log").read_text())
+            if secret == "music":  # and the redaction itself is plain: the short secret is hidden everywhere
+                self.assertEqual(engine_mpt.redact("file=music.mp3 and some music", self.env), "file=***.mp3 and some ***")
 
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
