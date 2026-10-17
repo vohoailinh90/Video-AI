@@ -499,6 +499,41 @@ class ReviewFindings(unittest.TestCase):
         tl = planlib.timeline(plan, estimated_durations(plan))
         self.assertEqual(run_gate(special, make_video.voiceover_doc(plan, tl), compose.render(plan, tl))[0], 0)
 
+    def test_html_that_is_never_closed_hides_nothing_from_the_gate(self):
+        def parts(markup):
+            parser = check_facts.Visible()
+            parser.feed(markup)
+            parser.close()
+            return parser.parts
+        # a data-label element left open at the end of the file is read like the rest of the page...
+        self.assertEqual(parts("<div data-label>Dùng ElevenLabs"), ["Dùng ElevenLabs"])
+        self.assertEqual(parts("<div data-label><b>Dùng</b> ElevenLabs"), ["Dùng ElevenLabs"])
+        # ...unless it holds exactly a fixed label
+        self.assertEqual(parts("<div data-label>Tự thử"), [])
+        # a <head> that is never closed does not turn the rest of the page into invisible text
+        self.assertEqual(parts("<html><head><meta charset=utf-8><body><p>Dùng ElevenLabs</p>"), ["Dùng ElevenLabs"])
+        self.assertEqual(parts("<html><head><style>.a { color: red }</style><script>var x = 99999;</script></head><body>ok"), ["ok"])
+        # and the same through the gate, on a real composition
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html = compose.render(plan, tl)
+        doc = make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        self.assertEqual(run_gate(digest, doc, html + "<div data-label>ElevenLabs nhanh gấp 99999 lần")[0], 1)
+        self.assertEqual(run_gate(digest, doc, html.replace("</head>", "", 1))[0], 0)
+        self.assertEqual(run_gate(digest, doc, html.replace("</head>", "", 1).replace("</body>", "<p>ElevenLabs nhanh gấp 99999 lần</p></body>", 1))[0], 1)
+
+    def test_a_grouped_number_longer_than_the_words_go_is_read_digit_by_digit(self):
+        self.assertEqual(numbers_vi.speak_text("1.000.000.000.000 tham số"), " ".join(["một"] + ["không"] * 12) + " tham số")
+        self.assertEqual(numbers_vi.speak_text("12,345,678,901,234"), "một hai ba bốn năm sáu bảy tám chín không một hai ba bốn")
+        # the largest number with words, grouped or not, is still read as a number
+        self.assertEqual(numbers_vi.speak_text("999.999.999.999"), numbers_vi.speak_text("999999999999"))
+        self.assertTrue(numbers_vi.speak_text("999.999.999.999").startswith("chín trăm chín mươi chín tỷ"))
+        # and nothing a digest can hold makes speak_text raise
+        for digits in range(1, 30):
+            numbers_vi.speak_text("9" * digits + " và " + ".".join(["999"] * (digits // 3 + 1)))
+
     def test_a_percent_sign_is_part_of_the_value(self):
         self.assertEqual(check_facts.numbers("giảm 19% và 19"), {"19%", "19"})
         self.assertEqual(check_facts.numbers("giảm 19 % và 19 phần trăm"), {"19%"})

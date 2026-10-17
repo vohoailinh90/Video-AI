@@ -61,7 +61,7 @@ class Visible(HTMLParser):
     """Text a viewer can read: everything in <body> except script, style and template, and except elements marked data-label whose
     text is exactly one of FIXED_LABELS (the template's own words, not facts about the digest). A data-label element with any other
     text counts as visible text, so the attribute cannot hide anything."""
-    SKIP = {"script", "style", "template", "title", "head"}
+    SKIP = {"script", "style", "template", "title"}      # not <head>: a browser ends it at the first element that cannot be in it
     VOID = {"br", "img", "meta", "link", "input", "hr", "source", "wbr"}
 
     def __init__(self):
@@ -85,6 +85,15 @@ class Visible(HTMLParser):
                             self.parts.append(text)
                 del self.stack[index:]
                 return
+
+    def close(self):
+        super().close()
+        for _, _, buffer in self.stack[::-1]:      # an element that was never closed still shows what it holds
+            if buffer is not None:
+                text = " ".join(buffer).strip()
+                if text and text not in FIXED_LABELS.values():
+                    self.parts.append(text)
+        self.stack = []
 
     def handle_data(self, data):
         text = data.strip()
@@ -198,6 +207,7 @@ def main() -> int:
 
     parser = Visible()
     parser.feed(Path(args.html).read_text(encoding="utf-8"))
+    parser.close()
     screen = "\n".join(parser.parts)
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)

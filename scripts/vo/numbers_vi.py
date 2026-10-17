@@ -57,9 +57,9 @@ def _digit_by_digit(token: str) -> str:
 def _token_words(token: str):
     """Words for one number token, or None to leave it as it is."""
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", token):  # 62.958 and 62,958 -> thousands separators, as the facts gate reads them
-        return integer_words(int(re.sub(r"[.,]", "", token)))
+        token = re.sub(r"[.,]", "", token)
     if re.fullmatch(r"\d+", token):
-        if len(token) > 1 and token[0] == "0" or len(token) > 12:
+        if len(token) > 1 and token[0] == "0" or len(token) > 12:     # integer_words stops at 999 tỷ ... (12 digits)
             return _digit_by_digit(token)
         return integer_words(int(token))
     decimal = re.fullmatch(r"(\d+)([.,])(\d+)", token)       # 3.5 or 3,5
