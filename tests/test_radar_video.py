@@ -7,6 +7,7 @@ Fixtures are real digests (draft-vi.json) copied from the github-radar repositor
 """
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import math
@@ -35,6 +36,14 @@ NAMES = ["voicestudio", "moneyprinterturbo", "orca", "impeccable"]
 
 def fixture(name):
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def write_source(project, name="voicestudio"):
+    """source/ of a project as scaffold leaves it: the digest, and provenance.json with the sha256 of its bytes."""
+    source = project / "source"
+    source.mkdir(exist_ok=True)
+    (source / "draft-vi.json").write_text(json.dumps(fixture(name)), encoding="utf-8")
+    (source / "provenance.json").write_text(json.dumps({"sha256": hashlib.sha256((source / "draft-vi.json").read_bytes()).hexdigest()}), encoding="utf-8")
 
 
 def estimated_durations(plan):
@@ -293,7 +302,7 @@ class ReviewFindings(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / "source").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")     # what scaffold puts there
             make_video.write_composition(project, plan, tl)
             self.assertIn("all traced", make_video.require_gate(project))
@@ -1038,7 +1047,7 @@ class ReviewFindings(unittest.TestCase):
             project = Path(tmp)
             (project / "source").mkdir()
             (project / "assets").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
             durations = {}
             for unit in plan["units"]:
@@ -1181,12 +1190,48 @@ class ReviewFindings(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / "source").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
             make_video.write_composition(project, plan, tl)
             args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None})()
             with self.assertRaises(SystemExit):
                 make_video.cmd_render(args, project)
+
+    def test_a_digest_edited_after_scaffold_is_not_rebuilt_voiced_or_rendered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_source(project)
+            make_video.require_source_unchanged(project)                                    # as scaffold left it
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None, "tts_python": "python3"})()
+            digest_path, record_path = project / "source" / "draft-vi.json", project / "source" / "provenance.json"
+            original, record = digest_path.read_text(encoding="utf-8"), record_path.read_text(encoding="utf-8")
+
+            def stops(what, command=make_video.require_source_unchanged):
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
+                    command(args, project) if command is not make_video.require_source_unchanged else command(project)
+                self.assertIn("provenance.json", errors.getvalue(), what)
+
+            edited = json.loads(original)
+            edited["facts"]["stars"] = 999999                                               # a figure made up after the fact
+            digest_path.write_text(json.dumps(edited), encoding="utf-8")
+            stops("a number changed")
+            for name in ("cmd_rebuild", "cmd_voice", "cmd_render"):                         # no command trusts the edited file
+                stops(name, getattr(make_video, name))
+            digest_path.write_text(original + " ", encoding="utf-8")
+            stops("one byte added")
+            digest_path.write_text(original, encoding="utf-8")
+            make_video.require_source_unchanged(project)                                    # put back: fine
+            record_path.write_text(json.dumps({"sha256": "0" * 64}), encoding="utf-8")
+            stops("a record that does not match")
+            record_path.write_text(json.dumps({}), encoding="utf-8")
+            stops("a record without a hash")
+            record_path.write_text("not json", encoding="utf-8")
+            stops("a record that is not json")
+            record_path.unlink()
+            stops("no record")
+            record_path.write_text(record, encoding="utf-8")
+            make_video.require_source_unchanged(project)
 
     def test_the_timing_of_voiceover_json_is_what_the_clips_give(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
@@ -1195,7 +1240,7 @@ class ReviewFindings(unittest.TestCase):
             project = Path(tmp)
             (project / "source").mkdir()
             (project / "assets").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
             for unit in plan["units"]:
                 subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", str(unit["est"]),

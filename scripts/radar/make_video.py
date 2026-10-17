@@ -289,8 +289,26 @@ def write_json(path: Path, doc):
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def require_source_unchanged(project: Path):
+    """source/draft-vi.json is the digest `scaffold` copied, byte for byte, and source/provenance.json records its sha256. Everything in the
+    project (the plan, the page the gate compares with, the facts the words are traced to) is derived from that file, so a file that was
+    edited afterwards would make a changed number pass every check and still be called a verbatim copy. A project whose record is
+    missing or does not match is not rebuilt, voiced or rendered; scaffold it again from the digest."""
+    source = project / "source"
+    try:
+        recorded = json.loads((source / "provenance.json").read_text(encoding="utf-8")).get("sha256")
+        actual = hashlib.sha256((source / "draft-vi.json").read_bytes()).hexdigest()
+    except (OSError, ValueError, AttributeError):
+        recorded = actual = None
+    if not recorded or recorded != actual:
+        fail(f"{rel(source / 'draft-vi.json')} is not the digest that scaffold copied (its sha256 is not the one in source/provenance.json, "
+             f"or there is no record): every word and number of the video is traced to this file, so it must stay as it was. Scaffold the "
+             f"project again from the digest")
+
+
 def load_project(project: Path):
     """(digest, plan, voiceover doc) rebuilt from source/ and voiceover.json."""
+    require_source_unchanged(project)
     digest = planlib.load_digest(project / "source" / "draft-vi.json")
     doc = json.loads((project / "voiceover.json").read_text(encoding="utf-8"))
     selection = [l["unit"] for l in doc["lines"]]
