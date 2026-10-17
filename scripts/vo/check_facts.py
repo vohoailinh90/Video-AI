@@ -356,6 +356,8 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
     parts = NAME.findall(low)
     if not parts or not all(part in names for part in parts):
         return False
+    if any(low[m.end():m.end() + 1] in ("+", "#") for m in NAME.finditer(low)):      # C+++ is not C++, nor C## C#
+        return False
     if len(parts) == 1:
         return True
     # whole, by the grammar of NAME: nothing that continues a name (letters, digits, _, a - or . and a letter after it, + or #) may touch it
@@ -375,11 +377,24 @@ def canonical(number: str) -> str:
     return sign + number.replace(",", ".") + percent
 
 
+def plain_letter(c: str) -> str:
+    """A letter that is only another form of a Latin one (full-width Ｏ, mathematical 𝐎, Kelvin K, ligature ﬁ, circled ⓞ) is that
+    letter; the same name would otherwise vanish as a word of another alphabet. ™ (TM) and the like are symbols, not letters: they stay."""
+    if ord(c) >= 128:
+        category = unicodedata.category(c)
+        if category[0] == "L" or category == "So":
+            folded = unicodedata.normalize("NFKC", c)
+            if folded.isascii() and folded.isalpha() and (category[0] == "L" or len(folded) == 1):
+                return folded
+    return c
+
+
 def shown(text: str) -> str:
     """What a viewer reads of a text. A format character (zero-width space or joiner, soft hyphen, a direction mark), a control character
     and a combining mark that has no letter to join draw nothing, so they are dropped and do not break a word: G<zero-width>P<zero-width>T
-    is GPT. A symbol (a trademark sign, an emoji) is drawn and a space of any width is a gap, so those stay and break one."""
-    return "".join(c for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
+    is GPT. A symbol (a trademark sign, an emoji) is drawn and a space of any width is a gap, so those stay and break one. A letter in a
+    compatibility form is the plain letter (see plain_letter)."""
+    return "".join(plain_letter(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
 def numbers(text: str) -> set:
@@ -392,8 +407,13 @@ EDGE_PUNCTUATION = "".join(c for c in string.punctuation if c not in "+#_")
 
 def vietnamese_syllable(piece: str) -> bool:
     """A syllable of written Vietnamese: with its tone marks and diacritics taken off (ư, ơ, ê, đ ...) it is an optional initial
-    consonant, one to three vowels and an optional final consonant (Việt, nghiêng, Nguyễn, quyển). GPTé, npmé and C++é are not."""
-    base = "".join(c for c in unicodedata.normalize("NFD", piece.strip(EDGE_PUNCTUATION).lower()) if unicodedata.category(c) != "Mn")
+    consonant, one to three vowels and an optional final consonant (Việt, nghiêng, Nguyễn, quyển), in one of the three casings of a word.
+    GPTé, npmé, C++é and AIé are not. What the structure allows but no word has (Goé, Noé) cannot be told from a word without a
+    dictionary, and a dictionary would hold back real words: such a name with one accent glued on is the limit of this check."""
+    piece = piece.strip(EDGE_PUNCTUATION)
+    if not (piece.islower() or piece.isupper() or piece.istitle()):       # a Vietnamese word is written in lower case, Capitalised or in capitals
+        return False                                                       # AIé and iOSé are not
+    base = "".join(c for c in unicodedata.normalize("NFD", piece.lower()) if unicodedata.category(c) != "Mn")
     return VIETNAMESE_SYLLABLE.fullmatch(base.replace("đ", "d")) is not None
 
 
