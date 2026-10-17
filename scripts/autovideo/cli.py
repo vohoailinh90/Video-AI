@@ -3,12 +3,12 @@
   python3 scripts/autovideo/main.py validate <pack>   check a pack: schema, files, TTS-unfriendly text. No network, no MPT.
   python3 scripts/autovideo/main.py plan <pack>       what would run: every job, its reading time, its MPT parameters, setup problems
   python3 scripts/autovideo/main.py run <pack>        render the jobs one after another (resumable)
-  python3 scripts/autovideo/main.py status <pack>     what each job reached
+  python3 scripts/autovideo/main.py status <pack>     what each job reached (exit 1 unless every video is done)
   python3 scripts/autovideo/main.py qa <pack>         run the QA again on rendered folders, without rendering
   python3 scripts/autovideo/main.py doctor            ffmpeg, ffprobe, the MPT checkout and which of its keys are set (never their values)
 
 <pack> is a JSON file or a directory (pack.json + videos/<id>.json). Output goes to build/autovideo/<batch>/ (gitignored).
-Exit codes: 0 all good, 1 a video failed or failed QA, 2 the pack or the arguments are wrong.
+Exit codes: 0 all good, 1 a video failed, failed QA, is missing or stale (rendered from an older version of the pack), 2 the pack or the arguments are wrong.
 """
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def cmd_status(args) -> int:
     else:
         for r in rows:
             print(f"{r['id']}: {r['status']}" + (f" ({r['error']})" if r["error"] else ""))
-    return 0
+    return 0 if all(r["status"] == "done" for r in rows) else 1  # pending, stale, failed and qa_failed are all "not ready"
 
 
 def cmd_qa(args) -> int:
@@ -129,7 +129,7 @@ def cmd_qa(args) -> int:
         for c in r["checks"]:
             if not c["ok"]:
                 print(f"    {c['level']}: {c['name']}: {c['detail']}")
-    return 1 if any(r["status"] in ("qa_failed", "missing") for r in rows) else 0  # a video that was not there was not checked
+    return 1 if any(r["status"] != "done" for r in rows) else 0  # a video that was missing or stale was not checked
 
 
 def cmd_doctor(args) -> int:

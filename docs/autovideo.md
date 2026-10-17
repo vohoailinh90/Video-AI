@@ -63,7 +63,7 @@ python3 scripts/autovideo/main.py status   batches/meo-lam-video      # pending 
 python3 scripts/autovideo/main.py qa       batches/meo-lam-video      # chạy lại QA trên video đã có, không render
 ```
 
-Mã thoát: 0 tất cả tốt, 1 có video lỗi, không qua QA, hoặc `qa` không thấy video nào để kiểm, 2 gói hoặc tham số sai. Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
+Mã thoát: 0 tất cả tốt (với `status`: mọi video đã `done`), 1 có video lỗi, không qua QA, chưa render, hoặc là bản cũ so với gói (`stale`), 2 gói hoặc tham số sai. Kết quả ở `build/autovideo/<batch>/` (đã nằm trong `.gitignore`):
 
 ```
 state.json  summary.json  summary.md

@@ -100,8 +100,20 @@ def evaluate(job: Job, dest: Path) -> list[qa.Check]:
     return qa.check_video(job, dest / "video.mp4", narration, cues)
 
 
+def rendered_fingerprint(dest: Path) -> str | None:
+    """Fingerprint of the job as it was rendered into `dest`. job.json is written together with the video, so it says whose video it is."""
+    try:
+        return json.loads((dest / "job.json").read_text(encoding="utf-8")).get("fingerprint")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def _skip(entry: dict | None, job: Job, dest: Path) -> bool:
-    return bool(entry) and entry.get("status") == "done" and entry.get("fingerprint") == job.fingerprint() and (dest / "video.mp4").is_file()
+    """Done and unchanged. The state alone is not enough: a failed render of an edited job leaves the old video in the folder."""
+    return (
+        bool(entry) and entry.get("status") == "done" and entry.get("fingerprint") == job.fingerprint()
+        and (dest / "video.mp4").is_file() and rendered_fingerprint(dest) == job.fingerprint()
+    )
 
 
 def run(
@@ -204,7 +216,7 @@ def summarise(pack: Pack, rows: list[dict], batch_dir: Path) -> dict:
 
 
 def requalify(pack: Pack, out_root: Path, only: list[str] | None = None) -> list[dict]:
-    """Run QA again on the folders that exist, without rendering. Use after changing target_seconds or the QA code."""
+    """Run QA again on the folders that hold this version of each job, without rendering. Use after changing target_seconds or the QA code."""
     batch_dir = out_root / pack.batch
     unknown = [i for i in (only or []) if i not in [job.id for job in pack.jobs]]
     if unknown:
@@ -217,6 +229,11 @@ def requalify(pack: Pack, out_root: Path, only: list[str] | None = None) -> list
         dest = batch_dir / job.id
         if not (dest / "video.mp4").is_file():
             rows.append({"id": job.id, "status": "missing", "checks": []})
+            continue
+        if rendered_fingerprint(dest) != job.fingerprint():
+            # The folder holds a video of an earlier version of this job (its newer render failed or never finished).
+            # Passing QA does not make it the video of this job, so it is neither checked nor marked done.
+            rows.append({"id": job.id, "status": "stale", "checks": []})
             continue
         checks = evaluate(job, dest)
         ok = qa.passed(checks)

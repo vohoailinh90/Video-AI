@@ -311,6 +311,25 @@ class RunnerTests(FakeMptCase):
         pack = packmod.load_pack(write_pack(self.root, [video()], {"target_seconds": [1, 30]}))
         self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "done")
 
+    def test_qa_does_not_bless_a_video_left_over_from_before_a_failed_rerender(self):
+        self.run_pack([video()])
+        edited = packmod.load_pack(write_pack(self.root, [video(title="FAIL after the edit")]))
+        summary = runner.run(edited, self.env, self.out, retries=0, log=self.logs.append)
+        self.assertEqual(summary["failed"], 1)
+        folder = self.out / "test-batch" / "01-first"
+        self.assertTrue((folder / "video.mp4").is_file())  # the old video is still there, and it is not the new job's
+        rows = runner.requalify(edited, self.out)
+        self.assertEqual(rows[0]["status"], "stale")
+        self.assertEqual(self.state()["01-first"]["status"], "failed")
+
+    def test_skip_needs_the_folder_to_hold_this_jobs_render(self):
+        self.run_pack([video()])
+        job_file = self.out / "test-batch" / "01-first" / "job.json"
+        data = json.loads(job_file.read_text())
+        job_file.write_text(json.dumps({**data, "fingerprint": "from-another-render"}))
+        summary, _ = self.run_pack([video()])
+        self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
+
     def test_timeout_kills_the_engine(self):
         (self.env.home / "cli.py").write_text("import time\ntime.sleep(60)\n")
         summary, _ = self.run_pack([video()], timeout=1, retries=3)
@@ -370,6 +389,18 @@ class CliTests(FakeMptCase):
         code, _, err = self.call("qa", str(path), "--only", "nope", *base)
         self.assertEqual(code, 2)
         self.assertIn("nope", err)
+
+    def test_status_exits_non_zero_unless_every_video_is_done(self):
+        base = ["--out", str(self.out), "--mpt-home", str(self.env.home), "--mpt-python", sys.executable]
+        path = write_pack(self.root, [video("01-a"), video("02-b", title="SILENT")])
+        self.assertEqual(self.call("status", str(path), *base)[0], 1)  # nothing rendered yet: pending
+        self.call("run", str(path), "--retries", "0", *base)
+        self.assertEqual(self.call("status", str(path), *base)[0], 1)  # one video failed QA
+        path = write_pack(self.root, [video("01-a")])
+        self.assertEqual(self.call("status", str(path), *base)[0], 0)  # the pack now holds only the video that is done
+        path = write_pack(self.root, [video("01-a", title="Changed after rendering")])
+        self.assertEqual(self.call("status", str(path), *base)[0], 1)  # stale
+
 
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)
