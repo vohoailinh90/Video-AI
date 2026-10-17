@@ -18,6 +18,7 @@ RATIO = {"9:16": 9 / 16, "16:9": 16 / 9, "1:1": 1.0}
 SILENT_DB = -50.0  # mean level below this is silence for our purpose (digital silence reads -91 dB)
 MIN_COVERAGE = 0.8
 LENGTH_GAP = 3.0  # seconds the video may run past (or stop short of) its narration
+CUE_OVERLAP = 0.1  # seconds a cue may start before the previous one has ended: timings in a subtitle file are rounded
 
 
 @dataclass(frozen=True)
@@ -106,8 +107,8 @@ def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) 
     if job.subtitles:  # whatever makes the sound: a voice, an audio_file, or no-voice (MPT times the text over the silence)
         add("subtitles_made", bool(cues), f"{len(cues)} cue(s)")
     if cues:
-        ordered = all(c.end > c.start for c in cues) and all(b.start >= a.start for a, b in zip(cues, cues[1:]))
-        add("subtitle_order", ordered, "every cue ends after it starts, in order")
+        ordered = all(c.end > c.start for c in cues) and all(b.start >= a.end - CUE_OVERLAP for a, b in zip(cues, cues[1:]))
+        add("subtitle_order", ordered, "every cue ends after it starts, and each one starts when the one before has ended (no overlap)")
         if seconds:
             last = max(c.end for c in cues)  # the cue that ends last, which is not always the last one in the file
             add("subtitle_inside_video", last <= seconds + 0.5, f"the last cue ends at {last:.1f} s, video {seconds:.1f} s")

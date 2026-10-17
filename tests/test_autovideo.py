@@ -785,9 +785,20 @@ class QaTests(unittest.TestCase):
             job = packmod.load_pack(write_pack(Path(tmp), [video()])).jobs[0]
             cues = [transcript.Cue(0.0, 100.0, "Xin chào các bạn"), transcript.Cue(1.0, 2.0, "hôm nay mình học")]  # starts are in order
             checks = {c.name: c for c in qa.check_video(job, media, None, cues)}
-            self.assertTrue(checks["subtitle_order"].ok)
             self.assertFalse(checks["subtitle_inside_video"].ok)
             self.assertIn("100.0", checks["subtitle_inside_video"].detail)
+
+    def test_overlapping_subtitle_cues_fail_the_order_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "video.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=108x192:d=3:r=10", "-f", "lavfi",
+                            "-i", "sine=frequency=300:sample_rate=22050", "-t", "3", "-pix_fmt", "yuv420p", str(media)], check=True)
+            job = packmod.load_pack(write_pack(Path(tmp), [video()])).jobs[0]
+            order = lambda cues: next(c for c in qa.check_video(job, media, None, cues) if c.name == "subtitle_order")
+            cue = transcript.Cue
+            self.assertFalse(order([cue(0.0, 2.5, "Xin chào các bạn"), cue(1.0, 2.9, "hôm nay mình học")]).ok)  # starts rise, the cues overlap
+            self.assertTrue(order([cue(0.0, 1.5, "Xin chào các bạn"), cue(1.5, 2.9, "hôm nay mình học")]).ok)  # touching is fine
+            self.assertTrue(order([cue(0.0, 1.5, "Xin chào các bạn"), cue(1.45, 2.9, "hôm nay mình học")]).ok)  # rounding noise is fine
 
     def test_no_voice_and_silent_music_expects_no_sound(self):
         with tempfile.TemporaryDirectory() as tmp:
