@@ -1,5 +1,5 @@
 {
-  "title": "Video thử: VoiceStudio",
+  "title": "Video thử VoiceStudio",
   "eyebrow": "Video-AI · từ bài GitHub Radar 2026-10-13",
   "lede": "Bản thử biến một bài radar thành video 54 giây: lời đọc tiếng Việt giọng Hải Đăng (VieNeu-TTS) và nhạc nền. Mọi số, tên và lệnh trên màn hình lấy từ các trường của bài, và một script đã kiểm tra điều đó.",
   "lines": "voiceover.json",
