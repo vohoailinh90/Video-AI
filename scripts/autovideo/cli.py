@@ -83,7 +83,7 @@ def cmd_plan(args) -> int:
             "id": job.id, "title": job.title, "scenes": len(job.scenes), "estimated_seconds": job.estimate_seconds(),
             "target_seconds": [job.min_seconds, job.max_seconds], "aspect": job.aspect, "language": job.language,
             "voice": job.audio_file or job.voice, "source": job.material_source, "terms": list(job.terms),
-            "problem": runner.preflight(env, job) if env else setup_problem,
+            "problem": runner.preflight(env, job, Path(args.out) / pack.batch / job.id) if env else setup_problem,
             "mpt_params": engine_mpt.video_params(job),
         })
     blocked = any(p["problem"] for p in plan)

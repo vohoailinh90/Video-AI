@@ -122,22 +122,32 @@ def managed_file(env: MptEnv, name: str, folders: tuple[str, ...]) -> Path | Non
     return None
 
 
-def has_music(env: MptEnv) -> bool:
-    """Whether MPT has a song it can pick for `random` music: a file with a supported suffix in storage/bgm or resource/songs, not one of its own
-    upload staging files, whose real path stays in the folder (app/services/bgm.py _list_bgm_files). With none, MPT logs a warning and renders
-    without music, and the video still passes QA on its narration."""
+def music_files(env: MptEnv) -> list[Path]:
+    """The songs MPT picks from for `random` music, as app/services/bgm.py _list_bgm_files lists them: files with a supported suffix in
+    storage/bgm or resource/songs, not its own upload staging files, whose real path stays in the folder; for a name in both folders the
+    one in storage/bgm. With none, MPT logs a warning and renders without music, and the video still passes QA on its narration."""
+    names: set[str] = set()
     for folder in MUSIC_FOLDERS:
-        directory = env.home / folder
         try:
-            names = sorted(os.listdir(directory)) if directory.is_dir() else []
-        except OSError:  # a folder that cannot be listed offers no song MPT could pick either
-            names = []
-        for name in names:
-            if name.lower().startswith(".bgm-upload-") or Path(name).suffix.lower() not in MUSIC_EXTENSIONS:
-                continue
-            if managed_file(env, name, (folder,)) is not None:
-                return True
-    return False
+            names.update(os.listdir(env.home / folder))
+        except OSError:  # missing, or a folder that cannot be listed: it offers no song MPT could pick either
+            pass
+    found = []
+    for name in sorted(names):
+        if name.lower().startswith(".bgm-upload-") or Path(name).suffix.lower() not in MUSIC_EXTENSIONS:
+            continue
+        path = managed_file(env, name, MUSIC_FOLDERS)
+        if path is not None:
+            found.append(path)
+    return found
+
+
+def readable(path: Path) -> bool:
+    try:
+        open(path, "rb").close()
+    except OSError:
+        return False
+    return True
 
 
 def _digest_in(env: MptEnv, name: str, folders: tuple[str, ...]) -> str:

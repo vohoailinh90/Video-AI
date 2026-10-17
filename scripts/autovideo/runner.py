@@ -85,8 +85,17 @@ def _missing_input(env: engine_mpt.MptEnv, what: str, name: str, folders: tuple[
     return f"{what} {absent}"
 
 
-def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
-    """Reasons a render cannot work, found before MPT starts. None when nothing is wrong."""
+def _inside(path: str, folder: Path) -> bool:
+    base = os.path.realpath(folder)
+    return os.path.commonpath([base, os.path.realpath(path)]) == base
+
+
+def preflight(env: engine_mpt.MptEnv, job: Job, dest: Path | None = None) -> str | None:
+    """Reasons a render cannot work, found before MPT starts. None when nothing is wrong. `dest` is the job's output folder."""
+    if dest is not None:
+        for name in [*job.materials, *([job.audio_file] if job.audio_file else [])]:
+            if _inside(name, dest):  # collect() clears the old results there, and MPT's own files are written there
+                return f"{name} is inside this video's output folder {dest}, which every render clears; copy the file somewhere else and point the pack at the copy"
     gone = [tool for tool in ("ffmpeg", "ffprobe") if shutil.which(tool) is None]
     if gone:
         return f"{' and '.join(gone)} not found on PATH (MPT needs ffmpeg, and QA needs ffmpeg and ffprobe)"
@@ -99,8 +108,13 @@ def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
         return _missing_input(env, f"font {job.font}", job.font, ("resource/fonts",), f"is not in {env.home}/resource/fonts")
     if job.bgm not in ("none", "random") and job.bgm_volume > 0 and engine_mpt.managed_file(env, job.bgm, engine_mpt.MUSIC_FOLDERS) is None:
         return _missing_input(env, f"music file {job.bgm}", job.bgm, engine_mpt.MUSIC_FOLDERS, f"is in neither storage/bgm nor resource/songs of {env.home}")
-    if job.bgm == "random" and job.bgm_volume > 0 and not engine_mpt.has_music(env):
-        return f'bgm is "random" but MPT has no music file it can read in storage/bgm or resource/songs of {env.home}, so it would render without music; add songs there, or set bgm to "none"'
+    if job.bgm == "random" and job.bgm_volume > 0:
+        songs = engine_mpt.music_files(env)
+        if not songs:
+            return f'bgm is "random" but MPT has no music file it can list in storage/bgm or resource/songs of {env.home}, so it would render without music; add songs there, or set bgm to "none"'
+        for song in songs:  # MPT picks one at random, and a song it cannot open is skipped without a word: the video has no music
+            if not engine_mpt.readable(song):
+                return f"music file {song} cannot be read (permissions?); MPT picks a song at random and would now and then render without music; fix it or remove it"
     for what, digest in engine_mpt.input_digests(env, job).items():
         if digest == engine_mpt.FILE_UNREADABLE:  # there, per the checks above, but not readable: MPT would stumble on it as well
             return f"the {'music' if what == 'bgm' else 'font'} file {job.bgm if what == 'bgm' else job.font} cannot be read (permissions?)"
@@ -277,7 +291,7 @@ def _run(
         state["jobs"][job.id] = {"status": "running", "fingerprint": job.fingerprint(), "attempts": attempts, "started": now()}
         write_json(batch_dir / "state.json", state)
 
-        problem = preflight(env, job)
+        problem = preflight(env, job, dest)
         outcome: dict
         if problem:
             outcome = {"status": "failed", "stage": "preflight", "error": problem}

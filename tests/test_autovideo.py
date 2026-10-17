@@ -353,6 +353,25 @@ class PackTests(unittest.TestCase):
         text = engine_mpt.redact("keys k1 and a-longer-key-value, password pw, provider edge, blank '   '", env)
         self.assertEqual(text, "keys *** and ***, password ***, provider edge, blank '   '")  # a blank value hides nothing, and other fields stay readable
 
+    def test_random_music_needs_every_candidate_song_to_be_readable(self):
+        # MPT picks one listed song with random.choice and, when it cannot open it, renders without music and goes on (video.py)
+        env = fake_mpt(self.root)
+        job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]  # random music at volume 0.2
+        songs = env.home / "resource" / "songs"
+        (songs / "bad.mp3").write_bytes(b"x")  # next to the good one that fake_mpt ships
+        real_open = open
+
+        def deny_bad(path, *args, **kwargs):  # (these tests run as root, which can read anything, so the failure is simulated)
+            if Path(path).name == "bad.mp3":
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, *args, **kwargs)
+
+        with mock.patch.object(engine_mpt, "open", deny_bad, create=True):
+            problem = runner.preflight(env, job)
+        self.assertIn("bad.mp3", problem)
+        self.assertIn("cannot be read", problem)
+        self.assertIsNone(runner.preflight(env, job))  # readable again
+
     def test_a_file_that_cannot_be_read_is_a_problem_not_a_traceback(self):
         env = fake_mpt(self.root)
         job = packmod.load_pack(write_pack(self.root, [video()])).jobs[0]
@@ -637,6 +656,23 @@ class RunnerTests(FakeMptCase):
         self.assertEqual(runner.job_status(self.state()["01-first"], pack.jobs[0], folder), "missing")
         summary, _ = self.run_pack([video(title="NOSUB")], retries=0)
         self.assertEqual((summary["skipped"], self.renders()), (0, 2))  # so it is not skipped as done
+
+    def test_an_input_inside_the_jobs_output_folder_is_refused_and_left_alone(self):
+        self.run_pack([video()])
+        folder = self.out / "test-batch" / "01-first"
+        narration = folder / "narration.mp3"
+        before = narration.read_bytes()
+        # the previous narration reused as the voice: every render clears narration.* in this folder first, which would delete the input
+        summary, pack = self.run_pack([video(audio_file=str(narration), subtitles=False)], retries=0)
+        self.assertEqual((summary["failed"], summary["videos"][0]["stage"]), (1, "preflight"))
+        self.assertIn("output folder", summary["videos"][0]["error"])
+        self.assertEqual(narration.read_bytes(), before)  # still there, untouched
+        self.assertEqual(self.renders(), 1)  # and MPT was not started
+        self.assertIn("output folder", runner.preflight(self.env, pack.jobs[0], folder))  # `plan` says it too, with the same folder
+        clip = folder / "video.mp4"
+        pack = packmod.load_pack(write_pack(self.root, [video()], {"material_source": "local", "materials": [str(clip)], "subtitles": False}))
+        self.assertIn("output folder", runner.preflight(self.env, pack.jobs[0], folder))  # a clip is just as exposed
+        self.assertIsNone(runner.preflight(self.env, pack.jobs[0], self.out / "test-batch" / "02-other"))  # another job's folder is not cleared by this one
 
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
