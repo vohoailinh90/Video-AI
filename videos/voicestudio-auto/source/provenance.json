@@ -4,6 +4,17 @@
   "last_commit_of_file": "d375c0a04d23171a105b51b974478f192fb55987 2026-10-13",
   "also_via": "video này được dựng từ bản chép giống hệt từng byte của nó trong `tests/fixtures/voicestudio.json` (so bằng sha256)",
   "sha256": "d3f2c2e12dd985bfe26ccfe81fbd6db60458bf177af8ff7650eacd03cb14a975",
+  "units": [
+    "hook",
+    "problem:0",
+    "problem:2",
+    "step:0",
+    "step:1",
+    "step:2",
+    "learn:0",
+    "learn:1",
+    "caveat:0"
+  ],
   "repo": "debpalash/VoiceStudio",
   "scanned": "2026-10-13",
   "generated_by": "scripts/radar/make_video.py scaffold"

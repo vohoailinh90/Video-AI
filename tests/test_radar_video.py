@@ -43,7 +43,9 @@ def write_source(project, name="voicestudio"):
     source = project / "source"
     source.mkdir(exist_ok=True)
     (source / "draft-vi.json").write_text(json.dumps(fixture(name)), encoding="utf-8")
-    (source / "provenance.json").write_text(json.dumps({"sha256": hashlib.sha256((source / "draft-vi.json").read_bytes()).hexdigest()}), encoding="utf-8")
+    units = [unit["key"] for unit in planlib.build_plan(planlib.load_digest(FIXTURES / f"{name}.json"))["units"]]
+    (source / "provenance.json").write_text(json.dumps({"sha256": hashlib.sha256((source / "draft-vi.json").read_bytes()).hexdigest(), "units": units}),
+                                            encoding="utf-8")
 
 
 def estimated_durations(plan):
@@ -1257,6 +1259,44 @@ class ReviewFindings(unittest.TestCase):
             record_path.write_text(record, encoding="utf-8")
             make_video.require_source_unchanged(project)
 
+    def test_the_lines_of_voiceover_json_are_the_ones_scaffold_chose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_source(project)
+            chosen = json.loads((project / "source" / "provenance.json").read_text(encoding="utf-8"))["units"]
+            self.assertGreater(len(chosen), 3)
+            path = project / "voiceover.json"
+
+            def stops(what, units, record=None):
+                path.write_text(json.dumps({"lines": [{"id": f"vo-{i}", "unit": unit} for i, unit in enumerate(units, 1)]}), encoding="utf-8")
+                if record is not None:
+                    (project / "source" / "provenance.json").write_text(json.dumps(record), encoding="utf-8")
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
+                    make_video.load_project(project)
+                self.assertIn("scaffold", errors.getvalue(), what)
+
+            stops("an emptied list", [])                                                    # music over a terminal, 0 lines "traced"
+            stops("one line dropped", chosen[:-1])
+            stops("the first line dropped", chosen[1:])
+            stops("a line added", chosen + ["caveat:9"])
+            stops("two lines exchanged", [chosen[1], chosen[0]] + chosen[2:])
+            good = {"sha256": hashlib.sha256((project / "source" / "draft-vi.json").read_bytes()).hexdigest()}
+            stops("a record without the chosen lines", chosen, good)
+            stops("a record with an empty list", chosen, {**good, "units": []})
+            path.write_text(json.dumps({"lines": [{"id": f"vo-{i}", "unit": unit} for i, unit in enumerate(chosen, 1)]}), encoding="utf-8")
+            (project / "source" / "provenance.json").write_text(json.dumps({**good, "units": chosen}), encoding="utf-8")
+            digest, plan, doc = make_video.load_project(project)                            # the chosen lines: fine
+            self.assertEqual([u["key"] for u in plan["units"]], chosen)
+        # and the facts gate by itself refuses a list with no line at all
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        status, output = run_gate(digest, {**doc, "lines": []}, html)
+        self.assertEqual(status, 1)
+        self.assertIn("no lines at all", output)
+
     def test_the_timing_of_voiceover_json_is_what_the_clips_give(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
         plan = planlib.build_plan(digest)
@@ -1296,7 +1336,8 @@ class ReviewFindings(unittest.TestCase):
                 errors = io.StringIO()
                 with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
                     make_video.require_generated_timing(project)
-                self.assertIn("rebuild", errors.getvalue(), what)
+                # the order of the lines is the scaffold's (provenance.json), so that one is refused before the timing is looked at
+                self.assertIn("scaffold" if what.startswith("two lines in") else "rebuild", errors.getvalue(), what)
             changed(swap_starts)
             args = type("Args", (), {"project": str(project), "videos_dir": tmp})()
             make_video.cmd_rebuild(args, project)                                           # rebuild writes the timing again
