@@ -6,10 +6,13 @@ and data-volume of the matching <audio id="<id>"> tags in index.html, runs `npm 
   * data-start comes from voiceover.json, data-duration from the clip length (+0.01 s).
   * data-volume brings each clip's mean level to --target-mean dB, but never lets the peak go above --max-peak dB.
   * A clip that would run into the scene's fade-out is reported as a warning.
+  * With --apply, once the check and the render have passed, the same clips and the rewritten index.html are also written into
+    the project itself. That is how a voice becomes the project's default: assets/<id>.wav and the <audio> tags then match it.
 
 usage:
   python -I scripts/vo/revoice.py --project videos/demo-video --lines videos/demo-video/voiceover.json \\
-      --clips build/voices/hai-dang --out renders/demo-video-nam.mp4
+      --clips videos/demo-video/voices/mai-anh --out videos/demo-video/renders/demo-video-mai-anh.mp4
+  python -I scripts/vo/revoice.py ... --clips build/voices/hai-dang --out videos/demo-video/renders/demo-video.mp4 --apply
 
 Needs node/npm, ffmpeg and ffprobe, and a Chrome headless shell for the render (npx hyperframes browser ensure).
 """
@@ -58,6 +61,7 @@ def main() -> int:
     ap.add_argument("--out", required=True, help="mp4 to write")
     ap.add_argument("--target-mean", type=float, default=-19.0, help="mean level of each clip in dB (default: %(default)s)")
     ap.add_argument("--max-peak", type=float, default=-1.5, help="highest allowed peak of a clip in dB (default: %(default)s)")
+    ap.add_argument("--apply", action="store_true", help="after a successful render, write the clips and index.html into --project (make this voice the default)")
     ap.add_argument("--keep", action="store_true", help="keep the temporary project copy and print its path")
     ap.add_argument("--skip-check", action="store_true", help="do not run npm run check before rendering")
     args = ap.parse_args()
@@ -111,6 +115,12 @@ def main() -> int:
     if render.returncode != 0 or not out.is_file():
         print(re.sub(r"\x1b\[[0-9;]*m", "", render.stdout + render.stderr)[-3000:], file=sys.stderr)
         return 1
+
+    if args.apply:
+        for line in lines:
+            shutil.copyfile(work / "assets" / f"{line['id']}.wav", project / "assets" / f"{line['id']}.wav")
+        (project / "index.html").write_text(html, encoding="utf-8")
+        print(f"applied: {len(lines)} clips and index.html written into {project}")
 
     probe = run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,duration",
                  "-of", "compact", str(out)], check=True).stdout.strip()

@@ -1,7 +1,7 @@
 {
   "title": "Video mẫu VieNeu-TTS",
   "eyebrow": "Video-AI · bản thử giọng",
-  "lede": "Bản video 17 giây về cách tự động hóa video bằng code, với lời đọc tiếng Việt do VieNeu-TTS tạo và nhạc nền. Chọn giọng nữ hoặc giọng nam.",
+  "lede": "Bản video 17 giây về cách tự động hóa video bằng code, với lời đọc tiếng Việt do VieNeu-TTS tạo và nhạc nền. Mở bằng giọng nam (giọng mặc định), có thể chuyển sang giọng nữ.",
   "lines": "voiceover.json",
   "facts": [
     ["Độ dài", "17 giây"],
@@ -10,8 +10,8 @@
     ["Mã hóa", "H.264 và AAC (có thêm bản WebM dự phòng)"]
   ],
   "voices": [
-    { "key": "mai-anh", "label": "Giọng nữ · Mai Anh", "mp4": "renders/demo-video.mp4" },
-    { "key": "hai-dang", "label": "Giọng nam · Hải Đăng", "mp4": "renders/demo-video-nam.mp4" }
+    { "key": "hai-dang", "label": "Giọng nam · Hải Đăng (mặc định)", "mp4": "renders/demo-video.mp4" },
+    { "key": "mai-anh", "label": "Giọng nữ · Mai Anh", "mp4": "renders/demo-video-mai-anh.mp4" }
   ],
   "notes": [
     "Mức dễ hiểu đã được kiểm tra bằng máy: PhoWhisper-small nghe lại âm thanh cắt từ chính các file video này và chép đúng mọi từ tiếng Việt, ở cả hai giọng. Các từ tiếng Anh (code, engine, skill, file MP4, render) được đọc theo kiểu Việt hóa nên bị chép khác đi.",

@@ -5,7 +5,7 @@ Synthesis is sampled, so two runs give slightly different clips: use --only to r
 
 usage:
   python -I scripts/vo/synth.py --list-voices
-  python -I scripts/vo/synth.py --lines videos/demo-video/voiceover.json --voice "Hải Đăng" --out build/voices/hai-dang
+  python -I scripts/vo/synth.py --lines videos/demo-video/voiceover.json --out build/voices/hai-dang        # default voice: Hải Đăng
   python -I scripts/vo/synth.py --lines ... --voice "Mai Anh" --out build/voices/mai-anh --only vo-2
 
 Needs the packages in scripts/vo/requirements-tts.txt. First run downloads the model from Hugging Face; if loading then fails
@@ -16,11 +16,13 @@ import json
 import sys
 from pathlib import Path
 
+DEFAULT_VOICE = "Hải Đăng"  # the owner's default narrator (male, northern); pass --voice for another
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--lines", help="voiceover.json with the lines to read")
-    ap.add_argument("--voice", help="preset voice name, for example 'Mai Anh' or 'Hải Đăng'")
+    ap.add_argument("--voice", default=DEFAULT_VOICE, help="preset voice name, for example 'Mai Anh' or 'Hải Đăng' (default: %(default)s)")
     ap.add_argument("--out", help="output directory for the wav files and manifest.json")
     ap.add_argument("--only", help="comma-separated line ids to (re)generate; the others in an existing manifest are kept")
     ap.add_argument("--list-voices", action="store_true", help="print the preset voices and exit")

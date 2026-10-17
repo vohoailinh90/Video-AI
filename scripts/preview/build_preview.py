@@ -10,7 +10,7 @@ and writes a status line that says which source it used or why none worked. For 
 
 usage: python -I scripts/preview/build_preview.py --config videos/demo-video/preview.json --out build/preview/index.html
 
-preview.json (paths are relative to the json file):
+preview.json (paths are relative to the json file; the first voice is the one the page opens with):
   { "title": "...", "eyebrow": "...", "lede": "...",
     "lines": "voiceover.json",                     # lines with start, text, scene
     "facts": [["Độ dài", "17 giây"], ...],
