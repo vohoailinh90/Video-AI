@@ -870,6 +870,12 @@ class ReviewFindings(unittest.TestCase):
         for symbol in ("™", "…", "½", "®", "°", "×", " "):
             self.assertEqual(numbers_vi.plain_text(symbol), symbol, repr(symbol))
         self.assertEqual(check_facts.untraced("npm™ …", check_facts.blob({"fact": "npm"}), set()), [])
+        # the Roman numeral characters are letters (Nl): ⅩⅨ% is XIX%, and the name has to be in the source
+        self.assertEqual(numbers_vi.plain_text("ⅩⅨ% ⅷ"), "XIX% viii")
+        self.assertEqual(check_facts.untraced("ⅩⅨ%", plain, set()), ["token 'XIX%'"])
+        self.assertEqual(check_facts.untraced("ⅩⅨ%", check_facts.blob({"fact": "XIX%"}), set()), [])
+        self.assertEqual(numbers_vi.speak_text("tăng ⅩⅨ%"), "tăng XIX%")
+        self.assertEqual(numbers_vi.plain_text("〇"), "〇")                                  # a character with no ASCII form is left alone
 
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):

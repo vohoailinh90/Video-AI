@@ -19,7 +19,7 @@ def plain_char(c: str) -> str:
     if ord(c) < 128:
         return c
     category, folded = unicodedata.category(c), unicodedata.normalize("NFKC", c)
-    if category[0] == "L":
+    if category[0] == "L" or category == "Nl":              # Nl: the Roman numeral characters, Ⅹ Ⅸ ... (NFKC: X IX)
         return folded if folded.isascii() and folded.isalpha() else c
     if category in ("Nd", "No"):
         if folded.isascii() and folded.isdigit():
