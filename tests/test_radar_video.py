@@ -826,6 +826,34 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.numbers("19 PHẦN TRĂM".replace("Ầ", "Ầ")), {"19%"})        # decomposed, as pasted text can be
         self.assertEqual(numbers_vi.speak_text("tăng 19％ và 5﹪"), "tăng mười chín phần trăm và năm phần trăm")
 
+    def test_letters_in_a_compatibility_form_are_the_plain_letters(self):
+        source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
+        untraced = lambda text, source=source: check_facts.untraced(text, source, set())
+        self.assertEqual(untraced("ＯｐｅｎＡＩ"), ["token 'OpenAI'"])                       # full-width
+        self.assertEqual(untraced("𝐎𝐩𝐞𝐧𝐀𝐈"), ["token 'OpenAI'"])                          # mathematical bold
+        self.assertEqual(untraced("ⓞⓟⓔⓝ"), ["token 'open'"])                             # circled
+        self.assertEqual(untraced("Keras"), ["token 'Keras'"])                         # the Kelvin sign
+        self.assertEqual(untraced("ﬁle"), ["token 'file'"])                                 # a ligature
+        self.assertEqual(untraced("ＶｏｉｃｅＳｔｕｄｉｏ"), [])                               # the name the source has, in full-width
+        self.assertEqual(untraced("VoiceStudio", check_facts.blob({"field": "ＶｏｉｃｅＳｔｕｄｉｏ"})), [])
+        # a symbol is not a letter: ™ is not "TM"
+        self.assertEqual(check_facts.untraced("npm™", check_facts.blob({"field": "npm"}), set()), [])
+
+    def test_a_word_is_vietnamese_only_in_the_casing_of_a_word(self):
+        source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
+        untraced = lambda text, source=source: check_facts.untraced(text, source, set())
+        self.assertEqual(untraced("AIé"), ["token 'AI'"])
+        self.assertEqual(untraced("iOSé"), ["token 'iOS'"])
+        self.assertEqual(untraced("Việt, VIỆT, việt, Đức, ĐỨC, Nguyễn, NGUYỄN"), [])
+        self.assertFalse(check_facts.vietnamese_syllable("AIé"))
+        self.assertTrue(check_facts.vietnamese_syllable("VIỆT"))
+
+    def test_a_rest_of_plus_or_hash_signs_is_not_the_name(self):
+        for text, source in (("C+++", "C++"), ("C##", "C#"), ("C++++", "C++"), ("f##", "F#")):
+            self.assertEqual(check_facts.untraced(text, check_facts.blob({"field": source}), set()), [f"token '{text}'"], text)
+        for text, source in (("C++", "C++"), ("C#", "C#"), ("C+", "C+"), ("`npm`", "npm"), ("c++/cli", "c++/cli"), ("C++.", "C++")):
+            self.assertEqual(check_facts.untraced(text, check_facts.blob({"field": source}), set()), [], text)
+
     def test_a_look_alike_of_a_sign_is_the_sign(self):
         for text, value in (("＋19%", "+19%"), ("﹢19%", "+19%"), ("➕19", "+19"), ("⁺3,5", "+3.5"),
                             ("－19%", "-19%"), ("﹣19%", "-19%"), ("➖3", "-3"), ("⁻3", "-3"), ("‐3", "-3"), ("−3", "-3")):
