@@ -282,6 +282,24 @@ class Narration(unittest.TestCase):
         self.assertIn("ElevenLabs", output)
         self.assertIn("number 10", output)
 
+    def test_speak_is_refreshed_before_synthesis(self):
+        plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        doc = make_video.voiceover_doc(plan, tl)
+        caveat = next(l for l in doc["lines"] if l["unit"] == "caveat:0")
+        self.assertIn("ba chấm không", caveat["speak"])
+        caveat.pop("speak")                         # a scaffold made before the AGPL-3.0 rule existed
+        self.assertTrue(make_video.refresh_speak(doc, plan))
+        self.assertIn("ba chấm không", caveat["speak"])
+        self.assertFalse(make_video.refresh_speak(doc, plan))
+        step = next(l for l in doc["lines"] if l["unit"] == "step:1")
+        step["text"] = "Chạy trong 5 phút."          # reworded by hand: gets its own speak
+        make_video.refresh_speak(doc, plan)
+        self.assertEqual(step["speak"], "Chạy trong năm phút.")
+        step["speak"] = "Chạy trong năm phút đồng hồ."   # written by hand: kept
+        make_video.refresh_speak(doc, plan)
+        self.assertEqual(step["speak"], "Chạy trong năm phút đồng hồ.")
+
     def test_speak_is_set_only_when_it_differs(self):
         plan = planlib.build_plan(planlib.load_digest(FIXTURES / "impeccable.json"))
         with_numbers = [u for u in plan["units"] if "speak" in u]

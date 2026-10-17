@@ -130,6 +130,30 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
     return {"allow": (existing or {}).get("allow", []), "lines": lines}
 
 
+def refresh_speak(doc, plan) -> bool:
+    """Bring each line's `speak` up to date before synthesizing. A line still worded as in the digest takes the plan's current
+    `speak` (the number rules may have changed since the scaffold); a reworded line gets one if it has none. A `speak` a person
+    wrote on a reworded line stays. Returns True when something changed."""
+    units = {u["key"]: u for u in plan["units"]}
+    changed = False
+    for line in doc["lines"]:
+        unit = units[line["unit"]]
+        if line["text"] == unit["text"]:
+            wanted = unit.get("speak")
+        elif "speak" in line:
+            continue
+        else:
+            wanted = speak_text(line["text"])
+            wanted = wanted if wanted != line["text"] else None
+        if wanted != line.get("speak"):
+            changed = True
+            if wanted:
+                line["speak"] = wanted
+            else:
+                line.pop("speak", None)
+    return changed
+
+
 def write_json(path: Path, doc):
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -235,6 +259,8 @@ def cmd_voice(args, project=None) -> dict:
     if not args.tts_python:
         fail("voice needs --tts-python (the Python of the VieNeu-TTS environment, see docs/voiceover-workflow.md)")
     digest, plan, doc = load_project(project)
+    if refresh_speak(doc, plan):
+        write_json(project / "voiceover.json", doc)
     ids = [l["id"] for l in doc["lines"]]
     only = [i for i in (args.only.split(",") if args.only else ids)]
     unknown = [i for i in only if i not in ids]
