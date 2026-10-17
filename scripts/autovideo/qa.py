@@ -1,4 +1,5 @@
 """Checks on a rendered video, made on the file and not on what the log says (ffprobe, ffmpeg volumedetect, the subtitle file).
+The one exception is the music: MPT drops a song it cannot mix and carries on, so its own error line is the only evidence.
 
 An `error` check that fails means the video must not be published as it is; a `warn` check is for a person to look at.
 Thresholds are conservative on purpose: they catch a silent, cut-off, wrong-shaped or wrongly subtitled video, not a dull one.
@@ -65,7 +66,7 @@ def _duration(info: dict | None) -> float | None:
         return None
 
 
-def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) -> list[Check]:
+def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue], music_failure: str | None = None) -> list[Check]:
     checks: list[Check] = []
     add = lambda name, ok, detail, level="error": checks.append(Check(name, bool(ok), detail, level))
 
@@ -82,6 +83,8 @@ def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) 
     music = job.bgm != "none" and job.bgm_volume > 0  # MPT skips the music when its volume is zero
     expects_audio = job.reads_aloud or job.audio_file is not None or music
     add("audio_stream", bool(astreams) or not expects_audio, f"{len(astreams)} audio stream(s)")
+    if music:  # the one check that reads MPT's log: a song it could not mix is dropped, and the file alone cannot tell (the narration is audible)
+        add("music_mixed", music_failure is None, music_failure or "no mixing error in MPT's log")
 
     if vstreams:
         w, h = int(vstreams[0].get("width", 0)), int(vstreams[0].get("height", 0))

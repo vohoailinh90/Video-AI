@@ -178,7 +178,11 @@ def evaluate(job: Job, dest: Path) -> list[qa.Check]:
     srt = dest / "subtitles.srt"
     cues = parse_srt(srt.read_text(encoding="utf-8", errors="replace")) if srt.is_file() else []
     narration = next(iter(sorted(dest.glob("narration.*"))), None)
-    return qa.check_video(job, dest / "video.mp4", narration, cues)
+    try:
+        log = (dest / "mpt.log").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        log = ""
+    return qa.check_video(job, dest / "video.mp4", narration, cues, engine_mpt.music_mix_failure(log))
 
 
 def rendered_fingerprint(dest: Path) -> str | None:

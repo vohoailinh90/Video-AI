@@ -122,6 +122,18 @@ def managed_file(env: MptEnv, name: str, folders: tuple[str, ...]) -> Path | Non
     return None
 
 
+MIX_FAILED = "failed to mix background music"  # MPT logs this at ERROR level (app/services/video.py, generate_video) and renders on without the music
+
+
+def music_mix_failure(log: str) -> str | None:
+    """MPT's own account of a song it could not mix (a corrupt or undecodable file), from its stored log, or None. The video is still made
+    and the narration keeps it audible, so nothing in the file shows the music is missing."""
+    for line in log.splitlines():
+        if MIX_FAILED in line:
+            return line[line.index(MIX_FAILED):].strip()
+    return None
+
+
 def music_files(env: MptEnv) -> list[Path]:
     """The songs MPT picks from for `random` music, as app/services/bgm.py _list_bgm_files lists them: files with a supported suffix in
     storage/bgm or resource/songs, not its own upload staging files, whose real path stays in the folder; for a name in both folders the

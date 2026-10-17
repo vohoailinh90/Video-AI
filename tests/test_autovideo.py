@@ -31,6 +31,8 @@ FAKE_CLI = textwrap.dedent('''
     p = json.loads(open(manifest, encoding="utf-8").readline())
     subject, tid = p["video_subject"], str(uuid.uuid4())
     print("log line with key " + "%(secret)s", file=sys.stderr)
+    if "MIXERR" in subject:  # what MPT logs at ERROR level when it cannot mix the music, and then renders without it
+        print('2026-10-17 13:43:35 | ERROR    | "./app/services/video.py:1856": generate_video - failed to mix background music: type=custom, file=./storage/bgm/x.mp3', file=sys.stderr)
     entry = {"index": 1, "task_id": tid, "status": "succeeded", "result": None, "failed_stage": None, "error": None}
     if "FAIL" in subject:
         entry.update(status="failed", failed_stage="audio", error="TTS said no, key %(secret)s")
@@ -673,6 +675,17 @@ class RunnerTests(FakeMptCase):
         pack = packmod.load_pack(write_pack(self.root, [video()], {"material_source": "local", "materials": [str(clip)], "subtitles": False}))
         self.assertIn("output folder", runner.preflight(self.env, pack.jobs[0], folder))  # a clip is just as exposed
         self.assertIsNone(runner.preflight(self.env, pack.jobs[0], self.out / "test-batch" / "02-other"))  # another job's folder is not cleared by this one
+
+    def test_a_song_mpt_could_not_mix_fails_qa_when_music_was_asked_for(self):
+        # a corrupt song is dropped by MPT with one error line, and the narration keeps the video audible, so the file alone cannot show it
+        summary, pack = self.run_pack([video(title="MIXERR")], retries=0)  # random music at 0.2 is the default
+        self.assertEqual(summary["videos"][0]["status"], "qa_failed")
+        self.assertIn("music_mixed", summary["videos"][0]["qa_failures"])
+        self.assertIn("failed to mix background music", (self.out / "test-batch" / "01-first" / "report.json").read_text())
+        self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "qa_failed")  # `qa` reads the same log
+        for no_music in ({"bgm": "none"}, {"bgm_volume": 0}):  # without music asked for, the line means nothing to this video
+            summary, _ = self.run_pack([video(title="MIXERR")], no_music, retries=0)
+            self.assertEqual(summary["videos"][0]["status"], "done", no_music)
 
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA
