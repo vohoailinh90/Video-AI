@@ -18,6 +18,8 @@ def plain_char(c: str) -> str:
     … into three dots, which are not what is on the screen. Vietnamese letters, symbols and other alphabets are left alone."""
     if ord(c) < 128:
         return c
+    if c in "\u2010\u2011\u2212":                         # the hyphen, the non-breaking hyphen and the minus sign: NFKC leaves them, they read as -
+        return "-"
     category, folded = unicodedata.category(c), unicodedata.normalize("NFKC", c)
     if category[0] == "L" or category == "Nl":              # Nl: the Roman numeral characters, Ⅹ Ⅸ ... (NFKC: X IX)
         return folded if folded.isascii() and folded.isalpha() else c

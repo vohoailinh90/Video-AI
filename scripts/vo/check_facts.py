@@ -389,16 +389,26 @@ def shown(text: str) -> str:
     return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
+# the marks beyond ASCII that the text of a video may use: quotes, dashes, the ellipsis, arrows, bullets, units and the like, and the full-width
+# brackets, colons and commas that stand around a name in another script (plain_char reads those as their ASCII twins)
+MARKS = set("“”‘’‚„«»‹›–—…→←↔·•©®°×÷±≈≠≤≥∞€£¥′″§¶†‡‰（）：，；！？［］。、「」『』〈〉《》【】～")
+
+
 def compat_problems(text: str) -> list:
-    """The characters of a text that NFKC changes: a full-width or mathematical letter, a superscript or circled digit, a Roman numeral, a
-    fraction, a ligature, a trademark sign ... Each is a different character that looks like a plain one (or like several), and a name, a
-    number or an address made of them would be read by the voice and the viewer but not by this check. The text of a video has to use
-    the plain characters. Punctuation (full-width brackets and colons around a name in another script, the ellipsis) and spaces of any
-    width are left: they are a break or a mark, not a letter or a digit."""
+    """The characters of a text that only look like others, or that this check does not know. A letter, a digit or a sign that NFKC
+    changes (a full-width or mathematical letter, a superscript or circled digit, a Roman numeral, a fraction, a ligature, ™ ...) is a
+    different character that looks like a plain one, so a name, a number or an address made of them would be read by the voice and the
+    viewer but not by this check. A punctuation mark or a symbol outside MARKS (a Unicode hyphen or slash, an emoji ...) is refused for
+    the same reason: it can stand in a name or an address without the check seeing it. The text of a video uses plain characters, the
+    marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
     found = {}
     for c in unicodedata.normalize("NFC", text):
-        if unicodedata.normalize("NFKC", c) != c and unicodedata.category(c)[0] not in "PZ":
-            found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
+        if ord(c) < 128:
+            continue
+        kind = unicodedata.category(c)[0]
+        if kind == "Z" or (kind in "PS" and c in MARKS) or (kind not in "PS" and unicodedata.normalize("NFKC", c) == c):
+            continue
+        found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
     return list(found.values())
 
 
@@ -537,8 +547,8 @@ def main() -> int:
             failures += 1
         plain = compat_problems(line["text"])
         if plain:
-            print(f"{line['id']}: the text uses {', '.join(plain)}, which only look like other characters (NFKC turns them into something else); "
-                  f"write the plain letters, digits and signs")
+            print(f"{line['id']}: the text uses {', '.join(plain)}, which only look like other characters (NFKC turns "
+                  f"them into something else) or are not marks this check knows; write the plain letters, digits and signs")
             failures += 1
         problems = untraced(line["text"], blob(fields), allow)
         if problems:
@@ -568,8 +578,8 @@ def main() -> int:
     screen = VALUE_BREAK.join(parser.parts + parser.glued)
     plain = compat_problems(screen)
     if plain:
-        print(f"{args.html}: the page's text uses {', '.join(plain)}, which only look like other characters (NFKC turns them into something "
-              f"else); write the plain letters, digits and signs")
+        print(f"{args.html}: the page's text uses {', '.join(plain)}, which only look like other characters (NFKC turns "
+              f"them into something else) or are not marks this check knows; write the plain letters, digits and signs")
         failures += 1
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)
