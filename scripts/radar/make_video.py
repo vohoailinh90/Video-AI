@@ -219,6 +219,8 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
             line["speak"] = spoken
         if unit["key"] in old and old[unit["key"]].get("voiced"):
             line["voiced"] = old[unit["key"]]["voiced"]          # which words the clip in assets/ was made from
+            if old[unit["key"]].get("clip"):
+                line["clip"] = old[unit["key"]]["clip"]          # and which clip that was
         lines.append(line)
     doc = {"allow": (existing or {}).get("allow", [])}
     if (existing or {}).get("voice"):
@@ -235,9 +237,18 @@ def voiced_fingerprint(text) -> str:
     return hashlib.sha1(speak_text(text).encode("utf-8")).hexdigest()[:12]
 
 
-def stale_voices(doc) -> list:
-    """Ids of the lines whose clip was not made from their current words (reworded and not voiced again, or never voiced)."""
-    return [line["id"] for line in doc["lines"] if line.get("voiced") != voiced_fingerprint(line["text"])]
+def clip_fingerprint(wav: Path) -> str:
+    """A short hash of a clip's bytes, or "" for a clip that is not there. `voice` records it per line beside the words: the words do
+    not tell which file was made from them, and a clip swapped for another line's would say the wrong sentence under the right text."""
+    return hashlib.sha256(wav.read_bytes()).hexdigest()[:16] if wav.is_file() else ""
+
+
+def stale_voices(doc, assets: Path) -> list:
+    """Ids of the lines whose clip in `assets` is not the one `voice` made from their current words: reworded and not voiced again,
+    never voiced, or the file is not the one that was recorded (replaced or missing)."""
+    return [line["id"] for line in doc["lines"]
+            if line.get("voiced") != voiced_fingerprint(line["text"])
+            or not line.get("clip") or line["clip"] != clip_fingerprint(assets / f"{line['id']}.wav")]
 
 
 def refresh_speak(doc) -> bool:
@@ -473,6 +484,7 @@ def cmd_voice(args, project=None) -> dict:
     for line in doc["lines"]:
         if line["id"] in only:
             line["voiced"] = voiced_fingerprint(line["text"])       # the clip just copied to assets/ was made from these words
+            line["clip"] = clip_fingerprint(project / "assets" / f"{line['id']}.wav")     # and it is this file
     write_composition(project, plan, tl, doc)
     make_pad(project / "assets" / "pad.wav", tl["duration"])
 
@@ -514,10 +526,11 @@ def cmd_render(args, project=None) -> dict:
     digest, plan, doc = load_project(project)
     gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
     require_generated_page(project)
-    stale = stale_voices(doc)
+    stale = stale_voices(doc, project / "assets")
     if stale:
-        fail(f"the clip of {', '.join(stale)} was not made from the line's current words (reworded since, or never voiced): "
-             f"run `voice {rel(project)} --only {','.join(stale)}` (or without --only) first, so that what is heard is what was checked")
+        fail(f"the clip of {', '.join(stale)} is not the one `voice` made from the line's current words (reworded since, never voiced, "
+             f"or the file in assets/ was replaced): run `voice {rel(project)} --only {','.join(stale)}` (or without --only) first, "
+             f"so that what is heard is what was checked")
     mp4 = project / "renders" / f"{project.name}.mp4"
     print("render: revoice.py (levels, npm run check, render) ...", flush=True)
     result = run([sys.executable, "-I", VO / "revoice.py", "--project", project, "--lines", project / "voiceover.json",
