@@ -114,7 +114,8 @@ thu ti to toi tu tua tui va vai van vao ve vi vo vua xa xe xi xo xu y yeu
 
 # a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
 # or 10-20, and a plus after one, as in 1+1 or x+5, are not signs) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
-NUMBER = re.compile(r"(?:(?<![\w.,\-−+])[-−+])?\d[\d.,]*(?:\s?%|\s+phần trăm\b)?")
+NUMBER = re.compile(r"(?:(?<![\w.,\-−+])[-−+])?\d[\d.,]*(?:\s?[%％﹪٪]|\s+phần\s+trăm\b)?", re.I)    # PHẦN TRĂM is the same words
+PERCENT = re.compile(r"[%％﹪٪]|phần\s+trăm", re.I)
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
 
@@ -124,6 +125,7 @@ class Visible(HTMLParser):
     text counts as visible text, so the attribute cannot hide anything."""
     SKIP = {"script", "style", "template", "title"}      # not <head>: a browser ends it at the first element that cannot be in it
     VOID = {"br", "img", "meta", "link", "input", "hr", "source", "wbr"}
+    INLINE = {"b", "em", "i", "small", "span", "strong"}    # the template's tags that do not start a new line: text on both sides touches
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -133,9 +135,33 @@ class Visible(HTMLParser):
         self.scripts = []    # the trusted script files the page loads
         self.audio = []      # (id, src) of every <audio> element
         self.style = None    # the text of the <style> element being read
+        self.glued = []      # what text nodes that touch read as one: <span>Open</span><span>AI</span> shows OpenAI
+        self.run, self.run_nodes = "", 0
+
+    def end_run(self):
+        if self.run_nodes > 1:
+            self.glued.append(self.run)
+        self.run, self.run_nodes = "", 0
+
+    def touch(self, data):
+        """A text node that shows. It joins the one before it when nothing separates them: no whitespace at the end of one or the start of
+        the other, and only inline elements between. Parts and glued runs are both checked, because the page's layout decides whether
+        the viewer sees them apart or together, and the check cannot tell."""
+        if not data.strip():
+            self.end_run()
+            return
+        if self.run and not data[0].isspace():
+            self.run, self.run_nodes = self.run + data.rstrip(), self.run_nodes + 1
+        else:
+            self.end_run()
+            self.run, self.run_nodes = data.strip(), 1
+        if data[-1].isspace():
+            self.end_run()
 
     def handle_starttag(self, tag, attrs):
         self.look_at_code(tag, attrs)
+        if tag not in self.INLINE:
+            self.end_run()
         if tag in self.VOID:
             return
         is_label = any(name == "data-label" for name, _ in attrs)
@@ -148,6 +174,8 @@ class Visible(HTMLParser):
         self.style = None
 
     def handle_endtag(self, tag):
+        if tag not in self.INLINE:
+            self.end_run()
         if tag == "style":
             self.check_style()
         for index in range(len(self.stack) - 1, -1, -1):
@@ -190,6 +218,7 @@ class Visible(HTMLParser):
 
     def close(self):
         super().close()
+        self.end_run()
         self.check_style()
         for _, _, buffer in self.stack[::-1]:      # an element that was never closed still shows what it holds
             if buffer is not None:
@@ -200,6 +229,8 @@ class Visible(HTMLParser):
 
     def handle_data(self, data):
         text = data.strip()
+        if not self.stack_is_hidden():
+            self.touch(data)
         if not text:
             return
         inside = [entry[0] for entry in self.stack if entry[0] in ("script", "style")]
@@ -337,15 +368,22 @@ def canonical(number: str) -> str:
     three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus or plus sign and a percent sign belong
     to the value: -19 is not 19, +19% is not 19%, and 19% (or 19 phần trăm) is not 19."""
     sign = "-" if number[:1] in "-−" else "+" if number[:1] == "+" else ""
-    percent = "%" if re.search(r"%|phần trăm", number) else ""
-    number = re.sub(r"\s?%$|\s+phần trăm$", "", number.lstrip("-−+")).rstrip(".,")
+    percent = "%" if PERCENT.search(number) else ""
+    number = re.sub(r"\s?[%％﹪٪]$|\s+phần\s+trăm$", "", number.lstrip("-−+"), flags=re.I).rstrip(".,")
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
         return sign + re.sub(r"[.,]", "", number) + percent
     return sign + number.replace(",", ".") + percent
 
 
+def shown(text: str) -> str:
+    """What a viewer reads of a text. A format character (zero-width space or joiner, soft hyphen, a direction mark), a control character
+    and a combining mark that has no letter to join draw nothing, so they are dropped and do not break a word: G<zero-width>P<zero-width>T
+    is GPT. A symbol (a trademark sign, an emoji) is drawn and a space of any width is a gap, so those stay and break one."""
+    return "".join(c for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
+
+
 def numbers(text: str) -> set:
-    return {canonical(n) for n in NUMBER.findall(text)} - {""}
+    return {canonical(n) for n in NUMBER.findall(shown(text))} - {""}
 
 
 VIETNAMESE_SYLLABLE = re.compile(r"(?:ngh|ng|gh|nh|ph|th|tr|ch|kh|gi|qu|[bcdghklmnprstvx])?[aeiouy]{1,3}(?:ng|nh|ch|[cmnpt])?")
@@ -377,9 +415,9 @@ def glued_names(chunk: str):
 
 def ascii_chunks(text: str, need_letter: bool = True):
     """The chunks of a text made only of ASCII (names, acronyms, commands, addresses; a chunk ends at a space or at one of SPLIT).
-    A character outside ASCII that is not a letter (a symbol like (tm) or an emoji, a zero-width or combining mark) ends a word and
-    hides nothing; a chunk with a non-ASCII letter is a Vietnamese word unless it is not one (see glued_names)."""
-    text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in unicodedata.normalize("NFC", text))
+    A character outside ASCII that is not a letter (a symbol like (tm) or an emoji) ends a word and hides nothing, while one that draws
+    nothing (a zero-width character, see `shown`) does not end it; a chunk with a non-ASCII letter is a Vietnamese word unless it is not one (see glued_names)."""
+    text = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in shown(text))
     for chunk in SPLIT.split(text):
         chunk = chunk.strip(".:,;")
         if re.search(r"[^\x00-\x7f]", chunk):
@@ -469,7 +507,7 @@ def main() -> int:
         print(f"{args.html}: code that could put words on the screen or load code, which this check cannot trace: "
               f"{'; '.join(sorted(set(parser.code)))}")
         failures += 1
-    screen = "\n".join(parser.parts)
+    screen = "\n".join(parser.parts + parser.glued)
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)
     if problems:
