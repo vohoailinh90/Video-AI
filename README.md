@@ -23,7 +23,9 @@ có audio). Quy ước của repo nằm trong [`CLAUDE.md`](CLAUDE.md).
 | Đường dẫn | Nội dung |
 |---|---|
 | `.claude/skills/` | bộ skill HyperFrames (upstream, khoá bằng `skills-lock.json`, không sửa tay) |
-| `videos/<tên>/` | mỗi video một dự án (`index.html`, `compositions/`, `assets/`, `expected.json`) |
+| `videos/<tên>/` | mỗi video một dự án (`index.html`, `compositions/`, `assets/`) |
+| `videos/<tên>.expected.json` | ngưỡng cho gate của team (độ dài, loudness, ...): nằm cạnh thư mục dự án, không nằm trong đó, vì `hyperframes init` từ chối thư mục không rỗng |
+| `videos/<tên>.inputs/` | file người vận hành đưa vào (ví dụ giọng đọc tiếng Việt từng cảnh), cũng nằm cạnh thư mục dự án |
 | `scripts/` | công cụ dùng chung: `vo/` (lồng tiếng), `preview/` (trang xem thử), `radar/` (từ bản tin ra video) |
 | `docs/` | quy trình lồng tiếng, âm thanh tiếng Việt, từ bản tin ra video, `TEAM.md` |
 | `tests/` | test của `scripts/radar` |
