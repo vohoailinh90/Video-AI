@@ -145,6 +145,9 @@ VIDEO_EXCLUDES = ("renders/", "snapshots/", ".hyperframes/")
 # Worker-chosen paths per git command line: how many there are is the worker's
 # choice, the size of argv is not (ARG_MAX). 200 paths of PATH_MAX fit easily.
 ARG_BATCH = 200
+# `pack --force` lifts TEAM_PACK_MAX_BYTES, but the diff it quotes still stops here, so it is never held whole.
+PACK_FORCE_DIFF_BYTES = 20_000_000
+CUT_NOTE = "\n[team] diff cut at {limit} bytes: the rest of it was not read\n"
 SENSITIVE_PATH_RE = re.compile(
     r"(^|/)(\.github|\.claude|\.gitlab-ci\.yml|\.gitattributes|\.codex|\.agents|CLAUDE\.md|AGENTS(?:\.override)?\.md|\.cursorrules|\.hermes\.md"
     r"|opencode\.json)(/|$)"
@@ -413,6 +416,20 @@ def git_paths(repo: Path, *args: str) -> list[str]:
     return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]
 
 
+def git_capped(repo: Path, *args: str, limit: int) -> tuple[str, bool]:
+    """`git *args` output, at most `limit` bytes of it; True when there was more. Git is stopped at the limit rather than
+    waited for, so a diff of gigabytes is never held in memory or written out whole."""
+    with subprocess.Popen(["git", *GIT_SAFE, "-C", str(repo), *args], stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL) as proc:
+        data = proc.stdout.read(limit + 1)
+        cut = len(data) > limit
+        if cut:
+            proc.kill()
+        elif proc.wait():
+            raise SystemExit(f"git {' '.join(args)} failed")
+    return data[:limit].decode("utf-8", "replace"), cut
+
+
 def readable_diff(repo: Path) -> tuple[str, ...]:
     """`git diff` as every reviewer and the auditor reads it.
 
@@ -641,6 +658,9 @@ def hardening(cfg: dict[str, str]) -> list[str]:
         "--memory", cfg["TEAM_WORKER_MEMORY"], "--cpus", cfg["TEAM_WORKER_CPUS"],
         "--read-only", "--tmpfs", f"/tmp:rw,exec,nosuid,size={cfg['TEAM_WORKER_TMP']}",
         "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp/home",
+        # Docker copies a container's output into its own json-file log, which is not rotated by default, whether or not
+        # `docker run` is attached. run_docker reads the pipe and keeps its own capped log, so Docker keeps none.
+        "--log-driver", "none",
         # Chrome (the video team's renders) crashes on Docker's default 64 MB /dev/shm.
         *(["--shm-size", cfg["TEAM_WORKER_SHM"]] if cfg["TEAM_WORKER_SHM"] else []),
     ]
@@ -1046,7 +1066,12 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
     """One review round, from the pipeline or from `team work reviewer`: it replaces the last round's review and warnings."""
     drop_round_warnings(state, "review")
     diff = f.out / "diff.patch"
-    diff.write_text(git(f.repo, *readable_diff(f.repo), f"{merge_base(f, state)}..HEAD"), encoding="utf-8")
+    limit = int(cfg["TEAM_PACK_MAX_BYTES"])  # a diff past the pack's size is refused there anyway; the reviewer reads this much
+    text, cut = git_capped(f.repo, *readable_diff(f.repo), f"{merge_base(f, state)}..HEAD", limit=limit)
+    if cut:
+        text += CUT_NOTE.format(limit=limit)
+        warn(state, f"the reviewer read only the first {limit} bytes of the diff", round="review")
+    diff.write_text(text, encoding="utf-8")
     mounts = handoff_mounts(f, {"diff.patch": diff, "gates.log": f.file("gates.log")})
     prompt = render(shipped(PROMPTS, "reviewer.md"), id=f.id)
     # A review belongs to the HEAD it read. If every reviewer fails on a rerun, the pack must say "none", not carry
@@ -1070,9 +1095,25 @@ def run_reviewer(f: Feature, cfg, keys, state: dict) -> str | None:
 
 def diff_of(repo: Path, revs: str, paths: list[str]) -> str:
     """The readable diff of exactly these paths, ARG_BATCH at a time."""
+    return diff_capped(repo, revs, paths, None)[0]
+
+
+def diff_capped(repo: Path, revs: str, paths: list[str], limit: int | None) -> tuple[str, bool]:
+    """diff_of, stopping at `limit` bytes (None: no limit). The flag says it stopped."""
     batches = (paths[i:i + ARG_BATCH] for i in range(0, len(paths), ARG_BATCH))
-    return "".join(git(repo, *readable_diff(repo), revs, "--", *(f":(literal){path}" for path in batch))
-                   for batch in batches)
+    parts: list[str] = []
+    room = limit
+    for batch in batches:
+        args = (*readable_diff(repo), revs, "--", *(f":(literal){path}" for path in batch))
+        if room is None:
+            parts.append(git(repo, *args))
+            continue
+        text, cut = git_capped(repo, *args, limit=room)
+        parts.append(text)
+        room -= len(text.encode("utf-8"))
+        if cut:
+            return "".join(parts), True
+    return "".join(parts), False
 
 
 def binary_paths(repo: Path, revs: str) -> list[str]:
@@ -1132,6 +1173,12 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     def add(title: str, body: str) -> None:
         sections.extend([f"## {title}", body.rstrip() or "(none)", ""])
 
+    limit, max_bytes = int(cfg["TEAM_PACK_MAX_LINES"]), int(cfg["TEAM_PACK_MAX_BYTES"])
+    # A diff past the byte ceiling makes the pack too big whatever else it holds, so it is read only that far (or, for --force,
+    # up to PACK_FORCE_DIFF_BYTES): a worker's several large files must not be held whole to be told they are too many.
+    diff_limit = PACK_FORCE_DIFF_BYTES if force else max_bytes
+    cut_anywhere = False
+
     add("Spec", read(f.file("spec.md")))
     add("Acceptance", read(f.file("acceptance.md")))
     add("Gates", tail(f.file("gates.log"), 60))
@@ -1144,7 +1191,9 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     tester = state.get("tester_commit")
     if tester:
         paths = test_paths_changed(f, tester)
-        body = "```diff\n" + diff_of(f.repo, f"{tester}..HEAD", paths).rstrip() + "\n```" if paths else ""
+        shown, cut = diff_capped(f.repo, f"{tester}..HEAD", paths, diff_limit) if paths else ("", False)
+        cut_anywhere = cut_anywhere or cut
+        body = "```diff\n" + shown.rstrip() + (CUT_NOTE.format(limit=diff_limit) if cut else "") + "\n```" if paths else ""
         add("Test files changed after the tester commit", body)
     else:
         add("Test files changed after the tester commit", "UNKNOWN: no tester commit recorded")
@@ -1157,15 +1206,17 @@ def build_pack(f: Feature, cfg, state: dict, force: bool = False) -> int:
     add("Binary files changed (their contents are NOT in this pack, and one NUL byte makes any file binary, "
         "source included): BLOCK unless the spec asks for each one", "\n".join(binary_paths(f.repo, f"{base}..HEAD")))
     add("Diffstat", git(f.repo, *readable_diff(f.repo), "--stat", f"{base}..HEAD"))
-    add("Diff", "```diff\n" + git(f.repo, *readable_diff(f.repo), f"{base}..HEAD").rstrip() + "\n```")
+    shown, cut = git_capped(f.repo, *readable_diff(f.repo), f"{base}..HEAD", limit=diff_limit)
+    cut_anywhere = cut_anywhere or cut
+    add("Diff", "```diff\n" + shown.rstrip() + (CUT_NOTE.format(limit=diff_limit) if cut else "") + "\n```")
     text = "\n".join(sections)
     lines = text.count("\n")
     size = len(text.encode("utf-8"))
-    limit, max_bytes = int(cfg["TEAM_PACK_MAX_LINES"]), int(cfg["TEAM_PACK_MAX_BYTES"])
     # Bytes as well as lines: a minified or generated file is one line however large it is.
     if (lines > limit or size > max_bytes) and not force:
         pack.unlink(missing_ok=True)
-        print(f"audit pack would be {lines} lines and {size} bytes (limits {limit} lines, {max_bytes} bytes): "
+        print(f"audit pack would be {'at least ' if cut_anywhere else ''}{lines} lines and {size} bytes "
+              f"(limits {limit} lines, {max_bytes} bytes): "
               f"split the feature, or `{team_lead().command} pack {f.id} --force`", file=sys.stderr)
         return 1
     pack.write_text(text, encoding="utf-8")

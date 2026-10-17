@@ -243,7 +243,9 @@ Có test và mutation check canh giữ (`tests/test_team.py`, `tests/mutations/t
   của chính nó, kể cả khi chưa chạy lại setup.
 - **Dung lượng:** log của một container chỉ ghi tối đa `TEAM_LOG_MAX_BYTES` (cho cả một lần chạy gates);
   thư mục làm việc `/work` mà worker ghi vào không được lớn thêm quá `TEAM_WORKSPACE_GROWTH_BYTES`
-  (container bị dừng, lần thử bị bỏ; còn một lần đo cuối khi container thoát, nên ghi nhanh rồi thoát giữa hai lần đo định kỳ cũng bị bắt). Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS.
+  (container bị dừng, lần thử bị bỏ; còn một lần đo cuối khi container thoát, nên ghi nhanh rồi thoát giữa hai lần đo định kỳ cũng bị bắt). Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS. Container chạy với `--log-driver none`
+  (Docker không giữ thêm một bản log `json-file` không xoay vòng của output), và diff đưa cho reviewer hay vào gói audit chỉ được đọc
+  tới `TEAM_PACK_MAX_BYTES` (hoặc 20 MB với `pack --force`) rồi dừng `git`, nên vài file lớn không bị nạp nguyên vào bộ nhớ.
 - **Thay đổi nhạy cảm:** gói audit liệt kê riêng các thay đổi ở `.github/` (CI chạy ngay trên
   VPS này), `CLAUDE.md`, `AGENTS.md`, `.claude/`, và lockfile phụ thuộc. Diff của lockfile nằm
   trong gói (không bị lược), vì CI trên VPS cài gói theo chính lockfile đó.

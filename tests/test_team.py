@@ -75,7 +75,7 @@ FAKE_DOCKER = textwrap.dedent('''
     if args[:1] == ["rm"] or args[:2] == ["image", "inspect"]:
         sys.exit(0)
     VALUED = {"--name", "-e", "-v", "--network", "--cap-drop", "--security-opt", "--pids-limit",
-              "--memory", "--cpus", "--tmpfs", "--user", "--mount", "-w"}
+              "--memory", "--cpus", "--tmpfs", "--user", "--mount", "-w", "--log-driver"}
     mounts, envs, name, i = {}, [], "", 1
     while i < len(args) and args[i].startswith("-"):
         if args[i] in VALUED:
@@ -1376,6 +1376,80 @@ class PipelineTests(Sandbox):
             ok = team.run_docker([sys.executable, "-c", "print('small')"], "t-small", 60, team.base_env(),
                                  self.tmp / "small.log", workspace=work, workspace_growth=50_000_000)
         self.assertEqual(ok[0], 0, "an exit inside the limit is still accepted, and nothing waits for the poll interval")
+
+    def commit_big_files(self, f, files: int = 3, megabytes: int = 8) -> str:
+        """Commit `files` test files of `megabytes` MB each; returns the commit they were added on top of."""
+        before = team.head(f.repo)
+        (f.repo / "tests").mkdir(exist_ok=True)
+        for i in range(files):
+            with open(f.repo / "tests" / f"test_big{i}.py", "w") as fh:
+                for n in range(megabytes * 1_000_000 // 20):
+                    fh.write(f"line {n:014d}\n")
+        team.commit_all(f.repo, "feat: big files", "main")
+        return before
+
+    def test_git_capped_stops_reading_at_the_limit(self):
+        f = self.new_feature()
+        self.commit_big_files(f, files=1, megabytes=2)
+        diff = (*team.readable_diff(f.repo), "main..HEAD")
+        text, cut = team.git_capped(f.repo, *diff, limit=50_000)
+        self.assertEqual((len(text.encode()), cut), (50_000, True))
+        whole, cut = team.git_capped(f.repo, *diff, limit=10_000_000)
+        self.assertFalse(cut)
+        self.assertEqual(whole, team.git(f.repo, *diff))
+        with self.assertRaises(SystemExit):
+            team.git_capped(f.repo, "diff", "no-such-revision..HEAD", limit=10)
+
+    def test_a_huge_diff_is_never_held_whole_for_the_reviewer(self):
+        # Codex's twenty-third review: three 8 MB files are well inside the workspace allowance, yet `git diff` was captured
+        # whole into a Python string and then written out whole as diff.patch.
+        import tracemalloc
+        f = self.new_feature()
+        self.commit_big_files(f)
+        self.write_env({**MODELS, "TEAM_PACK_MAX_BYTES": "100000"})
+        self.scenario(reviewer=NO_BLOCKERS)
+        tracemalloc.start()
+        try:
+            code, out = run_cli("work", "reviewer", "F1")
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(code, 0, out)
+        self.assertLess(peak, 8_000_000, "the 24 MB diff was not materialised")
+        patch = (f.out / "diff.patch").read_text()
+        self.assertLess(len(patch), 101_000)
+        self.assertIn("diff cut at 100000 bytes", patch)
+        self.assertTrue(any("first 100000 bytes of the diff" in w for w in f.load_state()["warnings"]))
+        self.assertEqual(run_cli("work", "reviewer", "F1")[0], 0, "a second round replaces the first round's warning")
+        self.assertEqual(sum("first 100000 bytes" in w for w in f.load_state()["warnings"]), 1)
+
+    def test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack(self):
+        import tracemalloc
+        f = self.new_feature()
+        state = f.load_state()
+        state["tester_commit"] = self.commit_big_files(f)  # the big files are "test files changed after the tester commit"
+        cfg = {**team.DEFAULTS, **MODELS, "TEAM_PACK_MAX_BYTES": "100000"}
+        errors = io.StringIO()
+        with mock.patch.object(team, "gates_problem", lambda feature: None):
+            tracemalloc.start()
+            try:
+                with contextlib.redirect_stderr(errors):
+                    refused = team.build_pack(f, cfg, state)
+                peak = tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+            self.assertEqual(refused, 1)
+            self.assertLess(peak, 8_000_000)
+            self.assertFalse(f.file("audit-pack.md").exists())
+            self.assertIn("at least", errors.getvalue(), "the diff was cut, so its size is a lower bound")
+            with mock.patch.object(team, "PACK_FORCE_DIFF_BYTES", 300_000):
+                self.assertEqual(team.build_pack(f, cfg, state, force=True), 0)
+        pack = f.file("audit-pack.md").read_text()
+        self.assertLess(len(pack), 700_000, "two diff sections, each cut at 300 KB")
+        self.assertIn("diff cut at 300000 bytes", pack)
+        section = pack.split("## Test files changed after the tester commit", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("diff cut at 300000 bytes", section, "the test files' own diff is capped too")
+        self.assertLess(len(section), 301_000)
 
     def test_a_worker_that_fills_the_checkout_fails_and_its_files_are_discarded(self):
         f = self.new_feature()
@@ -2697,6 +2771,19 @@ class VideoTeamTests(Sandbox):
             self.assertTrue((team.PROMPTS / "video" / f"{name}.md").is_file(), name)
         for name in team.HANDOFF:
             self.assertTrue((team.TEMPLATES / "video" / name).is_file(), name)
+
+    def test_no_container_logs_through_dockers_unrotated_json_file_driver(self):
+        # Codex's twenty-third review: attached or not, Docker copies a container's output into its own json-file log, which
+        # is never rotated by default. TEAM_LOG_MAX_BYTES bounds the conductor's file, not that one.
+        cfg = {**team.DEFAULTS, **MODELS}
+        self.assertEqual(team.hardening(cfg)[team.hardening(cfg).index("--log-driver") + 1], "none")
+        self.new_feature()
+        f = team.Feature(self.home, "F1")
+        worker = team.worker_argv(cfg, f, "coder", "openrouter/vendor/coder-a:free", {}, "prompt")
+        gate = team.gate_argv(cfg, f.repo, "true", "none", "g")
+        for argv in (worker, gate):
+            self.assertEqual(argv[argv.index("--log-driver") + 1], "none", argv[:6])
+            self.assertLess(argv.index("--log-driver"), argv.index(cfg["TEAM_IMAGE"]), "a docker option, not an argument of the command")
 
     def test_chrome_gets_shared_memory_and_the_frame_cache_gets_room(self):
         cfg = {**team.DEFAULTS, **self.VIDEO_ENV}

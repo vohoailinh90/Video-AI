@@ -75,8 +75,8 @@ mutations:
   replace: "        git(f.repo, \"push\", \"origin\", f.branch)\n"
   test: tests.test_team.PipelineTests.test_push_sends_the_audited_commit_not_the_branch
 - label: lockfile changes are hidden from the audit pack again
-  find: "    add(\"Diff\", \"```diff\\n\" + git(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\").rstrip() + \"\\n```\")\n"
-  replace: "    add(\"Diff\", \"```diff\\n\" + git(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\", \"--\", \".\", \":(exclude,glob)**/package-lock.json\").rstrip() + \"\\n```\")\n"
+  find: "    shown, cut = git_capped(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\", limit=diff_limit)\n"
+  replace: "    shown, cut = git_capped(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\", \"--\", \".\", \":(exclude,glob)**/package-lock.json\", limit=diff_limit)\n"
   test: tests.test_team.PipelineTests.test_lockfile_changes_reach_the_auditor
 - label: a blocked coder's gate output is lost on resume
   find: "        state[\"gate_feedback\"] = last_gates  # a resumed `team run` starts from it\n"
@@ -87,8 +87,8 @@ mutations:
   replace: '    return ("diff", "--no-ext-diff", "--no-textconv")'
   test: tests.test_team.PipelineTests.test_gitattributes_cannot_hide_a_diff_from_the_auditor
 - label: a diff byte that is not UTF-8 crashes the conductor
-  find: "    result = subprocess.run([\"git\", *GIT_SAFE, \"-C\", str(repo), *args], capture_output=True, text=True,\n                            errors=\"replace\")\n"
-  replace: "    result = subprocess.run([\"git\", *GIT_SAFE, \"-C\", str(repo), *args], capture_output=True, text=True)\n"
+  find: "    return data[:limit].decode(\"utf-8\", \"replace\"), cut\n"
+  replace: "    return data[:limit].decode(\"utf-8\"), cut\n"
   test: tests.test_team.PipelineTests.test_a_real_binary_is_summarised_and_never_crashes_the_pipeline
 - label: real binaries are dumped as text instead of summarised
   find: '    return (f"--attr-source={empty_tree}", "diff", "--no-ext-diff", "--no-textconv")'
@@ -578,3 +578,39 @@ mutations:
   find: "            grown = 0 if stopped else disk_usage(workspace) - baseline\n"
   replace: "            grown = 0\n"
   test: tests.test_team.PipelineTests.test_a_container_that_fills_its_workspace_and_exits_before_the_first_poll_is_still_caught
+- label: "containers log into Docker's unrotated json-file log again"
+  find: "        \"--log-driver\", \"none\",\n"
+  replace: ''
+  test: tests.test_team.VideoTeamTests.test_no_container_logs_through_dockers_unrotated_json_file_driver
+- label: "git_capped returns one byte more than its limit"
+  find: "    return data[:limit].decode(\"utf-8\", \"replace\"), cut\n"
+  replace: "    return data.decode(\"utf-8\", \"replace\"), cut\n"
+  test: tests.test_team.PipelineTests.test_git_capped_stops_reading_at_the_limit
+- label: "git_capped reads the whole output before cutting it"
+  find: "        data = proc.stdout.read(limit + 1)\n"
+  replace: "        data = proc.stdout.read()\n"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_never_held_whole_for_the_reviewer
+- label: "the reviewer's diff is captured whole again"
+  find: "    text, cut = git_capped(f.repo, *readable_diff(f.repo), f\"{merge_base(f, state)}..HEAD\", limit=limit)\n"
+  replace: "    text, cut = git(f.repo, *readable_diff(f.repo), f\"{merge_base(f, state)}..HEAD\"), False\n"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_never_held_whole_for_the_reviewer
+- label: "a cut diff does not warn that the reviewer read only part of it"
+  find: "        warn(state, f\"the reviewer read only the first {limit} bytes of the diff\", round=\"review\")\n"
+  replace: "        pass\n"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_never_held_whole_for_the_reviewer
+- label: "the pack's diff is captured whole again"
+  find: "    shown, cut = git_capped(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\", limit=diff_limit)\n"
+  replace: "    shown, cut = git(f.repo, *readable_diff(f.repo), f\"{base}..HEAD\"), False\n"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
+- label: "the pack's test-file diff is captured whole again"
+  find: "diff_capped(f.repo, f\"{tester}..HEAD\", paths, diff_limit) if paths"
+  replace: "diff_capped(f.repo, f\"{tester}..HEAD\", paths, None) if paths"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
+- label: "pack --force reads the diff only up to the ordinary limit"
+  find: "    diff_limit = PACK_FORCE_DIFF_BYTES if force else max_bytes\n"
+  replace: "    diff_limit = max_bytes\n"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
+- label: "a pack refused for a cut diff claims an exact size"
+  find: "{'at least ' if cut_anywhere else ''}"
+  replace: "{''}"
+  test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
