@@ -93,7 +93,7 @@ A free-model team can make videos on a VPS with Claude Code as architect and aud
   silence from `videos/<id>.expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
 - **Audit BLOCKs:** a loosened `expected.json`; any change under `.claude/` the spec did not ask for; a project `AGENTS.md` or
   `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
-- **Audio.** Local Kokoro voices only (no Vietnamese, see Language above): Vietnamese narration is a supplied clip per scene.
+- **Audio.** Local Kokoro voices only (no Vietnamese, see Language above): Vietnamese narration is a supplied clip per scene, committed to `videos/<id>.inputs/` (beside the project, because `init` refuses a non-empty folder) before the run.
   No provider key ever goes to a worker container.
 - **Language.** `verdict.md`, the pre-review and the gate output are English, machine-read artifacts; summarise them to the owner in
   Vietnamese, as above.

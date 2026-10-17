@@ -12,7 +12,7 @@ TODO(you): audience, platform (YouTube 16:9, Shorts/TikTok 9:16, feed 1:1) and l
 
 ## Language and voice
 TODO(you): narration language and voice. Local voices speak English, Japanese, Chinese, Spanish,
-French, Hindi, Italian and Portuguese; Vietnamese needs your own audio files in `assets/audio/`.
+French, Hindi, Italian and Portuguese; Vietnamese needs your own audio files in `videos/{{id}}.inputs/` (beside the project folder, committed to the branch before the run).
 
 ## Music, sound and assets
 TODO(you): music (a licensed file you add, or none), sound effects, logos, footage. Name each file you supply.

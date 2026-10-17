@@ -1,0 +1,11 @@
+# Mutation manifest - see scripts/mutation_check.py
+#
+# The operator reads this template before adding anything to the repository. Audio put inside videos/<id>/ makes
+# `hyperframes init` refuse the folder (Codex's second review), so the template names the folder beside it.
+target: scripts/team/templates/video/request.md
+note: Supplied audio is staged in videos/<id>.inputs/, never inside the project folder.
+mutations:
+- label: the request template sends supplied audio into the project folder again
+  find: "in `videos/{{id}}.inputs/` (beside the project folder, committed to the branch before the run)"
+  replace: "in `videos/{{id}}/assets/audio/`"
+  test: tests.test_team.VideoTeamTests.test_supplied_audio_is_staged_beside_the_project_not_inside_it

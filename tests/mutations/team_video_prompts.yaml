@@ -17,3 +17,7 @@ mutations:
   find: "keep them exactly as written, never edit them"
   replace: "edit them as you like"
   test: tests.test_team.VideoTeamTests.test_the_prompts_follow_the_video_ai_conventions
+- label: the coder is no longer told to copy the supplied audio in after init
+  find: "copy each into `assets/audio/` AFTER `hyperframes init`"
+  replace: "copy each into `assets/audio/`"
+  test: tests.test_team.VideoTeamTests.test_supplied_audio_is_staged_beside_the_project_not_inside_it

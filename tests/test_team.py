@@ -1751,6 +1751,26 @@ class VideoTeamTests(Sandbox):
         acceptance = (team.TEMPLATES / "video" / "acceptance.md").read_text()
         self.assertIn("--expect videos/{{id}}.expected.json", acceptance)
 
+    def test_supplied_audio_is_staged_beside_the_project_not_inside_it(self):
+        # Found by Codex's second review: files the operator adds under videos/<id>/ create the folder `hyperframes init`
+        # then refuses. Vietnamese narration is always supplied, so this is the main path, not an edge.
+        request = (team.TEMPLATES / "video" / "request.md").read_text()
+        self.assertIn("videos/{{id}}.inputs/", request)
+        spec_prompt = run_cli("prompt", "video-spec", "V1")[1]
+        self.assertIn("they are staged in `videos/V1.inputs/`, beside the project folder", spec_prompt)
+        self.assertIn("`videos/V1.expected.json` and `videos/V1.inputs/`", spec_prompt, "the builder is kept out of both")
+        coder = run_cli("prompt", "coder", "V1")[1]
+        self.assertIn("videos/V1.inputs/", coder)
+        self.assertIn("AFTER `hyperframes init`", coder)
+        tasks = (team.TEMPLATES / "video" / "tasks.md").read_text()
+        self.assertEqual(tasks.count("videos/{{id}}.inputs/"), 3, "every task keeps the builder out of the staged inputs")
+        doc = (ROOT / "docs" / "vps-team-video.md").read_text(encoding="utf-8")
+        self.assertIn("videos/<id>.inputs/", doc)
+        self.assertIn("git commit -m \"inputs for V01\"", doc)
+        for number, line in enumerate(doc.splitlines(), 1):
+            self.assertFalse("đặt" in line and "assets/audio" in line,
+                             f"docs/vps-team-video.md:{number} tells the operator to put audio inside the project")
+
     def test_the_tester_may_write_the_one_file_every_task_forbids_the_builder(self):
         tester = run_cli("prompt", "tester", "V1")[1]
         self.assertIn("except `videos/V1.expected.json`", tester)

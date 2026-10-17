@@ -69,10 +69,11 @@ Có 13 mutation check cho script này (`tests/mutations/video_gates.yaml`).
 - **Giọng đọc local (Kokoro, chạy offline trong image):** tiếng Anh, Nhật, Trung, Tây
   Ban Nha, Pháp, Hindi, Ý, Bồ Đào Nha (`hyperframes tts --list`).
 - **Tiếng Việt: Kokoro không có.** Hãy tự thu âm, hoặc tạo bằng công cụ TTS tiếng Việt
-  bên ngoài, đặt file vào `assets/audio/` và ghi tên từng file trong `request.md`. Spec
+  bên ngoài, đặt file vào `videos/<id>.inputs/` (cạnh, không phải trong, thư mục dự án: `hyperframes init`
+  từ chối thư mục không rỗng) rồi commit lên nhánh trước khi chạy, và ghi tên từng file trong `request.md`. Spec
   sẽ chỉ định file nào cho cảnh nào, coder chỉ ghép và cân âm. Danh sách công cụ TTS/STT
   tiếng Việt (kèm giấy phép, chưa chạy thử) ở [`docs/vietnamese-audio.md`](vietnamese-audio.md);
-  team không gọi chúng: bạn tạo clip bên ngoài rồi đặt vào `videos/<id>/assets/audio/`, và ghi
+  team không gọi chúng: bạn tạo clip bên ngoài rồi đặt vào `videos/<id>.inputs/`, và ghi
   giấy phép của model trong `request.md` (audit BLOCK file nhị phân không có giấy phép).
 - **Không bật TTS cần key (Gemini, HeyGen, ElevenLabs):** mỗi container chỉ nhận key
   của provider model nó chạy, và code do model viết chạy ngay cạnh key. Đưa thêm một key
@@ -117,6 +118,14 @@ Cài Claude Code dưới user của bạn như trong `docs/vps-team.md`; không 
 ```bash
 team-video new V01 --repo git@github.com:vohoailinh90/Video-AI.git
 nano /srv/team-video/work/V01/request.md           # chủ đề, khán giả, độ dài 30–90 s, giọng, nhạc
+```
+
+Có file audio tự cung cấp (bắt buộc với tiếng Việt)? Đưa vào **trước** `team-video run`, và phải commit,
+vì khi một vai thất bại conductor xoá mọi file chưa commit (lệnh này chưa được chạy thử trên VPS):
+
+```bash
+cd /srv/team-video/work/V01/repo && mkdir -p videos/V01.inputs && cp ~/clips/vo-*.wav videos/V01.inputs/
+sudo -u team git add videos/V01.inputs && sudo -u team git commit -m "inputs for V01"
 ```
 
 `team-video push` cần deploy key có quyền ghi vào Video-AI (cách tạo ở mục "Repo riêng tư"
