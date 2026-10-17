@@ -114,9 +114,14 @@ gate script, setup and the Vietnamese guide `docs/vps-team-video.md`) lives in `
   silence from `videos/<id>.expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
 - **Audit BLOCKs:** a loosened `expected.json`; any change under `.claude/` the spec did not ask for; a project `AGENTS.md` or
   `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
-- **Audio.** Local Kokoro voices only (no Vietnamese, see Language above): Vietnamese narration is a supplied clip per scene, committed to `videos/<id>.inputs/` (beside the project, because `init` refuses a non-empty folder) before the run.
+- **Audio.** Local Kokoro voices only (no Vietnamese, see Language above). Vietnamese narration is made before the run with this repo's own
+  pipeline (`docs/voiceover-workflow.md`: `voiceover.json` lines, then `scripts/vo/synth.py`, then the `scripts/vo/roundtrip.py` check), and the chosen
+  `vo-N.wav` clips plus that `voiceover.json` are committed to `videos/<id>.inputs/` (beside the project, because `init` refuses a non-empty folder).
+  The builder keeps this file's layout: `assets/vo-N.wav`, `<audio id="vo-N">`, and a `voiceover.json` in the project.
   Each model worker gets only its own model provider's API key and the gates get none; a TTS or other audio provider key
   (Gemini, HeyGen, ElevenLabs) never goes to a worker container.
+- **Not for this team.** A video made from a GitHub Radar digest is made by `python3 -I scripts/radar/make_video.py` (see Language above), never by
+  the free models: the spec step stops and says so.
 - **Language.** `verdict.md`, the pre-review and the gate output are English, machine-read artifacts; summarise them to the owner in
   Vietnamese, as above.
 - **Changing the team itself:** do it in the template repository, where its tests and mutation checks run, not here. Its docs:
