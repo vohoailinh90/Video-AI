@@ -233,6 +233,6 @@ def doctor_info(env: MptEnv) -> dict:
         "pexels_api_keys": bool(app.get("pexels_api_keys")),
         "pixabay_api_keys": bool(app.get("pixabay_api_keys")),
         "coverr_api_keys": bool(app.get("coverr_api_keys")),
-        "subtitle_provider": app.get("subtitle_provider", "edge"),
+        "subtitle_provider": str(app.get("subtitle_provider", "edge")).strip().lower(),  # MPT reads it with .strip().lower()
         "llm_provider": app.get("llm_provider", ""),
     }

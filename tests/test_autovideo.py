@@ -232,6 +232,17 @@ class PackTests(unittest.TestCase):
             with mock.patch.object(runner.shutil, "which", lambda name, gone=gone: None if name == gone else f"/usr/bin/{name}"):
                 self.assertIn(gone, runner.preflight(env, job))
 
+    def test_preflight_reads_subtitle_provider_the_way_mpt_does(self):
+        (self.root / "voice.mp3").write_bytes(b"x")
+        job = packmod.load_pack(write_pack(self.root, [video(audio_file="voice.mp3")])).jobs[0]  # audio_file with subtitles: needs whisper
+        for index, written in enumerate(("whisper", "  Whisper ", "WHISPER")):
+            home = self.root / f"home-{index}"
+            home.mkdir()
+            self.assertIsNone(runner.preflight(fake_mpt(home, subtitle_provider=written), job), repr(written))  # MPT strips and lowercases it
+        other = self.root / "home-edge"
+        other.mkdir()
+        self.assertIn("whisper", runner.preflight(fake_mpt(other, subtitle_provider=" Edge "), job))
+
     def test_locate_refuses_a_python_that_cannot_run(self):
         env = fake_mpt(self.root)
         (self.root / "plain.txt").write_text("not executable")
