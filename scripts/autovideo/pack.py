@@ -18,7 +18,7 @@ from pathlib import Path
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 LANGUAGE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}$")
 VOICE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-[A-Za-z0-9-]+$")
-FONT = re.compile(r"^[\w .-]+\.(ttf|ttc)$", re.IGNORECASE)  # MPT's CLI refuses any other subtitle font extension, comparing it in lower case
+FONT_EXTENSIONS = (".ttf", ".ttc")  # MPT's CLI refuses any other subtitle font suffix, comparing it in lower case
 
 ASPECTS = ("9:16", "16:9", "1:1")
 # Only sources that cost nothing per request. MPT also has paid generators (WaveSpeed, Seedance, OFox, ...); each needs its own
@@ -29,7 +29,6 @@ VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".flv", ".mkv", ".webm", ".jpg", ".j
 # suffix. Music (bgm): SUPPORTED_BGM_EXTENSIONS in its app/services/bgm.py. Both compare the suffix in lower case.
 AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
 MUSIC_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus", ".wma")
-MUSIC_NAME = re.compile(r"[\w .()-]+(" + "|".join(re.escape(e) for e in MUSIC_EXTENSIONS) + ")", re.IGNORECASE)
 NO_VOICE = "no-voice"
 
 SETTINGS = (
@@ -75,6 +74,15 @@ CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # For text that is printed on one line (the title, file names): no control character at all, newline, tab and escape included; also the
 # C1 controls and the Unicode line and paragraph separators, which terminals and log viewers may render as a line break.
 UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def bare_name(value, extensions: tuple[str, ...]) -> bool:
+    """A file name MPT finds by name in one of its folders: one name (no folder part, no control character) with one of the suffixes,
+    compared in lower case. MPT puts no limit on the other characters; what it checks is the suffix and that the real path stays in the folder."""
+    return (
+        isinstance(value, str) and 0 < len(value) <= 255 and "/" not in value and "\\" not in value and not UNPRINTABLE.search(value)
+        and value not in (".", "..") and Path(value).suffix.lower() in extensions
+    )
 CJK = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
 
 
@@ -242,7 +250,7 @@ def _settings(raw: dict, root: Path, where: str, problems: list[str], check_file
     pick("bgm", lambda v: isinstance(v, str) and v.strip() != "", "must be none, random, or the name of a music file known to MPT")
     pick("bgm_volume", lambda v: _is_number(v) and 0 <= v <= 1, "must be a number from 0 to 1")
     pick("subtitles", lambda v: isinstance(v, bool), "must be true or false")
-    pick("font", lambda v: v is None or (isinstance(v, str) and FONT.match(v)), "must be a .ttf or .ttc font file name such as BeVietnamPro-Bold.ttf")
+    pick("font", lambda v: v is None or (bare_name(v, FONT_EXTENSIONS)), "must be a .ttf or .ttc font file name such as BeVietnamPro-Bold.ttf")
     pick("font_size", lambda v: isinstance(v, int) and not isinstance(v, bool) and 20 <= v <= 200, "must be a whole number from 20 to 200")
     pick("clip_seconds", lambda v: isinstance(v, int) and not isinstance(v, bool) and 2 <= v <= 15, "must be a whole number from 2 to 15")
     if "target_seconds" in raw:
@@ -346,7 +354,8 @@ def _video(raw, index: int, defaults: dict, root: Path, problems: list[str], war
         problems.append(f"{where}: give search terms (scene terms or terms); without them MPT would ask an LLM for them")
     if cfg["audio_file"] and cfg["subtitles"]:
         warnings.append(f"{where}: audio_file with subtitles needs subtitle_provider = \"whisper\" in MPT's config.toml, or no subtitles are made")
-    if cfg["bgm"] not in ("none", "random") and not MUSIC_NAME.fullmatch(cfg["bgm"]):
+    staging = cfg["bgm"].lower().startswith(".bgm-upload-")  # MPT never selects its own upload staging files
+    if cfg["bgm"] not in ("none", "random") and (staging or not bare_name(cfg["bgm"], MUSIC_EXTENSIONS)):
         problems.append(f"{where}.bgm: must be none, random or a music file name")
 
     if vid is None or not scenes:

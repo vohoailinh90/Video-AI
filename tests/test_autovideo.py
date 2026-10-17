@@ -196,6 +196,18 @@ class PackTests(unittest.TestCase):
         for name in ("font.otf", "font", "font.ttf.txt", "dir/font.ttf"):
             self.assertIn("font: must be a .ttf or .ttc font file name", self.problems([video()], {"font": name}), name)
 
+    def test_font_and_music_names_only_need_to_be_a_bare_file_name_with_the_right_suffix(self):
+        # MPT puts no limit on the characters of a font or music name: it checks the suffix, and that the real path stays inside its folder
+        for name in ("Noto Sans (Condensed).ttf", "Café Font.ttf", "A+B.TTC", "It's [bold] & fine.ttf"):
+            packmod.load_pack(write_pack(self.root, [video()], {"font": name}))
+        for name in ("Rock & Roll.mp3", "Don't Stop.mp3", "Tình ca + remix [2026].wma", "a;b,c=d.OGG"):
+            packmod.load_pack(write_pack(self.root, [video()], {"bgm": name}))
+        # but it stays one name inside the folder: no folder part, no control character, and MPT's own staging prefix is not selectable
+        for name in ("a/b.ttf", "a\\b.ttf", "..", ".ttf", "x.ttf\n", "x\u0000.ttf", "x\ny.ttf", ""):
+            self.assertIn("font:", self.problems([video()], {"font": name}), repr(name))
+        for name in ("a/b.mp3", "a\\b.mp3", ".mp3", "x.mp3\n", "x\ty.mp3", ".bgm-upload-x.mp3", ".BGM-UPLOAD-x.mp3", ""):
+            self.assertIn("bgm: must be none, random", self.problems([video()], {"bgm": name}), repr(name))  # (the empty name is caught one check earlier)
+
     def test_text_that_is_printed_cannot_carry_control_characters(self):
         # the title and the file names are written to the terminal by plan and run, so a newline or an escape sequence in them could forge a log line
         for bad in ("Line one\nline two", "Tab\there", "red \x1b[2J clear", "nul\x00", "cr\rreturn", "sep\u2028x", "c1\x85x"):
@@ -556,6 +568,22 @@ class RunnerTests(FakeMptCase):
         summary, _ = self.run_pack([video()])
         self.assertEqual((summary["done"], summary["skipped"]), (1, 0))
         self.assertEqual(self.renders(), 2)
+
+    def test_a_file_added_by_hand_and_accepted_by_qa_is_covered_from_then_on(self):
+        summary, pack = self.run_pack([video(title="NOSUB")], retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "qa_failed")  # MPT made no subtitles
+        folder = self.out / "test-batch" / "01-first"
+        words = " ".join(scene["narration"] for scene in SCENES).split()
+        lines = [" ".join(words[i:i + 4]) for i in range(0, len(words), 4)]
+        stamp = lambda t: "00:00:%02d,%03d" % (int(t), round((t - int(t)) * 1000))
+        step = 3 / len(lines)
+        (folder / "subtitles.srt").write_text("".join(f"{n + 1}\n{stamp(n * step)} --> {stamp((n + 1) * step)}\n{line}\n\n" for n, line in enumerate(lines)), encoding="utf-8")
+        self.assertEqual(runner.requalify(pack, self.out)[0]["status"], "done")  # the owner supplied them, and QA accepts the folder
+        self.assertEqual(runner.job_status(self.state()["01-first"], pack.jobs[0], folder), "done")
+        (folder / "subtitles.srt").unlink()  # a file QA required is gone again
+        self.assertEqual(runner.job_status(self.state()["01-first"], pack.jobs[0], folder), "missing")
+        summary, _ = self.run_pack([video(title="NOSUB")], retries=0)
+        self.assertEqual((summary["skipped"], self.renders()), (0, 2))  # so it is not skipped as done
 
     def test_a_job_that_failed_qa_is_not_rendered_again_by_the_next_run(self):
         summary, _ = self.run_pack([video(title="SILENT")], retries=1)  # both attempts fail QA

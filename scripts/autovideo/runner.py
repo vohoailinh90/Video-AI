@@ -139,12 +139,14 @@ def _sha256(path: Path) -> str | None:
         return None
 
 
-def stored_outputs(dest: Path, files: dict) -> dict[str, str]:
-    """Name and SHA-256 of every file collect() stored (the video, the narration and subtitles when there are any, and the transcripts).
-    The state keeps them so that a render which is later cut short, loses a file, or has a file swapped for another is not still called
-    finished. job.json is not in the list: its content is read and compared with the job's fingerprint."""
-    names = [files["video"], files["narration"], files["subtitles"], "transcript.txt", "transcript.json"]
-    return {name: _sha256(dest / name) or "" for name in names if name}
+def stored_outputs(dest: Path) -> dict[str, str]:
+    """Name and SHA-256 of every result file in a job's folder: the video, the narration and subtitles when there are any, and the
+    transcripts. The state keeps them so that a render which is later cut short, loses a file, or has a file swapped for another is not
+    still called finished. They are taken from the folder when QA accepts or refuses it (after a render, and after `qa`), so a file the
+    owner added by hand and QA then counted is covered from then on. job.json is not in the list: its content is checked against the
+    job's fingerprint."""
+    names = ["video.mp4", *sorted(p.name for p in dest.glob("narration.*")), "subtitles.srt", "transcript.txt", "transcript.json"]
+    return {name: _sha256(dest / name) or "" for name in names if (dest / name).is_file()}
 
 
 def outputs_intact(entry: dict, dest: Path) -> bool:
@@ -295,7 +297,7 @@ def _run(
                 bad = [c for c in checks if c.level == "error" and not c.ok]
                 outcome = {
                     "status": "done" if not bad else "qa_failed", "files": files, "checks": [c.to_dict() for c in checks],
-                    "outputs": stored_outputs(dest, files),
+                    "outputs": stored_outputs(dest),
                     "engine": {
                         "name": "moneyprinterturbo", "task_id": result.task_id, "task_dir": str(result.task_dir),
                         "audio_seconds": result.audio_seconds, "warnings": list(result.warnings),
@@ -381,7 +383,8 @@ def requalify_job(job: Job, dest: Path, state: dict, inputs: dict | None = None)
         return {"id": job.id, "status": "stale", "checks": []}  # rendered with other music or font than the files there now
     checks = evaluate(job, dest)
     entry = state["jobs"].setdefault(job.id, {})
-    entry.update(fingerprint=job.fingerprint(), status="done" if qa.passed(checks) else "qa_failed", qa_basis=qa_basis(job))
+    entry.update(fingerprint=job.fingerprint(), status="done" if qa.passed(checks) else "qa_failed", qa_basis=qa_basis(job),
+                 outputs=stored_outputs(dest))  # the folder as QA just saw it
     try:
         report = json.loads((dest / "report.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
