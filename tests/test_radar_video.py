@@ -641,20 +641,70 @@ class ReviewFindings(unittest.TestCase):
         same_file = html.replace('src="gsap.min.js"', 'src="gsap.min.js" data-x', 1)                       # an attribute is not a file
         self.assertEqual(run_gate(digest, doc, same_file)[0], 0)
 
-    def test_text_that_attributes_show_is_traced_like_the_rest(self):
+    def test_elements_and_attributes_the_template_never_uses_are_refused(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
         plan = planlib.build_plan(digest)
         tl = planlib.timeline(plan, estimated_durations(plan))
         html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
-        for name, tag in (("value", '<input value="ElevenLabs nhanh gấp 99999 lần">'),
-                          ("placeholder", '<input placeholder="Dùng ElevenLabs">'),
-                          ("alt", '<img src="missing.png" alt="ElevenLabs nhanh gấp 99999 lần">'),
-                          ("label", '<option label="Dùng ElevenLabs"></option>')):
-            status, output = run_gate(digest, doc, html.replace("</body>", tag + "</body>", 1))
+        for name, changed in (
+                ("input value", html.replace("</body>", '<input value="ElevenLabs nhanh gấp 99999 lần"></body>', 1)),
+                ("input placeholder", html.replace("</body>", '<input placeholder="Dùng ElevenLabs"></body>', 1)),
+                ("image alt", html.replace("</body>", '<img src="missing.png" alt="ElevenLabs 99999"></body>', 1)),
+                ("option label", html.replace("</body>", '<option label="Dùng ElevenLabs"></option></body>', 1)),
+                ("value on a div", html.replace("<body>", '<body><div value="Dùng ElevenLabs"></div>', 1)),
+                ("meta refresh", html.replace("<head>", '<head><meta http-equiv="refresh" content="0;url=evil.html">', 1)),
+                ("object", html.replace("</body>", '<object data="evil.html"></object></body>', 1)),
+                ("svg", html.replace("</body>", '<svg><text>ElevenLabs 99999</text></svg></body>', 1)),
+                ("title", html.replace("<head>", '<head><title>ElevenLabs</title>', 1)),
+                ("event handler", html.replace("<body>", '<body onload="x()">', 1))):
+            status, output = run_gate(digest, doc, changed)
             self.assertEqual(status, 1, name)
-            self.assertIn("ElevenLabs", output, name)
-        # an attribute that repeats text the digest has is fine
-        self.assertEqual(run_gate(digest, doc, html.replace("</body>", '<input value="Python"></body>', 1))[0], 0)
+            self.assertIn("put words on the screen or load code", output, name)
+
+    def test_the_script_and_style_of_the_page_are_held_to_the_template(self):
+        template_script = re.search(r"<script>(.*?)</script>", compose.render(*self.rendered_plan()), re.S).group(1)
+        self.assertEqual(check_facts.js_problems(template_script), [])
+        pilot = (REPO / "videos" / "voicestudio" / "index.html").read_text(encoding="utf-8")
+        self.assertEqual(check_facts.js_problems(re.findall(r"<script>(.*?)</script>", pilot, re.S)[0]), [])
+        for what, js in (("DOM text", 'el.firstChild.data = "ElevenLabs 99999"'), ("replaceData", 'el.firstChild.replaceData(0, 1, "x")'),
+                         ("innerHTML", 'tl.set("#a", { innerHTML: "x" })'), ("quoted key", 'tl.set("#a", { "innerHTML": "x" })'),
+                         ("obfuscated", 'window["inner" + "HTML"] = "x"'), ("computed", 'window["document"]'),
+                         ("template literal", "tl.set(`#a`, { opacity: 0 })"), ("eval", 'eval("x")'), ("fetch", 'fetch("https://example.com")'),
+                         ("canvas", 'c.getContext("2d").fillText("x", 0, 0)'), ("ternary", "x ? y : z"), ("regex", "/a/.test(b)"),
+                         ("comment hides nothing", '// harmless\ndocument.title = 1')):
+            self.assertTrue(check_facts.js_problems(js), what)
+        # comments and strings that merely contain words are fine
+        self.assertEqual(check_facts.js_problems('// scene starts, equal to the data-start\ntl.set("#a", { opacity: 0 }, S1 + 2.5);'), [])
+        template_style = re.search(r"<style>(.*?)</style>", compose.render(*self.rendered_plan()), re.S).group(1)
+        self.assertEqual(check_facts.css_problems(template_style), [])
+        self.assertEqual(check_facts.css_problems("font-size: 38px", inline=True), [])
+        for what, css in (("list marker", ".a { list-style-type: '99999' }"), ("quotes", ".a { quotes: '99999' '' }"),
+                          ("content", ".a::after { content: '99999' }"), ("counter", ".a::after { counter-increment: x }"),
+                          ("attr", ".a::after { content: attr(data-x) }"), ("import", "@import 'x.css';"), ("url", ".a { background: url(x.png) }"),
+                          ("escape", ".a { c\\6f ntent: 'x' }"), ("animation", ".a { animation: x 1s }")):
+            self.assertTrue(check_facts.css_problems(css), what)
+        self.assertTrue(check_facts.css_problems("list-style-type: '9'", inline=True))
+
+    def rendered_plan(self):
+        plan = planlib.build_plan(planlib.load_digest(FIXTURES / "voicestudio.json"))
+        return plan, planlib.timeline(plan, estimated_durations(plan))
+
+    def test_allow_may_list_only_vietnamese_words_not_names(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        invented = html.replace(">Python<", ">Python và ElevenLabs<", 1)
+        self.assertEqual(run_gate(digest, doc, invented)[0], 1)                       # the name is not in the digest
+        doc["allow"] = ["ElevenLabs"]                                                  # the document cannot vouch for itself
+        status, output = run_gate(digest, doc, invented)
+        self.assertEqual(status, 1)
+        self.assertIn("`allow` lists elevenlabs", output)
+        doc["allow"] = ["khi", "giao", "cho", "ba", "sao"]                              # Vietnamese words without diacritics are fine
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        self.assertTrue({"khi", "giao", "cho", "ba", "sao"} <= check_facts.VIETNAMESE_WORDS)
+        for tool in ("npm", "git", "bun", "pip", "go", "node", "vue", "sql", "ssh"):
+            self.assertNotIn(tool, check_facts.VIETNAMESE_WORDS)
 
     def test_a_command_is_shown_exactly_as_the_digest_gives_it(self):
         commands = ["export V=`git describe`", 'echo "a  b"', "bun run dev"]
