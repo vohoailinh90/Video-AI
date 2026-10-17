@@ -68,5 +68,5 @@ Các bài kiểm thử dùng bốn bài radar thật chép vào `tests/fixtures/
 - Chỉ bài tiếng Việt (`lang: vi`); VieNeu-TTS đọc tiếng Việt, và các nhãn cố định viết bằng tiếng Việt.
 - Lời đọc là câu nguyên văn của bài, viết để đọc chứ không để nghe: câu dài, nhiều từ tiếng Anh. Mức dễ hiểu đo bằng máy; chưa có người nghe đánh giá độ tự nhiên.
 - Khổ 16:9 và không có phụ đề (cần thời điểm từng từ của tiếng Việt). Bài radar xuất bản dạng dọc nên bản 9:16 là việc làm thêm.
-- Bố cục: `npm run check` (0 lỗi, 0 vấn đề bố cục) đã chạy trên 9 bài radar thật khi dựng khung với clip im lặng; chưa render và nghe từng bài.
+- Bố cục: dựng khung (với clip im lặng đúng độ dài ước tính) rồi chạy `npm run check` trên cả 25 bài radar có trong repo `github-radar` ngày 2026-10-17: 25/25 qua, 0 lỗi, 0 vấn đề bố cục, độ tương phản đạt WCAG AA, và cổng đối chiếu bài báo "all traced" ở cả 25. Chưa render và nghe từng bài.
 - Cổng đối chiếu chỉ kiểm số, tên và lệnh, không hiểu nghĩa: câu viết lại bằng tay cần người đối chiếu với bài.
