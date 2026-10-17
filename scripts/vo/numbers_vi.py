@@ -8,11 +8,18 @@ import re
 DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
 GROUPS = ["", " nghìn", " triệu", " tỷ"]
 
+# The signs of a number. Each has the look-alikes a page can show for it (full-width, small, heavy, superscript, a true hyphen); the facts
+# gate reads the same ones (scripts/vo/check_facts.py imports these), so a sign cannot be swapped for a twin that is neither traced nor read.
+PLUS = "+＋﹢➕⁺"
+MINUS = "-−－﹣➖⁻‐‑"
+PERCENT_SIGNS = "%％﹪٪"
+SIGNS, PERCENT_CLASS = re.escape(PLUS + MINUS), re.escape(PERCENT_SIGNS)
+
 # a number that stands alone: not glued to letters, a hyphen or another number; an optional minus (read "âm") or plus (read "cộng") sign in front and an
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
-VERSION = re.compile(r"(?<=[A-Za-z])-(\d+(?:[.,]\d+)*)(?![\w])")
-NUMBER = re.compile(r"(?:(?<![\w.,\-−+])([-−+])|(?<![\w.,\-−]))(\d+(?:[.,]\d+)*)(\s?[%％﹪٪])?(?![\w\-]|[.,]\d)")
+VERSION = re.compile(rf"(?<=[A-Za-z])[{re.escape(MINUS)}](\d+(?:[.,]\d+)*)(?![\w])")
+NUMBER = re.compile(rf"(?:(?<![\w.,{SIGNS}])([{SIGNS}])|(?<![\w.,{re.escape(MINUS)}]))(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -75,7 +82,7 @@ def speak_text(text: str) -> str:
         words = _token_words(match.group(2))
         if words is None:
             return match.group(0)
-        sign = {"+": "cộng ", "-": "âm ", "−": "âm "}.get(match.group(1) or "", "")
+        sign = "cộng " if match.group(1) and match.group(1) in PLUS else "âm " if match.group(1) else ""
         return sign + words + (" phần trăm" if match.group(3) else "")
 
     def version(match):
