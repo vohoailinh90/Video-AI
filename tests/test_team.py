@@ -208,6 +208,33 @@ class SpecTests(Sandbox):
                 "```sh\nmake check\n```\n")
         self.assertEqual(team.acceptance_commands(text), ["pytest -q a.py", "npm test -- --ci", "make check"])
 
+    def test_an_unfinished_continuation_is_a_spec_error_not_a_shorter_suite(self):
+        # Codex's twentieth review: a block whose last command ended in a backslash kept it in `pending` and dropped it at the
+        # closing fence, so the suite shrank without a word; the next block's first command was glued to the stale one.
+        at_fence = "```bash\npytest -q a.py\nmake slow \\\n```\n"
+        at_eof = "```bash\npytest -q a.py\nmake slow \\"
+        across = "```bash\npytest -q a.py\nmake slow \\\n```\n\n```sh\nmake check\n```\n"
+        for text in (at_fence, at_eof, across):
+            self.assertIn("backslash", team.acceptance_error(text) or "", text)
+        self.assertEqual(team.acceptance_commands(across), ["pytest -q a.py", "make check"],
+                         "the stale continuation is not glued to the next block's command")
+        for fine in ("```bash\nmake a \\\n  --flag\nmake b\n```\n", "```bash\nmake a\n```\n"):
+            self.assertIsNone(team.acceptance_error(fine), fine)
+
+    def test_check_spec_and_gates_refuse_an_unfinished_continuation(self):
+        f = self.new_feature()
+        f.file("acceptance.md").write_text("# Acceptance\n\n```bash\npython3 tests/check_feature.py\nmake slow \\\n```\n")
+        self.assertTrue(any("backslash" in problem for problem in team.check_spec(f)), team.check_spec(f))
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE)
+        self.assertEqual(run_cli("run", "F1")[0], 1, "the run refuses before any container starts")
+        self.assertEqual(self.docker_runs(), [])
+        code, out = run_cli("gates", "F1")
+        self.assertEqual(code, 1, out)
+        log = f.file("gates.log").read_text()
+        self.assertIn("ends with a backslash", log)
+        self.assertIn("RESULT: FAIL", log, "a suite that lost a command can never pass")
+        self.assertEqual(self.docker_runs(), [])
+
     def test_new_feature_templates_are_not_a_valid_spec(self):
         code, _ = run_cli("new", "F0", "--repo", str(self.origin))
         self.assertEqual(code, 0)
@@ -1143,6 +1170,38 @@ class PipelineTests(Sandbox):
         self.assertEqual(run_cli("pack", "F1")[0], 0)
         os.utime(f.file("verdict.md"), (pack.stat().st_mtime + 5, pack.stat().st_mtime + 5))
         self.assertEqual(run_cli("push", "F1")[0], 0, "a rebuilt pack is sealed again")
+
+    def test_forcing_a_push_needs_a_person_at_a_terminal(self):
+        # Codex's twentieth review: the Claude-led teams audit from the admin's own login, so an instruction hidden in the pack
+        # that reaches the lead can run any team command. --force skips the verdict, seal and gate checks; it now asks on the
+        # controlling terminal, which a script or an agent's shell does not have. (A speed bump for an agent that opens a
+        # pseudo-terminal of its own, not a boundary: the account is. See "Không đảm bảo" in docs/vps-team.md.)
+        f = self.new_feature()
+        tty = self.tmp / "tty"
+        with mock.patch.object(team, "CONFIRM_TTY", str(self.tmp / "no-terminal")):
+            code, out = run_cli("push", "F1", "--force")
+        self.assertNotEqual(code, 0)
+        self.assertIn("person at a terminal", out)
+        tty.write_text("not the id\n")
+        with mock.patch.object(team, "CONFIRM_TTY", str(tty)):
+            code, out = run_cli("push", "F1", "--force")
+        self.assertNotEqual(code, 0)
+        self.assertIn("not confirmed", out)
+        self.assertEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "", "nothing was pushed")
+        tty.write_text("F1\n")
+        with mock.patch.object(team, "CONFIRM_TTY", str(tty)):
+            code, out = run_cli("push", "F1", "--force")
+        self.assertEqual(code, 0, out)
+        self.assertIn("WITHOUT the verdict", tty.read_text(), "the prompt says what is being skipped")
+        self.assertIn("team/F1", git(self.origin, "branch", "--list", "team/F1"))
+
+    def test_an_audit_session_can_be_started_without_the_power_to_push(self):
+        # The settings a Claude lead is started with (docs/vps-team.md): it reads, judges and writes verdict.md; you push.
+        settings = json.loads((ROOT / "scripts" / "team" / "lead-settings.example.json").read_text())
+        deny = settings["permissions"]["deny"]
+        for needed in ("Bash(team push:*)", "Bash(team-codex push:*)", "Bash(team-video push:*)", "Bash(git push:*)",
+                       "Bash(sudo:*)", "Bash(*--force*)"):
+            self.assertIn(needed, deny)
 
     def test_push_refuses_when_the_spec_or_acceptance_changed_after_the_pack(self):
         # Codex's eleventh review: the pack quotes spec.md and acceptance.md, which live outside the git checkout, so editing

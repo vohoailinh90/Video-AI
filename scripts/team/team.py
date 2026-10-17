@@ -564,14 +564,20 @@ def repo_map(repo: Path, max_lines: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def acceptance_commands(text: str) -> list[str]:
-    """Each line of a ```bash/```sh block is one gate command; '\\' continues a line."""
+def parse_acceptance(text: str) -> tuple[list[str], str | None]:
+    """(the gate commands, what is wrong with how they are written). Each line of a ```bash/```sh block is one command and
+    a trailing '\\' continues it; a continuation left open at the closing fence or at the end of the file is an error,
+    and what it had collected is dropped rather than glued to the next block's first command."""
     commands: list[str] = []
     fence: str | None = None
     pending = ""
+    error: str | None = None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("```"):
+            if pending:
+                error = f"a command ends with a backslash at the end of its block: {pending.strip()[:80]!r}"
+                pending = ""
             fence = line[3:].strip().lower() if fence is None else None
             continue
         if fence not in ("bash", "sh", "shell") or not line or line.startswith("#"):
@@ -583,7 +589,17 @@ def acceptance_commands(text: str) -> list[str]:
             continue
         commands.append(pending + line)
         pending = ""
-    return commands
+    if pending:
+        error = f"a command ends with a backslash at the end of the file: {pending.strip()[:80]!r}"
+    return commands, error
+
+
+def acceptance_commands(text: str) -> list[str]:
+    return parse_acceptance(text)[0]
+
+
+def acceptance_error(text: str) -> str | None:
+    return parse_acceptance(text)[1]
 
 
 def check_spec(f: Feature) -> list[str]:
@@ -607,6 +623,9 @@ def check_spec(f: Feature) -> list[str]:
                 problems.append(f"tasks.md: task '{title}' has no '{field[:-1].capitalize()}:' line with a value")
     if f.file("acceptance.md").is_file() and not acceptance_commands(read(f.file("acceptance.md"))):
         problems.append("acceptance.md: no command inside a ```bash block")
+    broken = acceptance_error(read(f.file("acceptance.md")))
+    if broken:
+        problems.append(f"acceptance.md: {broken}")
     return problems
 
 
@@ -855,8 +874,13 @@ def commands_digest(commands: list[str]) -> str:
 def run_gates(f: Feature, cfg: dict[str, str]) -> bool:
     """Run acceptance.md's commands on a clean checkout of HEAD, in a container
     with no key and (by default) no network. Writes gates.log."""
-    commands = acceptance_commands(read(f.file("acceptance.md")))
+    commands, broken = parse_acceptance(read(f.file("acceptance.md")))
     lines = [f"# gates {f.id} @ {head(f.repo)[:12]} acceptance:{commands_digest(commands)} {now()}"]
+    if broken:  # the suite is not the one that was written: it cannot pass, and nothing is started
+        lines += [f"## FAIL acceptance.md: {broken}", f"RESULT: FAIL (0/{len(commands)} passed)"]
+        f.file("gates.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        say(f"gates: {lines[-1]}")
+        return False
     timeout = int(cfg["TEAM_GATE_TIMEOUT"])
     name = container_name(f, "gates")
     passed = 0
@@ -1323,9 +1347,31 @@ def cmd_pack(args, home, cfg) -> int:
         return build_pack(f, cfg, f.load_state(), force=args.force)
 
 
+CONFIRM_TTY = "/dev/tty"
+
+
+def confirm_force(f: Feature) -> None:
+    """`push --force` skips the verdict, seal and gate checks, so it is for a person: it asks on the controlling terminal,
+    which a script or an agent's shell does not have. A speed bump for one that opens a pseudo-terminal of its own, not a
+    boundary: the account the audit runs under is (docs/vps-team.md)."""
+    try:
+        answer, prompt = open(CONFIRM_TTY, "r"), open(CONFIRM_TTY, "a")
+    except OSError:
+        raise SystemExit("push --force skips the verdict, seal and gate checks, so it needs a person at a terminal "
+                         f"(it asks for confirmation on {CONFIRM_TTY}); a script or an agent's shell cannot give one")
+    with answer, prompt:
+        prompt.write(f"push {head(f.repo)[:12]} of {f.id} to {f.branch} WITHOUT the verdict, seal and gate checks? "
+                     "Type the feature id to confirm: ")
+        prompt.flush()
+        if answer.readline().strip() != f.id:
+            raise SystemExit("not confirmed: nothing was pushed")
+
+
 def cmd_push(args, home, cfg) -> int:
     f = Feature(home, args.id)
     f.require()
+    if args.force:
+        confirm_force(f)  # before the lock: a person's answer must not hold up a running pipeline
     with run_lock(home):  # no pipeline may move the branch between the checks and the push
         state = f.load_state()
         source = head(f.repo)

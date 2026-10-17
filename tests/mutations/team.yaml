@@ -522,3 +522,31 @@ mutations:
   find: "    if team_lead().name != \"video\":\n        return None\n    path = f.repo / \"videos\""
   replace: "    path = f.repo / \"videos\""
   test: tests.test_team.VideoTeamTests.test_only_the_video_team_has_supplied_inputs_to_protect
+- label: "an unfinished continuation at a closing fence is dropped silently"
+  find: "            if pending:\n                error = f\"a command ends with a backslash at the end of its block"
+  replace: "            if False:\n                error = f\"a command ends with a backslash at the end of its block"
+  test: tests.test_team.SpecTests.test_an_unfinished_continuation_is_a_spec_error_not_a_shorter_suite
+- label: "an unfinished continuation at the end of the file is dropped silently"
+  find: "    if pending:\n        error = f\"a command ends with a backslash at the end of the file"
+  replace: "    if False:\n        error = f\"a command ends with a backslash at the end of the file"
+  test: tests.test_team.SpecTests.test_an_unfinished_continuation_is_a_spec_error_not_a_shorter_suite
+- label: "a stale continuation is glued to the next block's first command"
+  find: "                pending = \"\"\n            fence = line[3:].strip().lower() if fence is None else None\n"
+  replace: "            fence = line[3:].strip().lower() if fence is None else None\n"
+  test: tests.test_team.SpecTests.test_an_unfinished_continuation_is_a_spec_error_not_a_shorter_suite
+- label: "check_spec accepts a suite with an unfinished continuation"
+  find: "    broken = acceptance_error(read(f.file(\"acceptance.md\")))\n    if broken:\n        problems.append(f\"acceptance.md: {broken}\")\n"
+  replace: ""
+  test: tests.test_team.SpecTests.test_check_spec_and_gates_refuse_an_unfinished_continuation
+- label: "gates run a suite that lost a command"
+  find: "    if broken:  # the suite is not the one that was written: it cannot pass, and nothing is started\n"
+  replace: "    if False:\n"
+  test: tests.test_team.SpecTests.test_check_spec_and_gates_refuse_an_unfinished_continuation
+- label: "push --force needs nobody at a terminal"
+  find: "    if args.force:\n        confirm_force(f)"
+  replace: "    if False:\n        confirm_force(f)"
+  test: tests.test_team.PipelineTests.test_forcing_a_push_needs_a_person_at_a_terminal
+- label: "push --force takes any answer"
+  find: "        if answer.readline().strip() != f.id:\n"
+  replace: "        if False:\n"
+  test: tests.test_team.PipelineTests.test_forcing_a_push_needs_a_person_at_a_terminal

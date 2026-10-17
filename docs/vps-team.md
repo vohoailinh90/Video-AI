@@ -254,6 +254,17 @@ Không đảm bảo, cần bạn tự quản:
 - User `team` thuộc nhóm `docker`, tức là tương đương root trên VPS. Ranh giới thật
   là: chỉ `team.py` (code root-owned) ra lệnh cho docker, còn Hermes chỉ gọi được
   `team`.
+- **Phiên audit của lead Claude chạy bằng chính tài khoản của bạn** (team Claude và team video; Codex thì có sandbox
+  riêng, xem `docs/vps-team-codex.md`). Gói audit chứa chữ do model miễn phí viết: nếu một chỉ dẫn chèn trong đó
+  qua được lead, phiên đó làm được mọi thứ bạn làm được, kể cả `team push --force` hay `git push` thẳng.
+  Seal và quyền thư mục chặn việc xuất bản một commit/gói/spec khác dưới lần APPROVE, không chặn một phiên đã bị
+  chiếm quyền dùng chính quyền của bạn. Ba lớp giảm rủi ro, theo thứ tự từ yếu đến mạnh:
+  (1) `team push --force` hỏi xác nhận trên terminal (`/dev/tty`), nên không chạy được từ script hay shell của agent,
+  nhưng một agent tự mở pseudo-terminal thì vẫn vượt qua; (2) khởi động lead bằng
+  `claude --settings /opt/team/lead-settings.example.json`: chặn `team push`, `git push`, `sudo`, `gh` và mọi lệnh
+  có `--force` (chỉ là hàng rào, không phải sandbox); (3) lớp thật: chạy phiên audit dưới một tài khoản Unix riêng
+  không có `sudo`, không có khoá SSH/token push và không thuộc nhóm `team` có quyền ghi, còn bạn tự `team push` ở
+  terminal của mình. Chỉ lớp (3) là ranh giới.
 - Free tier có thể huấn luyện trên code của bạn.
 - Runner GitHub chạy chung máy: nếu user của runner thuộc nhóm `docker`, job CI cũng
   tương đương root. Xem `docs/ci-runner-mode.md` trong repo claude-agent-routing-template.
