@@ -50,8 +50,9 @@ SILENCE = """size=       0kB time=00:00:00.00 bitrate=N/A speed=   0x    [silenc
 EXPECT = {"duration_s": 6, "width": 640, "height": 360, "fps": 25}
 
 
-def info(duration=6.0, audio=True, width=640, height=360, rate="25/1", audio_duration=None):
-    streams = [{"codec_type": "video", "width": width, "height": height, "avg_frame_rate": rate}]
+def info(duration=6.0, audio=True, width=640, height=360, rate="25/1", audio_duration=None, video_duration=None):
+    streams = [{"codec_type": "video", "width": width, "height": height, "avg_frame_rate": rate,
+                "duration": str(video_duration or duration)}]
     if audio:
         streams.append({"codec_type": "audio", "duration": str(audio_duration or duration)})
     return {"streams": streams, "format": {"duration": str(duration)}}
@@ -135,7 +136,23 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(failed(self.run_checks(info(audio_duration=3.0))), ["audio coverage"])
 
     def test_a_wrong_length_fails_on_duration(self):
-        self.assertEqual(failed(self.run_checks(info(duration=9.0))), ["duration"])
+        self.assertEqual(failed(self.run_checks(info(duration=9.0))), ["duration", "video duration"])
+
+    def test_a_picture_that_stops_before_the_sound_fails_on_video_duration(self):
+        # Codex's tenth review: 2 s of picture plus 6 s of sound reads 6 s on the container, so every other check passed
+        # while the player froze on the last frame.
+        checks = self.run_checks(info(video_duration=2.0))
+        self.assertEqual(failed(checks), ["video duration"])
+        self.assertIn("2.00s", next(text for ok, name, text in checks if name == "video duration"))
+
+    def test_a_video_stream_that_reports_no_duration_is_unmeasured_not_passed(self):
+        media = info()
+        media["streams"][0].pop("duration")
+        checks = self.run_checks(media)
+        self.assertEqual(failed(checks), ["video duration"])
+        self.assertIn("unmeasured", next(text for ok, name, text in checks if name == "video duration"))
+        media["streams"][0]["duration"] = "N/A"
+        self.assertEqual(failed(self.run_checks(media)), ["video duration"])
 
     def test_the_duration_tolerance_is_honoured(self):
         expected = {**EXPECT, "duration_tolerance_s": 5}
@@ -203,6 +220,10 @@ class RenderedClipTests(unittest.TestCase):
         make("good.mp4", "-f", "lavfi", "-i", "sine=frequency=440:duration=4,volume=3", *sound)
         make("noaudio.mp4")
         make("silent.mp4", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=4", *sound)
+        # 1.5 s of picture under 4 s of sound: the container says 4 s, the picture stream says 1.5 s.
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=1.5",
+                        "-f", "lavfi", "-i", "sine=frequency=440:duration=4,volume=3", *encode, "-c:a", "aac",
+                        str(cls.dir / "short-picture.mp4")], check=True)
         cls.expect = cls.dir / "expected.json"
         cls.expect.write_text(json.dumps({"duration_s": 4, "width": 640, "height": 360, "fps": 25}))
 
@@ -224,6 +245,10 @@ class RenderedClipTests(unittest.TestCase):
         code, summary = self.verdict("silent.mp4")
         self.assertEqual(code, 1)
         self.assertIn("loudness", summary["failed"])
+
+    def test_a_picture_that_ends_before_the_sound_is_rejected(self):
+        code, summary = self.verdict("short-picture.mp4")
+        self.assertEqual((code, summary["failed"]), (1, ["video duration"]))
 
     def test_a_missing_render_is_rejected(self):
         code, summary = self.verdict("never-rendered.mp4")

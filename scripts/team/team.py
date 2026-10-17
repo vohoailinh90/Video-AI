@@ -1013,14 +1013,17 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
             if review is not None and blockers(review):
                 before = head(f.repo)
                 fix = "A reviewer found blockers. Fix them; change nothing else.\n\n" + review
-                if run_coder(f, cfg, keys, state, fix, attempts=1):
+                passed = run_coder(f, cfg, keys, state, fix, attempts=1)
+                if passed and head(f.repo) != before:
                     warn(state, "pre-review blockers were addressed by a fix commit that was not re-reviewed", round="review")
                 else:
+                    # A coder that exits cleanly without changing a file leaves the gates passing: that is no fix.
                     git(f.repo, "reset", "-q", "--hard", before)
                     state.pop("gate_feedback", None)  # belongs to the reverted fix, not to HEAD
                     run_gates(f, cfg)
-                    warn(state, f"{len(blockers(review))} pre-review blocker(s) stand: the fix attempt broke "
-                                "the gates and was reverted", round="review")
+                    warn(state, f"{len(blockers(review))} pre-review blocker(s) stand: " +
+                         ("the fix attempt made no commit" if passed else "the fix attempt broke the gates and was reverted"),
+                         round="review")
         elif stage == "pack":
             if build_pack(f, cfg, state):
                 return blocked(f, state, "audit pack not built: over the size limit, or the gates did not run on this commit")

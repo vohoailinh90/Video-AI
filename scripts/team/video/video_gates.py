@@ -11,7 +11,7 @@ wrong; ffprobe and ffmpeg's loudness meter cannot.
 `expected.json` is written by the tester stage from the spec. Keys (all optional
 except `duration_s`; an unknown key is an error, so a typo cannot disable a check):
 
-    duration_s, duration_tolerance_s (1.5)   video length
+    duration_s, duration_tolerance_s (1.5)   video length, of the container and of the picture stream alone
     width, height, fps                       exact size; fps within 0.05
     audio.required (true)                    an audio stream must exist
     audio.min_coverage (0.9)                 audio length / video length
@@ -141,6 +141,11 @@ def evaluate(info: dict, loudness: tuple[float | None, float | None] | None, gap
     check(abs(length - expected["duration_s"]) <= tolerance, "duration",
           f"{length:.2f}s, wanted {expected['duration_s']}s +/- {tolerance}s")
     if video:
+        # The container is as long as its longest stream: 6 s of sound under a picture that stopped at 2 s still reads 6 s.
+        picture = video.get("duration")
+        picture_length = float(picture) if picture not in (None, "N/A") else None
+        check(picture_length is not None and abs(picture_length - expected["duration_s"]) <= tolerance, "video duration",
+              f"{'unmeasured' if picture_length is None else f'{picture_length:.2f}s'}, wanted {expected['duration_s']}s +/- {tolerance}s")
         for key in ("width", "height"):
             if key in expected:
                 check(video.get(key) == expected[key], key, f"{video.get(key)}, wanted {expected[key]}")

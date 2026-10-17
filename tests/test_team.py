@@ -980,6 +980,42 @@ class PipelineTests(Sandbox):
         self.assertIn('"Sum."', (f.repo / "feature.py").read_text())
         self.assertTrue(any("not re-reviewed" in w for w in f.load_state()["warnings"]))
 
+    def test_a_fix_attempt_that_changes_nothing_does_not_count_as_addressing_the_blockers(self):
+        # Codex's tenth review: a coder that exits 0 without touching a file leaves the gates passing, so run_coder said
+        # True and the pack claimed a fix commit that does not exist.
+        f = self.new_feature()
+        review = 'print("=== REVIEW ===\\nBLOCKER feature.py:1 - no docstring - add one\\nSUMMARY: x\\n=== END ===")'
+        coder = textwrap.dedent("""
+            if "/handoff/feedback.md" not in handoff:
+                with open(work + "/feature.py", "w") as fh:
+                    fh.write("def add(a, b):\\n    return a + b\\n")
+        """)
+        self.scenario(tester=WRITE_TEST, coder=coder, reviewer=review)
+        code, out = self.run_pipeline()
+        self.assertEqual(code, 0, out)
+        warnings = f.load_state()["warnings"]
+        self.assertFalse(any("addressed" in w for w in warnings), warnings)
+        self.assertTrue(any("1 pre-review blocker(s) stand: the fix attempt made no commit" in w for w in warnings), warnings)
+        self.assertEqual(git(f.repo, "log", "--format=%s").count("feat(F1)"), 1, "no second coder commit")
+        self.assertIn("1 pre-review blocker(s) stand", f.file("audit-pack.md").read_text())
+
+    def test_a_fix_attempt_that_breaks_the_gates_is_reverted_and_reported(self):
+        f = self.new_feature()
+        review = 'print("=== REVIEW ===\\nBLOCKER feature.py:1 - no docstring - add one\\nSUMMARY: x\\n=== END ===")'
+        coder = textwrap.dedent("""
+            body = "return a - b" if "/handoff/feedback.md" in handoff else "return a + b"
+            with open(work + "/feature.py", "w") as fh:
+                fh.write("def add(a, b):\\n    " + body + "\\n")
+        """)
+        self.scenario(tester=WRITE_TEST, coder=coder, reviewer=review)
+        code, out = self.run_pipeline()
+        self.assertEqual(code, 0, out)
+        self.assertIn("return a + b", (f.repo / "feature.py").read_text(), "the broken fix was reverted")
+        warnings = f.load_state()["warnings"]
+        self.assertTrue(any("1 pre-review blocker(s) stand: the fix attempt broke the gates and was reverted" in w for w in warnings),
+                        warnings)
+        self.assertIn("RESULT: PASS", f.file("gates.log").read_text(), "gates were rerun on the reverted code")
+
     def test_an_oversized_pack_is_refused(self):
         f = self.new_feature()
         self.write_env({**MODELS, "TEAM_PACK_MAX_LINES": "10"})

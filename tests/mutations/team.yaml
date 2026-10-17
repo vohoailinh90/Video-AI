@@ -370,3 +370,19 @@ mutations:
   find: "\"the new tests may not exercise the feature\", round=\"tester\")"
   replace: "\"the new tests may not exercise the feature\")"
   test: tests.test_team.PipelineTests.test_a_new_tester_round_drops_the_previous_rounds_warning
+- label: "a fix attempt that changes nothing counts as addressing the blockers"
+  find: "                if passed and head(f.repo) != before:\n"
+  replace: "                if passed:\n"
+  test: tests.test_team.PipelineTests.test_a_fix_attempt_that_changes_nothing_does_not_count_as_addressing_the_blockers
+- label: "a no-commit fix attempt is reported as broken gates"
+  find: "(\"the fix attempt made no commit\" if passed else \"the fix attempt broke the gates and was reverted\")"
+  replace: "\"the fix attempt broke the gates and was reverted\""
+  test: tests.test_team.PipelineTests.test_a_fix_attempt_that_changes_nothing_does_not_count_as_addressing_the_blockers
+- label: "a broken fix attempt is reported as having made no commit"
+  find: "(\"the fix attempt made no commit\" if passed else \"the fix attempt broke the gates and was reverted\")"
+  replace: "\"the fix attempt made no commit\""
+  test: tests.test_team.PipelineTests.test_a_fix_attempt_that_breaks_the_gates_is_reverted_and_reported
+- label: "a broken fix attempt is not reverted"
+  find: "                    git(f.repo, \"reset\", \"-q\", \"--hard\", before)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_fix_attempt_that_breaks_the_gates_is_reverted_and_reported

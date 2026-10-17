@@ -50,7 +50,7 @@ ffprobe/ffmpeg:
 | Kiểm tra | Mặc định |
 |---|---|
 | có luồng video; có luồng audio | bắt buộc (`audio.required`) |
-| độ dài | `duration_s` ± 1,5 s |
+| độ dài (cả container lẫn luồng hình riêng) | `duration_s` ± 1,5 s |
 | `width`, `height`, `fps` | đúng bằng spec (fps ± 0,05) |
 | audio dài ≥ 90% video | `audio.min_coverage` |
 | loudness tích hợp | −30…−10 LUFS (nên đặt quanh −16 theo spec) |
@@ -212,6 +212,7 @@ audit). Riêng team video:
 | `smoke narration failed` | Kokoro không chạy trong image: dùng file audio tự cung cấp, hoặc sửa espeak trong `Dockerfile.video` |
 | gate `loudness`/`true peak` FAIL | tiếng quá to/nhỏ hoặc méo: coder chuẩn hoá lại (`loudnorm`); đừng nới `expected.json` |
 | gate `audio stream` FAIL | thiếu `id` trên `<audio>` (render sẽ câm), hoặc không có audio nào được đặt |
+| gate `video duration` FAIL | hình dừng sớm hơn tiếng/khung: cảnh cuối thiếu `data-duration` hoặc timeline ngắn hơn audio |
 | gate `silence gap` FAIL | cảnh dài hơn giọng đọc: chỉnh độ dài cảnh theo audio thật |
 | `check` báo lỗi mạng/CDN | có URL ngoài (GSAP, font, ảnh): đưa file vào repo |
 | "another pipeline is running" | chỉ một pipeline một lúc cho cả ba team; chờ hoặc xem `team-video status` |

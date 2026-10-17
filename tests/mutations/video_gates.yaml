@@ -62,3 +62,15 @@ mutations:
   find: "    longest = max(max(gaps, default=0.0), tail)\n"
   replace: "    longest = max(gaps, default=0.0)\n"
   test: tests.test_video_gates.EvaluateTests.test_a_silent_tail_after_the_audio_stream_ends_counts_as_silence
+- label: "a picture that stops before the sound passes"
+  find: "abs(picture_length - expected[\"duration_s\"]) <= tolerance, \"video duration\""
+  replace: "True, \"video duration\""
+  test: tests.test_video_gates.EvaluateTests.test_a_picture_that_stops_before_the_sound_fails_on_video_duration
+- label: "an unmeasured picture duration passes"
+  find: "check(picture_length is not None and abs("
+  replace: "check(picture_length is None or abs("
+  test: tests.test_video_gates.EvaluateTests.test_a_video_stream_that_reports_no_duration_is_unmeasured_not_passed
+- label: "N/A is read as a picture duration of zero"
+  find: "if picture not in (None, \"N/A\") else None"
+  replace: "if picture is not None else None"
+  test: tests.test_video_gates.EvaluateTests.test_a_video_stream_that_reports_no_duration_is_unmeasured_not_passed
