@@ -442,11 +442,58 @@ def warn(state: dict, message: str, round: str | None = None) -> None:
 
 # ------------------------------------------------------------------------ git
 
+# What `team new` leaves in a feature clone's .git/config (clone, `checkout -b`, and the two `git config` calls). Anything else is
+# refused: the file is writable by the audit session, and a setting such as core.worktree, core.fsmonitor, core.sshCommand, a
+# filter driver, an include or an alias would have every host-side git command act on, or run, what the setting names.
+SAFE_REPO_KEYS = frozenset({"core.repositoryformatversion", "core.filemode", "core.bare", "core.logallrefupdates", "core.ignorecase",
+                            "core.precomposeunicode", "core.symlinks", "remote.origin.url", "remote.origin.fetch",
+                            "user.name", "user.email"})
+SAFE_REPO_KEY_RE = re.compile(r"branch\..+\.(remote|merge)")
+_checked_repos: dict[str, tuple] = {}
+
+
+def check_repo(repo: Path) -> None:
+    """Refuse a feature clone whose git directory or configuration is not what `team new` made (see SAFE_REPO_KEYS)."""
+    git_dir = repo / ".git"
+    if git_dir.is_symlink() or not git_dir.is_dir() or (git_dir / "commondir").exists():
+        raise SystemExit(f"{git_dir} is not the plain git directory `{team_lead().command} new` made: refusing to run git in {repo}")
+    config = git_dir / "config"
+    try:
+        info = config.lstat()
+    except OSError:
+        raise SystemExit(f"{config} is missing: refusing to run git in {repo}") from None
+    if not stat.S_ISREG(info.st_mode):
+        raise SystemExit(f"{config} is not a plain file: refusing to run git in {repo}")
+    stamp = (info.st_mtime_ns, info.st_size, info.st_ino, git_dir.stat().st_ino)
+    if _checked_repos.get(str(repo)) == stamp:
+        return
+    # `--file` reads that one file: no repository discovery, no worktree, nothing it names is run or followed
+    listed = subprocess.run(["git", "config", "--file", str(config), "--list", "-z"], capture_output=True, env=base_env())
+    if listed.returncode:
+        raise SystemExit(f"{config} cannot be read by git: refusing to run git in {repo}")
+    for entry in listed.stdout.decode("utf-8", "replace").split("\0"):
+        key, _, value = entry.partition("\n")
+        key = key.lower()
+        if not key:
+            continue
+        ok = key in SAFE_REPO_KEYS or SAFE_REPO_KEY_RE.fullmatch(key)
+        ok = ok and not (key == "core.bare" and value != "false") and not (key == "core.repositoryformatversion" and value != "0")
+        if not ok:
+            raise SystemExit(f"{config} sets {key}, which `{team_lead().command} new` never does and which could send git elsewhere: "
+                             f"refusing to run git in {repo}. Remove it: git -C {repo} config --unset {key}")
+    _checked_repos[str(repo)] = stamp
+
+
+def git_argv(repo: Path, *args: str) -> list[str]:
+    """The command line for a host-side git command in a feature clone, once its configuration is known to be ordinary."""
+    check_repo(repo)
+    return ["git", *GIT_SAFE, "-C", str(repo), *args]
+
+
 def git(repo: Path, *args: str, check: bool = True) -> str:
     # errors="replace": a diff can carry bytes that are not UTF-8 (a Latin-1
     # source file); a model-written file must never crash the conductor.
-    result = subprocess.run(["git", *GIT_SAFE, "-C", str(repo), *args], capture_output=True, text=True,
-                            errors="replace")
+    result = subprocess.run(git_argv(repo, *args), capture_output=True, text=True, errors="replace")
     if check and result.returncode:
         raise SystemExit(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout
@@ -455,8 +502,7 @@ def git(repo: Path, *args: str, check: bool = True) -> str:
 def read_capped(repo: Path, args: tuple[str, ...] | list[str], limit: int) -> tuple[bytes, bool]:
     """`git *args` output, at most `limit` bytes of it; True when there was more. Git is stopped at the limit rather than
     waited for, so output of gigabytes is never held in memory or written out whole."""
-    with subprocess.Popen(["git", *GIT_SAFE, "-C", str(repo), *args], stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL) as proc:
+    with subprocess.Popen(git_argv(repo, *args), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
         data = bytearray()
         while len(data) <= limit:  # in chunks: one read(limit + 1) allocates its whole size at once, even for a short output
             chunk = proc.stdout.read1(min(1 << 16, limit + 1 - len(data)))
@@ -573,15 +619,14 @@ def untrack_caches(repo: Path, base: str) -> None:
     outranks info/exclude, so `!__pycache__/` there stages a cache anyway. It
     also clears a cache committed before LOCAL_EXCLUDES existed, which no worker
     can untrack (it sees no .git) and every test run rewrote."""
-    if subprocess.run(["git", *GIT_SAFE, "-C", str(repo), "rev-parse", "--verify", "--quiet", f"{base}^{{tree}}"],
-                      capture_output=True).returncode:
+    if subprocess.run(git_argv(repo, "rev-parse", "--verify", "--quiet", f"{base}^{{tree}}"), capture_output=True).returncode:
         return  # no base to tell the pipeline's caches from the repository's
     at_base = set(git_paths(repo, "ls-tree", "-r", "-z", "--name-only", base, limit=TREE_PATHS_MAX_BYTES))
     excludes = [f"--exclude={pattern}" for pattern in local_excludes()]
     tracked = git_paths(repo, "ls-files", "-z", "--cached", "--ignored", *excludes, limit=TREE_PATHS_MAX_BYTES)
     added = [path for path in tracked if path not in at_base]
     if added:  # on stdin, as plain paths (not pathspecs), however many there are
-        result = subprocess.run(["git", *GIT_SAFE, "-C", str(repo), "update-index", "-z", "--force-remove", "--stdin"],
+        result = subprocess.run(git_argv(repo, "update-index", "-z", "--force-remove", "--stdin"),
                                 input=b"\0".join(os.fsencode(path) for path in added), capture_output=True)
         if result.returncode:
             raise SystemExit(f"git update-index failed: {result.stderr.decode('utf-8', 'replace').strip()}")
@@ -632,7 +677,7 @@ def commit_all(repo: Path, message: str, base: str, min_free: int = 0) -> bool:
                          f"{min_free} to keep in reserve (TEAM_MIN_FREE_BYTES). The attempt was discarded; free some space and run again")
     git(repo, "add", "-A")
     untrack_caches(repo, base)
-    staged = subprocess.run(["git", *GIT_SAFE, "-C", str(repo), "diff", "--cached", "--quiet"]).returncode != 0
+    staged = subprocess.run(git_argv(repo, "diff", "--cached", "--quiet")).returncode != 0
     if staged:
         git(repo, "commit", "-q", "--no-verify", "-m", message)
     purge_untracked(repo)
@@ -641,16 +686,14 @@ def commit_all(repo: Path, message: str, base: str, min_free: int = 0) -> bool:
 
 def merge_base(f: Feature, state: dict) -> str:
     base = state.get("base", "main")
-    result = subprocess.run(
-        ["git", *GIT_SAFE, "-C", str(f.repo), "merge-base", "HEAD", f"origin/{base}"],
-        capture_output=True, text=True,
-    )
+    result = subprocess.run(git_argv(f.repo, "merge-base", "HEAD", f"origin/{base}"), capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else base
 
 
 def export_head(repo: Path, dest: Path) -> None:
     """A clean checkout of HEAD: untracked or ignored files a worker left behind
     do not exist here, and neither does .git."""
+    check_repo(repo)
     subprocess.run(
         ["git", *GIT_SAFE, "clone", "-q", "--no-hardlinks", "--", str(repo), str(dest)],
         check=True, capture_output=True,
@@ -865,6 +908,20 @@ def disk_usage(path: Path) -> int:
     return workspace_usage(path)[0]
 
 
+@contextlib.contextmanager
+def open_for_append(path: Path, what: str):
+    """`path` opened for appending, never through a link: the feature directory is group-writable, and a link left at a log's
+    name would have `what` written into whatever it points to (workers.env, a seal), as the privileged team user."""
+    try:
+        handle = os.fdopen(os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o664), "ab")
+    except OSError as exc:
+        raise SystemExit(f"{path} is a link or cannot be opened ({exc.strerror}): refusing to write {what} there") from None
+    with handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise SystemExit(f"{path} is not a plain file: refusing to write {what} there")
+        yield handle
+
+
 def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], log: Path,
                max_bytes: int = 20_000_000, workspace: Path | None = None, workspace_growth: int = 0,
                workspace_baseline: tuple[int, int] | None = None, workspace_files: int = 0) -> tuple[int, str]:
@@ -930,11 +987,7 @@ def run_docker(argv: list[str], name: str, timeout: int, env: dict[str, str], lo
                 proc.kill()
                 return
 
-    try:  # appending to a link the lead left at this name would write the container's output into whatever it points to
-        sink = os.fdopen(os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o664), "ab")
-    except OSError as exc:
-        raise SystemExit(f"{log} is a link or cannot be opened ({exc.strerror}): refusing to write the output of {name} there") from None
-    with sink:
+    with open_for_append(log, f"the output of {name}") as sink:
         written = sink.tell()
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         reader = threading.Thread(target=pump, args=(proc.stdout, sink), daemon=True)
@@ -1636,7 +1689,7 @@ def cmd_run(args, home: Path, cfg) -> int:
             raise SystemExit(f"another pipeline is running ({team_lead().command} status)")
         cmd = [sys.executable, str(Path(__file__).resolve()), "run", f.id]
         cmd += (["--from", args.from_] if args.from_ else []) + (["--force"] if args.force else [])
-        with open(f.out / "run.log", "ab") as log:
+        with open_for_append(f.out / "run.log", "the output of the detached run") as log:
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                     start_new_session=True)
         print(f"started {f.id} (pid {proc.pid}); follow: tail -f {f.out / 'run.log'}  or  {team_lead().command} status {f.id}")

@@ -119,8 +119,8 @@ mutations:
   replace: "        git(repo, \"commit\", \"-q\", \"--no-verify\", \"-m\", message)\n"
   test: tests.test_team.PipelineTests.test_ignored_artifacts_never_reach_the_next_worker
 - label: worker-chosen cache paths go on one update-index command line, past ARG_MAX
-  find: '["git", *GIT_SAFE, "-C", str(repo), "update-index", "-z", "--force-remove", "--stdin"]'
-  replace: '["git", *GIT_SAFE, "-C", str(repo), "update-index", "--force-remove", "--", *added]'
+  find: 'git_argv(repo, "update-index", "-z", "--force-remove", "--stdin")'
+  replace: 'git_argv(repo, "update-index", "--force-remove", "--", *added)'
   test: tests.test_team.GitSafetyTests.test_thousands_of_worker_paths_never_overflow_argv
 - label: worker-chosen test paths go on one git diff command line, past ARG_MAX
   find: 'ARG_BATCH = 200'
@@ -693,15 +693,15 @@ mutations:
 - label: "push reads the destination and options from the clone's own configuration"
   find: "        push_sealed(f, sealed_origin(f), source)\n"
   replace: "        git(f.repo, \"push\", \"origin\", f\"{source}:refs/heads/{f.branch}\")\n"
-  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_and_never_reads_the_clones_config
 - label: "push borrows no objects, so it cannot send the audited commit"
   find: "        (git_dir / \"objects\" / \"info\" / \"alternates\").write_text(f\"{f.repo / '.git' / 'objects'}\\n\", encoding=\"utf-8\")\n"
   replace: "        pass\n"
-  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_and_never_reads_the_clones_config
 - label: "the push scratch repository is left behind"
   find: "            raise SystemExit(f\"git push failed: {pushed.stderr.strip()}\")\n    finally:\n        shutil.rmtree(root, ignore_errors=True)\n"
   replace: "            raise SystemExit(f\"git push failed: {pushed.stderr.strip()}\")\n    finally:\n        pass\n"
-  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_and_never_reads_the_clones_config
 - label: "push goes ahead without a sealed destination"
   find: "    raise SystemExit(f\"no sealed destination for {f.id}"
   replace: "    return \"origin\"\n    raise SystemExit(f\"no sealed destination for {f.id}"
@@ -713,11 +713,11 @@ mutations:
 - label: "a new feature does not record its destination"
   find: "        write_origin(f, str(local.resolve()) if local.exists() else args.repo)\n"
   replace: "        pass\n"
-  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_and_never_reads_the_clones_config
 - label: "the recorded destination is writable by everyone"
   find: "\"recorded\": now()}, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o640)\n"
   replace: "\"recorded\": now()}, indent=2) + \"\\n\", encoding=\"utf-8\")\n    tmp.chmod(0o666)\n"
-  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says
+  test: tests.test_team.PipelineTests.test_push_goes_to_the_origin_sealed_at_creation_and_never_reads_the_clones_config
 - label: "a relative repository path is recorded as given"
   find: "write_origin(f, str(local.resolve()) if local.exists() else args.repo)"
   replace: "write_origin(f, args.repo)"
@@ -735,8 +735,8 @@ mutations:
   replace: "        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)\n"
   test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_pipe_or_far_too_big_is_refused_by_read
 - label: "read takes anything that is not a plain file"
-  find: "        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):\n            raise SystemExit(f\"{path} is not a plain file"
-  replace: "        if False:\n            raise SystemExit(f\"{path} is not a plain file"
+  find: "        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):\n            raise SystemExit(f\"{path} is not a plain file: refusing to use it\")"
+  replace: "        if False:\n            raise SystemExit(f\"{path} is not a plain file: refusing to use it\")"
   test: tests.test_team.PipelineTests.test_a_feature_file_that_is_a_pipe_or_far_too_big_is_refused_by_read
 - label: "read takes a file of any size"
   find: "    if len(data) > READ_MAX_BYTES:\n        raise SystemExit(f\"{path} is larger than"
@@ -771,8 +771,8 @@ mutations:
   replace: "    f.file(\"repo-map.txt\").write_text(repo_map(f.repo, int(cfg[\"TEAM_MAP_MAX_LINES\"])), encoding=\"utf-8\")\n    print(f.file(\"repo-map.txt\"))"
   test: tests.test_team.PipelineTests.test_the_conductor_replaces_a_link_it_would_have_written_through
 - label: "a worker log is opened through a link"
-  find: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC"
-  replace: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC"
+  find: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC"
+  replace: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK | os.O_CLOEXEC"
   test: tests.test_team.PipelineTests.test_a_worker_log_is_never_opened_through_a_link
 - label: "a feature whose repository directory is a link is used"
   find: "            if path.is_symlink():\n                raise SystemExit(f\"{path} is a link: refusing to use feature"
@@ -802,3 +802,43 @@ mutations:
   find: "    if cut_anywhere and force:\n"
   replace: "    if False:\n"
   test: tests.test_team.PipelineTests.test_a_huge_diff_is_refused_or_cut_before_it_is_held_in_the_pack
+- label: "git runs in a clone whose configuration names a worktree, a driver or a command"
+  find: "        if not ok:\n            raise SystemExit(f\"{config} sets {key}"
+  replace: "        if False:\n            raise SystemExit(f\"{config} sets {key}"
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "an allowed setting may carry any value"
+  find: "        ok = ok and not (key == \"core.bare\" and value != \"false\") and not (key == \"core.repositoryformatversion\" and value != \"0\")\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "a git directory that is a file or a link is used"
+  find: "    if git_dir.is_symlink() or not git_dir.is_dir() or (git_dir / \"commondir\").exists():\n"
+  replace: "    if False:\n"
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "the repository check is remembered even after the configuration changed"
+  find: "    stamp = (info.st_mtime_ns, info.st_size, info.st_ino, git_dir.stat().st_ino)\n"
+  replace: "    stamp = (0,)\n"
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "git() does not check the clone's configuration"
+  find: "    result = subprocess.run(git_argv(repo, *args), capture_output=True, text=True, errors=\"replace\")"
+  replace: "    result = subprocess.run([\"git\", *GIT_SAFE, \"-C\", str(repo), *args], capture_output=True, text=True, errors=\"replace\")"
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "reading a path list does not check the clone's configuration"
+  find: "    with subprocess.Popen(git_argv(repo, *args), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:"
+  replace: "    with subprocess.Popen([\"git\", *GIT_SAFE, \"-C\", str(repo), *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:"
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "the merge base is found in a clone whose configuration is not checked"
+  find: "    result = subprocess.run(git_argv(f.repo, \"merge-base\", \"HEAD\", f\"origin/{base}\"), capture_output=True, text=True)"
+  replace: "    result = subprocess.run([\"git\", *GIT_SAFE, \"-C\", str(f.repo), \"merge-base\", \"HEAD\", f\"origin/{base}\"], capture_output=True, text=True)"
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "the gates clone a repository whose configuration is not checked"
+  find: "    check_repo(repo)\n    subprocess.run(\n        [\"git\", *GIT_SAFE, \"clone\""
+  replace: "    subprocess.run(\n        [\"git\", *GIT_SAFE, \"clone\""
+  test: tests.test_team.PipelineTests.test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs
+- label: "the detached run log is opened through a link"
+  find: "        with open_for_append(f.out / \"run.log\", \"the output of the detached run\") as log:"
+  replace: "        with open(f.out / \"run.log\", \"ab\") as log:"
+  test: tests.test_team.PipelineTests.test_the_detached_run_log_is_never_opened_through_a_link
+- label: "opening a worker log that is a named pipe waits for a reader"
+  find: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC"
+  replace: "os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC"
+  test: tests.test_team.PipelineTests.test_a_worker_log_that_is_a_pipe_is_refused_instead_of_waiting_for_a_reader

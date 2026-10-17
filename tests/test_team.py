@@ -1210,23 +1210,34 @@ class PipelineTests(Sandbox):
         (hooks / "pre-push").chmod(0o755)
         return marker
 
-    def test_push_goes_to_the_origin_sealed_at_creation_whatever_the_repository_config_says(self):
+    def test_push_goes_to_the_origin_sealed_at_creation_and_never_reads_the_clones_config(self):
         # Codex's twenty-fifth review: push read the destination and every transport option from the audit-writable
         # .git/config, which the seal does not cover.
         f = self.approved_feature()
         sealed = (self.home / "seals" / "F1.origin")
         self.assertEqual(json.loads(sealed.read_text())["repo"], str(self.origin))
         self.assertEqual(stat.S_IMODE(sealed.stat().st_mode), 0o640, "readable by the group, not writable")
+        audited = f.load_state()["pack_head"]
+        # the one setting the clone is allowed to carry that decides where `git push origin` goes
+        attacker = self.tmp / "attacker.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(attacker)], check=True)
+        git(f.repo, "config", "remote.origin.url", str(attacker))
+        code, out = run_cli("push", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(git(self.origin, "rev-parse", "team/F1").strip(), audited)
+        self.assertEqual(git(attacker, "for-each-ref").strip(), "", "the clone's own remote.origin.url decided nothing")
+        self.assertEqual(list(self.home.glob(".push-*")), [], "the scratch repository is removed")
+
+    def test_push_sealed_ignores_a_clone_configuration_that_names_other_destinations_and_commands(self):
+        f = self.approved_feature()
         attacker = self.tmp / "attacker.git"
         subprocess.run(["git", "init", "-q", "--bare", str(attacker)], check=True)
         marker = self.tamper_with_the_repository_config(f, attacker)
         audited = f.load_state()["pack_head"]
-        code, out = run_cli("push", "F1")
-        self.assertEqual(code, 0, out)
+        team.push_sealed(f, str(self.origin), audited)  # the layer under the config check: it must hold on its own
         self.assertEqual(git(self.origin, "rev-parse", "team/F1").strip(), audited)
         self.assertEqual(git(attacker, "for-each-ref").strip(), "", "nothing reached the repository the config named")
         self.assertFalse(marker.exists(), "no command from the repository config ran")
-        self.assertEqual(list(self.home.glob(".push-*")), [], "the scratch repository is removed")
 
     def test_push_refuses_a_feature_whose_origin_was_never_sealed_or_whose_record_is_not_trusted(self):
         f = self.approved_feature()
@@ -1262,12 +1273,11 @@ class PipelineTests(Sandbox):
         f = self.approved_feature()
         attacker = self.tmp / "attacker.git"
         subprocess.run(["git", "init", "-q", "--bare", str(attacker)], check=True)
-        self.tamper_with_the_repository_config(f, attacker)
         with mock.patch.object(team, "confirm_force", lambda feature: None):
             code, out = run_cli("push", "F1", "--force")
         self.assertEqual(code, 0, out)
-        self.assertEqual(git(attacker, "for-each-ref").strip(), "")
         self.assertNotEqual(git(self.origin, "branch", "--list", "team/F1").strip(), "")
+        self.assertEqual(git(attacker, "for-each-ref").strip(), "")
 
     def test_push_trusts_the_seal_not_the_files_a_lead_can_rewrite(self):
         f = self.approved_feature()
@@ -1692,6 +1702,91 @@ class PipelineTests(Sandbox):
             self.assertTrue(path.is_file(), f"{path.name} is a file of the conductor's again")
             if path.name != "gates-raw.log":  # the raw log is empty when the commands print nothing
                 self.assertTrue(path.read_text(), f"{path.name} holds the conductor's output")
+
+    def test_a_repository_whose_git_configuration_redirects_git_is_refused_before_git_runs(self):
+        # Codex's twenty-seventh review: core.worktree=<team home> makes `reset --hard`, `clean -ffdqx` and `add -A` act on
+        # the team home, where workers.env is "untracked" and would be committed.
+        f = self.new_feature()
+        keep = self.home / "keep.txt"
+        keep.write_text("do not touch")
+        self.assertIsNone(team.check_repo(f.repo), "a repository as `team new` makes it passes")
+        config = f.repo / ".git" / "config"
+        original = config.read_text()
+        for snippet, token in ((f"[core]\n\tworktree = {self.home}\n", "core.worktree"),
+                               ("[core]\n\tfsmonitor = touch /tmp/x\n", "core.fsmonitor"),
+                               ("[core]\n\tsshCommand = false\n", "core.sshcommand"),
+                               (f"[core]\n\thooksPath = {self.tmp}\n", "core.hookspath"),
+                               ("[filter \"x\"]\n\tclean = cat\n", "filter.x.clean"),
+                               ("[include]\n\tpath = /etc/passwd\n", "include.path"),
+                               ("[url \"http://a/\"]\n\tinsteadOf = http://b/\n", "insteadof"),
+                               ("[core]\n\tbare = true\n", "core.bare"),
+                               ("[core]\n\trepositoryformatversion = 1\n", "core.repositoryformatversion"),
+                               ("[credential]\n\thelper = !true\n", "credential.helper"),
+                               ("[alias]\n\tstatus = !true\n", "alias.status")):
+            with self.subTest(setting=token):
+                config.write_text(original + snippet)
+                for call in (lambda: team.discard(f.repo), lambda: team.head(f.repo), lambda: team.git(f.repo, "status"),
+                             lambda: team.commit_all(f.repo, "msg", "main"), lambda: team.git_paths(f.repo, "ls-files", "-z"),
+                             lambda: team.merge_base(f, f.load_state()), lambda: team.export_head(f.repo, self.tmp / "exp")):
+                    with self.assertRaises(SystemExit) as raised:
+                        call()
+                    self.assertIn(token, str(raised.exception).lower())
+        config.write_text(original)
+        self.assertEqual(keep.read_text(), "do not touch")
+        self.assertTrue((self.home / "workers.env").is_file())
+        self.assertIsNone(team.check_repo(f.repo), "the configuration is read again, so removing the key restores it")
+        # the git directory itself must be the plain directory `clone` made
+        moved = f.repo / ".git-real"
+        (f.repo / ".git").rename(moved)
+        (f.repo / ".git").write_text(f"gitdir: {self.home}\n")
+        with self.assertRaises(SystemExit) as raised:
+            team.check_repo(f.repo)
+        self.assertIn(".git", str(raised.exception))
+        (f.repo / ".git").unlink()
+        # a link to a perfectly ordinary git directory elsewhere is still not the directory `new` made
+        moved.rename(self.tmp / "elsewhere.git")
+        (f.repo / ".git").symlink_to(self.tmp / "elsewhere.git")
+        with self.assertRaises(SystemExit) as raised:
+            team.check_repo(f.repo)
+        self.assertIn(".git", str(raised.exception))
+        (f.repo / ".git").unlink()
+        (self.tmp / "elsewhere.git").rename(f.repo / ".git")
+        (f.repo / ".git" / "commondir").write_text("../../elsewhere\n")  # another repository's objects and refs
+        with self.assertRaises(SystemExit):
+            team.check_repo(f.repo)
+        (f.repo / ".git" / "commondir").unlink()
+        self.assertIsNone(team.check_repo(f.repo))
+
+    def test_the_detached_run_log_is_never_opened_through_a_link(self):
+        # Codex's twenty-seventh review: out/run.log is group-writable, and `run --detach` opened it with a plain open()
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        sentinel = self.tmp / "run-log-sentinel"
+        sentinel.write_text("keep me")
+        (f.out / "run.log").symlink_to(sentinel)
+        started = mock.Mock()
+        with mock.patch.object(team.subprocess, "Popen", started):
+            code, out = run_cli("run", "F1", "--detach")
+        self.assertNotEqual(code, 0)
+        self.assertIn("link", out)
+        self.assertEqual(sentinel.read_text(), "keep me")
+        started.assert_not_called()
+
+    def test_a_worker_log_that_is_a_pipe_is_refused_instead_of_waiting_for_a_reader(self):
+        import signal
+        fifo = self.tmp / "pipe.log"
+        os.mkfifo(fifo)
+
+        def alarm(signum, frame):
+            raise AssertionError("opening a named pipe for writing blocked")
+        previous = signal.signal(signal.SIGALRM, alarm)
+        signal.alarm(20)
+        try:
+            with self.assertRaises(SystemExit):
+                team.run_docker([sys.executable, "-c", "print('hi')"], "t-pipe-log", 60, team.base_env(), fifo)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
 
     def test_a_worker_log_is_never_opened_through_a_link(self):
         sentinel = self.tmp / "log-sentinel"

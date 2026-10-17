@@ -257,7 +257,11 @@ Có test và mutation check canh giữ (`tests/test_team.py`, `tests/mutations/t
   `audit-pack.md`, `diff.patch`... nó ghi file mới rồi đổi tên đè lên, nên symlink bị thay chứ không bị ghi xuyên qua; `repo/`, `out/`
   hay chính thư mục feature mà là symlink thì lệnh bị từ chối. Ngoài số byte, container còn bị dừng khi thư mục làm việc tăng quá
   `TEAM_WORKSPACE_GROWTH_FILES` mục (file rỗng và symlink không tốn byte nhưng tốn inode). `pack --force` chỉ bỏ giới hạn kích thước,
-  không bao giờ niêm phong một diff đã bị cắt (quá 20 MB thì từ chối). Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS. Container chạy với `--log-driver none`
+  không bao giờ niêm phong một diff đã bị cắt (quá 20 MB thì từ chối).
+  Mọi lệnh git chạy trên máy chủ trong clone của feature chỉ chạy khi `.git/config` đúng như `team new` để lại (chỉ các khoá `core.*`
+  cơ bản, `remote.origin.*`, `branch.*`, `user.*`; `.git` phải là thư mục thật): một `core.worktree`, `core.fsmonitor`, `core.sshCommand`,
+  filter, include, alias hay `url.*.insteadOf` do phiên audit chèn vào bị từ chối kèm tên khoá và lệnh để gỡ, vì nó có thể khiến
+  `reset --hard`/`clean`/`add -A` chạy lên chính team home. `team run --detach` cũng ghi `out/run.log` không theo symlink. Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS. Container chạy với `--log-driver none`
   (Docker không giữ thêm một bản log `json-file` không xoay vòng của output), và diff đưa cho reviewer hay vào gói audit chỉ được đọc
   tới `TEAM_PACK_MAX_BYTES` (hoặc 20 MB với `pack --force`) rồi dừng `git`, nên vài file lớn không bị nạp nguyên vào bộ nhớ.
 - **Thay đổi nhạy cảm:** gói audit liệt kê riêng các thay đổi ở `.github/` (CI chạy ngay trên
