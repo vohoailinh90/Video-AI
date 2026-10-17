@@ -108,7 +108,8 @@ def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) 
         ordered = all(c.end > c.start for c in cues) and all(b.start >= a.start for a, b in zip(cues, cues[1:]))
         add("subtitle_order", ordered, "every cue ends after it starts, in order")
         if seconds:
-            add("subtitle_inside_video", cues[-1].end <= seconds + 0.5, f"last cue ends at {cues[-1].end:.1f} s, video {seconds:.1f} s")
+            last = max(c.end for c in cues)  # the cue that ends last, which is not always the last one in the file
+            add("subtitle_inside_video", last <= seconds + 0.5, f"the last cue ends at {last:.1f} s, video {seconds:.1f} s")
         share = coverage(job.script, cues)
         add("subtitle_text", share >= MIN_COVERAGE, f"{share:.0%} of the script's words are in the subtitles (needs {MIN_COVERAGE:.0%})")
     return checks

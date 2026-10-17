@@ -61,9 +61,10 @@ def preflight(env: engine_mpt.MptEnv, job: Job) -> str | None:
     key = f"{job.material_source}_api_keys"
     if job.material_source != "local" and not info.get(key):
         return f"{key} is empty in {env.home}/config.toml (get a free key from the {job.material_source} website)"
-    if not (env.home / "resource" / "fonts" / job.font).is_file():
+    # Only what MPT itself will read: it checks the font when subtitles are on, and a custom music file when its volume is above zero.
+    if job.subtitles and not (env.home / "resource" / "fonts" / job.font).is_file():
         return f"font {job.font} is not in {env.home}/resource/fonts"
-    if job.bgm not in ("none", "random") and not any((env.home / d / job.bgm).is_file() for d in ("storage/bgm", "resource/songs")):
+    if job.bgm not in ("none", "random") and job.bgm_volume > 0 and not any((env.home / d / job.bgm).is_file() for d in ("storage/bgm", "resource/songs")):
         return f"music file {job.bgm} is in neither storage/bgm nor resource/songs of {env.home}"
     if job.audio_file and job.subtitles and info["subtitle_provider"] != "whisper":
         return "audio_file with subtitles needs subtitle_provider = \"whisper\" in config.toml; set subtitles to false or change it"

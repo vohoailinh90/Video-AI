@@ -190,6 +190,15 @@ class PackTests(unittest.TestCase):
         self.assertEqual(located.python, (str((self.root / "bin" / "py").resolve()),))
         self.assertEqual(engine_mpt.locate(str(env.home), "python3").python, ("python3",))
 
+    def test_preflight_asks_only_for_what_the_engine_will_read(self):
+        env = fake_mpt(self.root)  # has BeVietnamPro-Bold.ttf, a Pexels key, and neither STHeitiMedium.ttc nor any music file
+        job = lambda **d: packmod.load_pack(write_pack(self.root, [video()], d)).jobs[0]
+        # MPT checks the font only when subtitles are on, and the custom music file only when its volume is above zero
+        self.assertIsNone(runner.preflight(env, job(font="Missing.ttf", subtitles=False)))
+        self.assertIn("font Missing.ttf", runner.preflight(env, job(font="Missing.ttf", subtitles=True)))
+        self.assertIsNone(runner.preflight(env, job(bgm="missing.mp3", bgm_volume=0)))
+        self.assertIn("music file missing.mp3", runner.preflight(env, job(bgm="missing.mp3", bgm_volume=0.2)))
+
     def test_locate_refuses_a_python_that_cannot_run(self):
         env = fake_mpt(self.root)
         (self.root / "plain.txt").write_text("not executable")
@@ -515,6 +524,18 @@ class CliTests(FakeMptCase):
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg and ffprobe")
 class QaTests(unittest.TestCase):
+    def test_a_cue_that_runs_past_the_video_fails_even_when_it_is_not_the_last(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "video.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=108x192:d=3:r=10", "-f", "lavfi",
+                            "-i", "sine=frequency=300:sample_rate=22050", "-t", "3", "-pix_fmt", "yuv420p", str(media)], check=True)
+            job = packmod.load_pack(write_pack(Path(tmp), [video()])).jobs[0]
+            cues = [transcript.Cue(0.0, 100.0, "Xin chào các bạn"), transcript.Cue(1.0, 2.0, "hôm nay mình học")]  # starts are in order
+            checks = {c.name: c for c in qa.check_video(job, media, None, cues)}
+            self.assertTrue(checks["subtitle_order"].ok)
+            self.assertFalse(checks["subtitle_inside_video"].ok)
+            self.assertIn("100.0", checks["subtitle_inside_video"].detail)
+
     def test_unreadable_file_fails_first_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "video.mp4"
