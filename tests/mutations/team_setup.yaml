@@ -134,3 +134,19 @@ mutations:
   find: "ExecStart=/usr/local/sbin/team-egress --maintain\n"
   replace: "ExecStart=/usr/local/sbin/team-egress --check\n"
   test: tests.test_team.EgressScriptTests.test_setup_keeps_the_proof_fresh_and_removes_it_when_the_unit_stops
+- label: "the Claude team's home is group-writable again"
+  find: "install -d -o team -g team -m 2750 \"${TEAM_HOME}\"\n"
+  replace: "install -d -o team -g team -m 2770 \"${TEAM_HOME}\"\n"
+  test: tests.test_team.CodexTeamInstallTests.test_team_homes_are_not_writable_by_the_admins_group
+- label: "the Codex team's home is group-writable again"
+  find: "install -d -o team -g team -m 2750 \"${CODEX_HOME}\"\n"
+  replace: "install -d -o team -g team -m 2770 \"${CODEX_HOME}\"\n"
+  test: tests.test_team.CodexTeamInstallTests.test_team_homes_are_not_writable_by_the_admins_group
+- label: "the video team's home is group-writable again"
+  find: "install -d -o team -g team -m 2750 \"${VIDEO_HOME}\"\n"
+  replace: "install -d -o team -g team -m 2770 \"${VIDEO_HOME}\"\n"
+  test: tests.test_team.CodexTeamInstallTests.test_team_homes_are_not_writable_by_the_admins_group
+- label: "the work directory stops being group-writable"
+  find: "install -d -o team -g team -m 2770 \"${TEAM_HOME}/work\"\n"
+  replace: "install -d -o team -g team -m 2750 \"${TEAM_HOME}/work\"\n"
+  test: tests.test_team.CodexTeamInstallTests.test_team_homes_are_not_writable_by_the_admins_group

@@ -233,6 +233,9 @@ Có test và mutation check canh giữ (`tests/test_team.py`, `tests/mutations/t
   SHA của HEAD, SHA-256 của `audit-pack.md` và digest của `spec.md`/`acceptance.md` lúc đóng gói.
   Một lead làm theo chỉ dẫn chèn trong gói có thể sửa mọi thứ trong thư mục feature của nó (repo,
   `state.json`, `gates.log`), nhưng không sửa được seal, nên push từ chối commit, gói hay spec đã đổi.
+  Thư mục gốc của mỗi team (`/srv/team`, `/srv/team-codex`, `/srv/team-video`) là `2750`: tài khoản của bạn
+  (nhóm `team`) đọc và vào được nhưng không thêm, đổi tên hay xoá được gì ngay trong đó, nên không thay được cả thư mục
+  `seals/`; chỉ `work/` bên dưới là `2770`. Chạy lại `setup-vps-team.sh` để áp dụng cho bản đã cài.
 - **Dung lượng:** log của một container chỉ ghi tối đa `TEAM_LOG_MAX_BYTES` (cho cả một lần chạy gates);
   thư mục làm việc `/work` mà worker ghi vào không được lớn thêm quá `TEAM_WORKSPACE_GROWTH_BYTES`
   (container bị dừng, lần thử bị bỏ). Hai giới hạn này giữ một vòng lặp hay một file khổng lồ khỏi làm đầy ổ đĩa của VPS.
@@ -259,6 +262,7 @@ Không đảm bảo, cần bạn tự quản:
 
 | Triệu chứng | Làm gì |
 |---|---|
+| vim báo `E510: Can't make backup file` khi lưu `team.env` | thư mục gốc của team không cho nhóm ghi (để bảo vệ seal), mà vim mặc định đổi tên file cũ để sao lưu: dùng `nano`, hoặc trong vim `:set backupcopy=yes` rồi lưu lại |
 | `doctor`: "not offered by … any more" | model free đã bị rút: chọn lại bằng `team models`, sửa `team.env` |
 | `doctor`: "not in OpenCode's model catalog" | provider đã có model nhưng danh mục của OpenCode (models.dev) chưa có, worker không chạy được: chọn model khác, vài ngày sau thử lại |
 | worker thoát ngay, log báo lỗi config OpenCode | phiên bản OpenCode bạn cài không nhận một khoá trong `scripts/team/opencode.json`: bỏ khoá đó, chạy lại setup. Kiểm tra: `docker run --rm team-worker opencode --version` |

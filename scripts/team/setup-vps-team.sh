@@ -109,7 +109,10 @@ getent group team >/dev/null || groupadd --system team
 id -u team >/dev/null 2>&1 || useradd --system --gid team --create-home --home-dir /var/lib/team --shell /bin/bash team
 usermod -aG docker team
 usermod -aG team "${ADMIN}"
-install -d -o team -g team -m 2770 "${TEAM_HOME}" "${TEAM_HOME}/work"
+# A home is 2750: your login (group team) can read and enter it but cannot add, rename or remove anything directly in it,
+# which is where the seals `team push` believes are kept (<home>/seals, made by the conductor); only work/ is group-writable.
+install -d -o team -g team -m 2750 "${TEAM_HOME}"
+install -d -o team -g team -m 2770 "${TEAM_HOME}/work"
 # Created here so `team status` (run as you) never creates it with your umask.
 touch "${TEAM_HOME}/.run.lock"
 chown team:team "${TEAM_HOME}/.run.lock"
@@ -117,10 +120,12 @@ chmod 660 "${TEAM_HOME}/.run.lock"
 if [ "${WITH_CODEX}" -eq 1 ]; then
   # No lock file here: team-codex takes the one above, so the two teams never
   # run a pipeline at the same time.
-  install -d -o team -g team -m 2770 "${CODEX_HOME}" "${CODEX_HOME}/work"
+  install -d -o team -g team -m 2750 "${CODEX_HOME}"
+  install -d -o team -g team -m 2770 "${CODEX_HOME}/work"
 fi
 if [ "${WITH_VIDEO}" -eq 1 ]; then
-  install -d -o team -g team -m 2770 "${VIDEO_HOME}" "${VIDEO_HOME}/work"
+  install -d -o team -g team -m 2750 "${VIDEO_HOME}"
+  install -d -o team -g team -m 2770 "${VIDEO_HOME}/work"
 fi
 
 echo "== code -> ${PREFIX}"

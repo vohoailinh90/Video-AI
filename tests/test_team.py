@@ -2144,6 +2144,19 @@ class CodexTeamInstallTests(unittest.TestCase):
         guard = script.index("command -v visudo >/dev/null || {")
         self.assertLess(guard, script.index("useradd --system"), "checked before the first side effect")
 
+    def test_team_homes_are_not_writable_by_the_admins_group(self):
+        # Codex's nineteenth review: the seals that `team push` believes sit in the team home. With the home itself
+        # group-writable, the admin account that runs a Claude lead (it is in group team) could rename the seals directory
+        # and put a forged one in its place. Only the work/ directory below it needs to be writable for the group.
+        script = "\n".join(self.setup_lines())
+        modes = {}
+        for mode, targets in re.findall(r"^\s*install -d -o team -g team -m (\d+) (.+)$", script, re.M):
+            for target in re.findall(r'"([^"]+)"', targets):
+                modes[target] = mode
+        for home in ("TEAM_HOME", "CODEX_HOME", "VIDEO_HOME"):
+            self.assertEqual(modes.get("${%s}" % home), "2750", f"{home}: the group may read and enter it, not change it")
+            self.assertEqual(modes.get("${%s}/work" % home), "2770", f"{home}/work: where the admin and the leads work")
+
     def test_setup_installs_the_video_team_only_when_asked(self):
         script = "\n".join(self.setup_lines())
         self.assertIn("--with-video) WITH_VIDEO=1; shift ;;", script)
