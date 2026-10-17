@@ -674,6 +674,19 @@ class ReviewFindings(unittest.TestCase):
             self.assertIn("not shown exactly", output, what)
         self.assertEqual(planlib.build_plan(digest_with(lambda d: d["draft"]["try_it"].update(commands=["  bun run dev \n"])))["try"]["commands"], ["bun run dev"])
 
+    def test_names_are_not_cut_from_vietnamese_words_and_keep_their_plus_and_hash(self):
+        vietnamese = check_facts.blob({"field": "công cụ chuyển giọng nói, đường dẫn và tiếng Việt"})
+        untraced = lambda text, source=vietnamese: check_facts.untraced(text, source, set())
+        self.assertEqual(untraced("C++"), ["token 'C++'"])            # c is a piece of công, not a name
+        self.assertEqual(untraced("C#"), ["token 'C#'"])
+        self.assertEqual(untraced("ng"), ["token 'ng'"])
+        self.assertEqual(untraced("Viet"), ["token 'Viet'"])
+        languages = check_facts.blob({"field": "Viết bằng C++ và C#, có cả F# và Python-based"})
+        self.assertEqual(untraced("C++, C# và F#", languages), [])
+        self.assertEqual(untraced("C#", check_facts.blob({"field": "Viết bằng C++"})), ["token 'C#'"])    # C# is not C++
+        self.assertEqual(untraced("C++/CLI", languages), ["token 'C++/CLI'"])
+        self.assertEqual(untraced("C++.", languages), [])           # a full stop after it ends the sentence, not the name
+
     def test_a_name_stuck_to_a_symbol_is_still_checked(self):
         source = check_facts.blob({"field": "Dùng npm để cài; mô hình faster-whisper-large-v3, tiếng Việt"})
         untraced = lambda text: check_facts.untraced(text, source, set())
