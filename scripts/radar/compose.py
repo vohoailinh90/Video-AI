@@ -9,19 +9,12 @@ Look and motion follow videos/demo-video and videos/voicestudio (dark grid, oran
 import html as htmllib
 import json
 
+import plan as planlib
+from check_facts import FIXED_LABELS
+
 E = htmllib.escape
 
-LABELS = {
-    "problem": "Vấn đề nó giải quyết",
-    "how": "Nó chạy như thế nào",
-    "parts": "Các mảnh ghép",
-    "learn": "Học được gì từ thiết kế này",
-    "caveats": "Lưu ý trước khi dùng",
-    "try": "Tự thử",
-    "scan": "Số liệu theo ngày quét",
-    "stars": "sao",
-    "forks": "fork",
-}
+LABELS = FIXED_LABELS   # the gate owns the list of fixed words it lets through
 
 CSS = """
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -93,7 +86,7 @@ CSS = """
       .term .top i { width: 16px; height: 16px; border-radius: 50%; background: #3a3f4a; }
       .term .body { padding: 30px 40px 34px; font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 38px; line-height: 1.75; }
       .term .prompt { color: var(--accent); }
-      .term .cmd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+      .term .cmd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; }
       .note { margin-top: 22px; font-size: 28px; line-height: 1.38; color: var(--muted); overflow-wrap: anywhere; }
       .foot { position: absolute; left: 120px; bottom: 56px; font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 28px; letter-spacing: 0.08em; color: var(--muted); }
 """
@@ -211,8 +204,8 @@ def how_scene(plan, scene, clips, n, js):
             flow.append(f'<div class="arrow" id="{sid}-a{i}"><i></i></div>')
     parts_html = ""
     if plan["components"]:
-        chips = "".join(
-            f'<div class="part" id="{sid}-pt{i}"><strong>{E(c["name"])}</strong>' + (f'<span>{E(c["evidence"])}</span>' if c["evidence"] else "") + "</div>"
+        chips = "".join(      # a space between the two blocks: the gate reads text that touches in the markup as touching on the screen
+            f'<div class="part" id="{sid}-pt{i}"><strong>{E(c["name"])}</strong>' + (f' <span>{E(c["evidence"])}</span>' if c["evidence"] else "") + "</div>"
             for i, c in enumerate(plan["components"]))
         parts_html = f'<div class="parts-title" id="{sid}-parts-title" data-label>{E(LABELS["parts"])}</div><div class="parts">{chips}</div>'
     markup = f"""
@@ -275,7 +268,9 @@ def end_scene(plan, scene, clips, n, js):
         if try_it["commands"]:
             rows = "".join(f'<div class="row"><span class="prompt">$</span> <span class="cmd" id="{sid}-cmd{i}">{E(c)}</span></div>'
                            for i, c in enumerate(try_it["commands"]))
-            term = f'<div class="term" id="{sid}-term"><div class="top"><i></i><i></i><i></i></div><div class="body">{rows}</div></div>'
+            px = 38 if len(try_it["commands"]) <= 4 else 32
+            term = (f'<div class="term" id="{sid}-term"><div class="top"><i></i><i></i><i></i></div>'
+                    f'<div class="body" style="font-size:{px}px">{rows}</div></div>')
         note = f'<div class="note" id="{sid}-note">{E(try_it["note"])}</div>' if try_it["note"] else ""
         right = f'<div class="col"><h2 class="head" id="{sid}-head-r" data-label>{E(LABELS["try"])}</h2>{term}{note}</div>'
     markup = f"""
@@ -293,17 +288,12 @@ def end_scene(plan, scene, clips, n, js):
         for i, c in enumerate(caveats):
             js.rise(f"#{sid}-cv{i}", clips[c["uid"]]["start"] - 0.2, 0.6)
     if try_it:
-        if try_it["uid"]:
-            head_at = clips[try_it["uid"]]["start"] - 0.9
-        elif caveats:
-            head_at = clips[caveats[-1]["uid"]]["end"] + 0.3
-        else:
-            head_at = start + 0.4
+        head_at = planlib.terminal_head_at(plan, clips, start)
         js.rise(f"#{sid}-head-r", head_at, 0.6)
         if try_it["commands"]:
             js.raw(f'tl.fromTo("#{sid}-term", {{ opacity: 0, y: 36 }}, {{ opacity: 1, y: 0, duration: 0.55, ease: E }}, {num(head_at + 0.3)});')
             for i in range(len(try_it["commands"])):
-                js.raw(f'tl.fromTo("#{sid}-cmd{i}", {{ clipPath: "inset(0 100% 0 0)" }}, {{ clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }}, {num(head_at + 0.9 + 0.5 * i)});')
+                js.raw(f'tl.fromTo("#{sid}-cmd{i}", {{ clipPath: "inset(0 100% 0 0)" }}, {{ clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "steps(12)" }}, {num(planlib.terminal_command_at(head_at, i))});')
         if try_it["note"]:
             js.rise(f"#{sid}-note", (clips[try_it["uid"]]["start"] - 0.1) if try_it["uid"] else head_at + 0.5, 0.6)
     js.rise(f"#{sid}-foot", start + 0.8, 0.6)
@@ -369,6 +359,7 @@ def render(plan, tl) -> str:
 
 {chr(10).join('      ' + line for line in js.lines)}
 
+      window.__timelines = window.__timelines || {{}};
       window.__timelines["main"] = tl;
       tl.seek(0);
     </script>
