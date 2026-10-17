@@ -325,8 +325,10 @@ def verdict_of(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def warn(state: dict, message: str) -> None:
+def warn(state: dict, message: str, review: bool = False) -> None:
     state.setdefault("warnings", []).append(message)
+    if review:  # remembered apart, so the next review round can drop exactly these (drop_review_warnings)
+        state.setdefault("review_warnings", []).append(message)
     say(f"warning: {message}")
 
 
@@ -874,6 +876,13 @@ def lock_busy(home: Path) -> bool:
     return False
 
 
+def drop_review_warnings(state: dict) -> None:
+    """A warning the review stage raised describes that round (no reviewer answered, a fix not re-reviewed, blockers that
+    stand). A new round replaces it; warnings from other stages still apply and stay."""
+    stale = state.pop("review_warnings", [])
+    state["warnings"] = [w for w in state.get("warnings", []) if w not in stale]
+
+
 def blocked(f: Feature, state: dict, reason: str) -> int:
     state["stage"] = f"blocked: {reason}"
     f.save_state(state)
@@ -899,20 +908,21 @@ def pipeline(f: Feature, cfg, keys, state: dict, start: str, feedback: str | Non
                                else "acceptance commands still fail after every coder attempt")
             state.pop("pending_feedback", None)
         elif stage == "review":
+            drop_review_warnings(state)
             review = run_reviewer(f, cfg, keys, state)
             if review is None:
-                warn(state, "no reviewer model returned a review")
+                warn(state, "no reviewer model returned a review", review=True)
             elif blockers(review):
                 before = head(f.repo)
                 fix = "A reviewer found blockers. Fix them; change nothing else.\n\n" + review
                 if run_coder(f, cfg, keys, state, fix, attempts=1):
-                    warn(state, "pre-review blockers were addressed by a fix commit that was not re-reviewed")
+                    warn(state, "pre-review blockers were addressed by a fix commit that was not re-reviewed", review=True)
                 else:
                     git(f.repo, "reset", "-q", "--hard", before)
                     state.pop("gate_feedback", None)  # belongs to the reverted fix, not to HEAD
                     run_gates(f, cfg)
                     warn(state, f"{len(blockers(review))} pre-review blocker(s) stand: the fix attempt broke "
-                                "the gates and was reverted")
+                                "the gates and was reverted", review=True)
         elif stage == "pack":
             if build_pack(f, cfg, state):
                 return blocked(f, state, "audit pack over the line limit")

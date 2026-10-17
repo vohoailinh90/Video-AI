@@ -655,6 +655,25 @@ class PipelineTests(Sandbox):
         self.assertIn("no reviewer model returned a review", pack)
         self.assertNotIn("reviewer_model", f.load_state())
 
+    def test_a_new_review_round_drops_the_previous_rounds_review_warnings(self):
+        # Codex's fifth review: a warning from an earlier review (no reviewer answered, a fix not re-reviewed, blockers that
+        # stand) used to stay in the pack after a rerun whose review succeeded, and the auditor must check every warning.
+        f = self.new_feature()
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer='print("the reviewer is confused")')
+        code, out = run_cli("run", "F1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("no reviewer model returned a review", f.file("audit-pack.md").read_text())
+        state = f.load_state()
+        state["warnings"].append("kept: a warning another stage raised and that still applies")
+        f.save_state(state)
+        self.scenario(tester=WRITE_TEST, coder=WRITE_FEATURE, reviewer=NO_BLOCKERS)
+        code, out = run_cli("run", "F1", "--from", "review")
+        self.assertEqual(code, 0, out)
+        pack = f.file("audit-pack.md").read_text()
+        self.assertNotIn("no reviewer model returned a review", pack)
+        self.assertIn("kept: a warning another stage raised", pack)
+        self.assertEqual(f.load_state()["warnings"], ["kept: a warning another stage raised and that still applies"])
+
     def test_reviewer_blockers_get_one_fix_round(self):
         f = self.new_feature()
         review = 'print("=== REVIEW ===\\nBLOCKER feature.py:1 - no docstring - add one\\nSUMMARY: x\\n=== END ===")'

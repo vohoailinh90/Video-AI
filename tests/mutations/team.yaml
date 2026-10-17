@@ -214,3 +214,11 @@ mutations:
   find: "    f.file(\"prereview.md\").unlink(missing_ok=True)\n    state.pop(\"reviewer_model\", None)\n"
   replace: ""
   test: tests.test_team.PipelineTests.test_a_failed_review_round_does_not_leave_the_previous_review_in_the_pack
+- label: a new review round keeps the previous round's review warnings
+  find: "            drop_review_warnings(state)\n"
+  replace: ""
+  test: tests.test_team.PipelineTests.test_a_new_review_round_drops_the_previous_rounds_review_warnings
+- label: a new review round also drops the warnings other stages raised
+  find: "    state[\"warnings\"] = [w for w in state.get(\"warnings\", []) if w not in stale]\n"
+  replace: "    state[\"warnings\"] = []\n"
+  test: tests.test_team.PipelineTests.test_a_new_review_round_drops_the_previous_rounds_review_warnings
