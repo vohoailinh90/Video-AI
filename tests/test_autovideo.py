@@ -565,6 +565,16 @@ class QaTests(unittest.TestCase):
             failed = [c.name for c in qa.check_video(music, media, None, []) if not c.ok]
             self.assertIn("audible", failed)  # with the music on, silence is a defect
 
+    def test_a_no_voice_video_with_subtitles_on_must_have_cues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "video.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=108x192:d=3:r=10", "-f", "lavfi",
+                            "-i", "anullsrc=r=22050:cl=mono", "-t", "3", "-pix_fmt", "yuv420p", str(media)], check=True)
+            make = lambda **d: packmod.load_pack(write_pack(Path(tmp), [video(voice="no-voice", bgm="none", **d)])).jobs[0]
+            checks = {c.name: c for c in qa.check_video(make(subtitles=True), media, None, [])}  # MPT gives no-voice subtitles when asked
+            self.assertFalse(checks["subtitles_made"].ok)
+            self.assertNotIn("subtitles_made", {c.name for c in qa.check_video(make(subtitles=False), media, None, [])})
+
     def test_unreadable_file_fails_first_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "video.mp4"

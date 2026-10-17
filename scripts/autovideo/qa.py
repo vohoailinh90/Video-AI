@@ -103,7 +103,7 @@ def check_video(job: Job, video: Path, narration: Path | None, cues: list[Cue]) 
         if spoken and seconds:
             add("length_matches_narration", abs(seconds - spoken) <= LENGTH_GAP, f"video {seconds:.1f} s, narration {spoken:.1f} s", "warn")
 
-    if job.subtitles and (job.reads_aloud or job.audio_file):
+    if job.subtitles:  # whatever makes the sound: a voice, an audio_file, or no-voice (MPT times the text over the silence)
         add("subtitles_made", bool(cues), f"{len(cues)} cue(s)")
     if cues:
         ordered = all(c.end > c.start for c in cues) and all(b.start >= a.start for a, b in zip(cues, cues[1:]))
