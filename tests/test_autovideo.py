@@ -4,6 +4,7 @@
 """
 import contextlib
 import io
+import os
 import json
 import shutil
 import subprocess
@@ -62,14 +63,14 @@ SCENES = [
 ]
 
 
-def fake_mpt(root: Path, pexels_key: bool = True) -> engine_mpt.MptEnv:
+def fake_mpt(root: Path, pexels_key: bool = True, subtitle_provider: str = "edge") -> engine_mpt.MptEnv:
     home = root / "mpt"
     (home / "app").mkdir(parents=True)
     (home / "resource" / "fonts").mkdir(parents=True)
     (home / "resource" / "fonts" / "BeVietnamPro-Bold.ttf").write_bytes(b"")
     (home / "cli.py").write_text(FAKE_CLI, encoding="utf-8")
     key = f'"{SECRET}"' if pexels_key else ""
-    (home / "config.toml").write_text(f'[app]\npexels_api_keys = [{key}]\nsubtitle_provider = "edge"\nllm_provider = "moonshot"\n', encoding="utf-8")
+    (home / "config.toml").write_text(f'[app]\npexels_api_keys = [{key}]\nsubtitle_provider = "{subtitle_provider}"\nllm_provider = "moonshot"\n', encoding="utf-8")
     return engine_mpt.MptEnv(home.resolve(), (sys.executable,))
 
 
@@ -164,6 +165,24 @@ class PackTests(unittest.TestCase):
         other = packmod.load_pack(write_pack(self.root, [video(title="Video", scenes=[{"narration": "Khác.", "terms": ["x"]}])])).jobs[0].fingerprint()
         self.assertEqual(base, same)
         self.assertNotEqual(base, other)
+
+    def test_fingerprint_follows_file_content_not_only_size(self):
+        clip = self.root / "c.mp4"
+        clip.write_bytes(b"aaaa")
+        make = lambda: packmod.load_pack(write_pack(self.root, [video()], {"material_source": "local", "materials": ["c.mp4"]})).jobs[0]
+        before = make().fingerprint()
+        self.assertEqual(make().fingerprint(), before)
+        clip.write_bytes(b"bbbb")  # same size, other content
+        self.assertNotEqual(make().fingerprint(), before)
+
+    def test_relative_mpt_python_is_resolved_against_the_callers_directory(self):
+        env = fake_mpt(self.root)
+        (self.root / "bin").mkdir()
+        (self.root / "bin" / "py").write_text("")
+        with contextlib.chdir(self.root):
+            located = engine_mpt.locate(str(env.home), "bin/py")
+        self.assertEqual(located.python, (str((self.root / "bin" / "py").resolve()),))
+        self.assertEqual(engine_mpt.locate(str(env.home), "python3").python, ("python3",))
 
     def test_mpt_params_for_each_kind_of_job(self):
         job = packmod.load_pack(write_pack(self.root, [video(bgm="none")])).jobs[0]
@@ -262,6 +281,20 @@ class RunnerTests(FakeMptCase):
         summary, _ = self.run_pack([video(title="NOSUB")], retries=0)
         self.assertIn("subtitles_made", summary["videos"][0]["qa_failures"])
 
+    def test_audio_file_job_without_subtitles_fails_qa(self):
+        (self.root / "voice.mp3").write_bytes(b"x")
+        env = fake_mpt(self.root / "whisper", subtitle_provider="whisper") if (self.root / "whisper").mkdir() is None else None
+        summary, _ = self.run_pack([video(title="NOSUB", audio_file="voice.mp3")], env=env, retries=0)
+        self.assertEqual(summary["videos"][0]["status"], "qa_failed")
+        self.assertIn("subtitles_made", summary["videos"][0]["qa_failures"])
+
+    def test_relative_output_root_still_reaches_mpt(self):
+        pack = packmod.load_pack(write_pack(self.root, [video()]))
+        with contextlib.chdir(self.root):
+            summary = runner.run(pack, self.env, Path("rel-out"), log=self.logs.append)
+        self.assertEqual((summary["done"], summary["failed"]), (1, 0))
+        self.assertTrue((self.root / "rel-out" / "test-batch" / "01-first" / "video.mp4").is_file())
+
     def test_preflight_stops_before_mpt_starts(self):
         env = fake_mpt(self.root / "nokey", pexels_key=False) if (self.root / "nokey").mkdir() is None else None
         summary, _ = self.run_pack([video()], env=env)
@@ -328,6 +361,15 @@ class CliTests(FakeMptCase):
         path = write_pack(self.root, [video("01-a", scenes=[{"narration": "Đổi lời.", "terms": ["x"]}]), video("02-b", title="SILENT")])
         code, out, _ = self.call("status", str(path), "--json", *base)
         self.assertEqual(json.loads(out)[0]["status"], "stale")
+
+    def test_qa_with_nothing_rendered_is_not_a_pass(self):
+        path = write_pack(self.root, [video()])
+        base = ["--out", str(self.out)]
+        code, out, _ = self.call("qa", str(path), *base)
+        self.assertEqual((code, out.strip()), (1, "01-first: missing"))
+        code, _, err = self.call("qa", str(path), "--only", "nope", *base)
+        self.assertEqual(code, 2)
+        self.assertIn("nope", err)
 
     def test_doctor_never_prints_a_key(self):
         code, out, err = self.call("doctor", "--mpt-home", str(self.env.home), "--mpt-python", sys.executable)

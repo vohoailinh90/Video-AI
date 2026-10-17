@@ -206,6 +206,9 @@ def summarise(pack: Pack, rows: list[dict], batch_dir: Path) -> dict:
 def requalify(pack: Pack, out_root: Path, only: list[str] | None = None) -> list[dict]:
     """Run QA again on the folders that exist, without rendering. Use after changing target_seconds or the QA code."""
     batch_dir = out_root / pack.batch
+    unknown = [i for i in (only or []) if i not in [job.id for job in pack.jobs]]
+    if unknown:
+        raise ValueError(f"no such video in the pack: {', '.join(unknown)}")
     state = read_state(batch_dir)
     rows = []
     for job in pack.jobs:

@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -134,14 +135,22 @@ class Job:
             "target_seconds": [self.min_seconds, self.max_seconds],
         }
 
-    def fingerprint(self) -> str:
-        """Changes when the words or a render setting changes, or a local file is replaced; an edited job renders again."""
-        files = []
+    @cached_property
+    def _file_digests(self) -> list:
+        """SHA-256 of every local material and of the audio file. A replaced file of the same size must change the fingerprint
+        (equal-length WAV clips are the usual case), so the content is read; once per job, because a run asks many times."""
+        digests = []
         for name in [*self.materials, *([self.audio_file] if self.audio_file else [])]:
             try:
-                files.append([name, Path(name).stat().st_size])
+                with open(name, "rb") as handle:
+                    digests.append([name, hashlib.file_digest(handle, "sha256").hexdigest()])
             except OSError:
-                files.append([name, None])
+                digests.append([name, None])
+        return digests
+
+    def fingerprint(self) -> str:
+        """Changes when the words or a render setting changes, or a local file is replaced; an edited job renders again."""
+        files = self._file_digests
         render_inputs = {k: v for k, v in self.to_dict().items() if k != "target_seconds"}  # a QA limit does not change the render
         blob = json.dumps([render_inputs, files], sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(blob.encode()).hexdigest()[:16]

@@ -57,7 +57,8 @@ def locate(home: str | os.PathLike | None = None, python: str | None = None) -> 
         )
     chosen = python or os.environ.get("MPT_PYTHON")
     if chosen:
-        return MptEnv(path, (chosen,))
+        # A path (not a bare command name) is relative to where the user is, and MPT is started from its own directory.
+        return MptEnv(path, (str(Path(chosen).expanduser().resolve()) if os.sep in chosen else chosen,))
     venv_python = path / ".venv" / "bin" / "python"
     if venv_python.is_file():
         return MptEnv(path, (str(venv_python),))
@@ -146,7 +147,7 @@ def _path(env: MptEnv, value) -> Path | None:
 def run_job(env: MptEnv, job: Job, workdir: Path, timeout: float) -> EngineResult:
     """Run MPT for one job and wait for it. Never raises for a failed render: the result says what failed."""
     workdir.mkdir(parents=True, exist_ok=True)
-    manifest = workdir / "mpt-task.jsonl"
+    manifest = workdir.resolve() / "mpt-task.jsonl"  # MPT runs in its own directory, so a relative path would not be found there
     manifest.write_text(json.dumps(video_params(job), ensure_ascii=False) + "\n", encoding="utf-8")
     cmd = [*env.python, "cli.py", "--batch-file", str(manifest), "--stop-at", "video"]
     proc = subprocess.Popen(cmd, cwd=env.home, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)

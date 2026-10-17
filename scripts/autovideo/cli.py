@@ -119,13 +119,17 @@ def cmd_status(args) -> int:
 
 def cmd_qa(args) -> int:
     pack = _load(args)
-    rows = runner.requalify(pack, Path(args.out), [i for i in (args.only or "").split(",") if i])
+    try:
+        rows = runner.requalify(pack, Path(args.out), [i for i in (args.only or "").split(",") if i])
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     for r in rows:
         print(f"{r['id']}: {r['status']}")
         for c in r["checks"]:
             if not c["ok"]:
                 print(f"    {c['level']}: {c['name']}: {c['detail']}")
-    return 1 if any(r["status"] == "qa_failed" for r in rows) else 0
+    return 1 if any(r["status"] in ("qa_failed", "missing") for r in rows) else 0  # a video that was not there was not checked
 
 
 def cmd_doctor(args) -> int:
