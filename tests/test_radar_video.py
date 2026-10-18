@@ -1019,6 +1019,21 @@ class ReviewFindings(unittest.TestCase):
         # a clause end between the word and the point still ends the clause
         self.assertEqual(check_facts.numbers("âm. .5 và âm, ,5"), {"0.5"})
 
+    def test_white_space_of_any_length_is_one_gap_between_a_figure_and_its_sign_or_unit(self):
+        for gap in ("    ", "\t\t\t\t", "    ", " \n \n ", " " * 40):
+            for text, value in ((f"âm{gap}19%", "-19%"), (f"trừ{gap}5", "-5"), (f"cộng{gap}.5", "+0.5"), (f"19{gap}%", "19%"), (f"${gap}19", "$19"),
+                                (f"-{gap}19", "-19"), (f"- ${gap}19", "-$19"), (f"{gap}âm: {gap}19{gap}phần{gap}trăm", "-19%")):
+                self.assertEqual(check_facts.numbers(text), {value}, repr(text))
+            source = check_facts.blob({"x": "19%"})
+            self.assertEqual(check_facts.untraced(f"âm{gap}19%", source, set()), ["number -19%"], repr(gap))
+            self.assertEqual(check_facts.untraced(f"19{gap}%", check_facts.blob({"x": "19"}), set()), ["number 19%"], repr(gap))
+            self.assertEqual(numbers_vi.speak_text(f"âm{gap}19%"), "âm mười chín phần trăm", repr(gap))
+            self.assertEqual(numbers_vi.speak_text(f"19{gap}%"), "mười chín phần trăm", repr(gap))
+            self.assertEqual(numbers_vi.speak_text(f"${gap}19"), "mười chín đô la", repr(gap))
+        # what a space does not join is still not joined: a dash after a word, and a range
+        self.assertEqual(check_facts.numbers("Stars -     62.958"), {"62958"})
+        self.assertEqual(check_facts.numbers("5     -     10 phút"), {"5", "10"})
+
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
                             ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
