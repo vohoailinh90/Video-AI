@@ -114,7 +114,9 @@ thu ti to toi tu tua tui va vai van vao ve vi vo vua xa xe xi xo xu y yeu
 
 # a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
 # or 10-20, and a plus after one, as in 1+1 or x+5, are not signs) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
-NUMBER = re.compile(rf"(?:\$\s?)?(?:{SIGN_BEFORE})?(?:\$\s?)?\d[\d.,]*(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b)?\$?", re.I)    # PHẦN TRĂM is the same words
+# A figure starts with its decimal point when it has no integer part (.5, ,5), and every unit after the digits belongs to it, however many
+# (19$$, 19%%, $19$): canonical() counts them, so a figure with an extra unit is another value, never the one the source has.
+NUMBER = re.compile(rf"(?:\$\s?)*(?:{SIGN_BEFORE})?(?:\$\s?)*(?:\d[\d.,]*|(?<![\w.,])[.,]\d+)(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b|\$)*", re.I)    # PHẦN TRĂM is the same words
 PERCENT = re.compile(rf"[{PERCENT_CLASS}]|phần\s+trăm", re.I)
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
@@ -371,13 +373,16 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
 
 def canonical(number: str) -> str:
     """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
-    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus or plus sign and a percent sign belong
-    to the value: -19 is not 19, +19% is not 19%, and 19% (or 19 phần trăm) is not 19."""
-    currency = "$" if "$" in number else ""                       # $19, 19$, $-19 and -$19 are the price, 19 is not
+    three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314; .5 and ,5 are 0.5. A minus or plus sign, a percent
+    sign and a currency sign belong to the value: -19 is not 19, +19% is not 19%, 19% (or 19 phần trăm) is not 19, and $19 is not 19.
+    Each unit counts: 19$$ and 19%% are not $19 and 19%, so a figure with a unit too many is never the source's."""
+    currency = "$" * number.count("$")                            # $19, 19$, $-19 and -$19 are the price, 19 is not
     number = number.replace("$", "").lstrip()
     sign = "-" if number[:1] in MINUS else "+" if number[:1] in PLUS else ""
-    percent = "%" if PERCENT.search(number) else ""
-    number = re.sub(rf"\s?[{PERCENT_CLASS}]$|\s+phần\s+trăm$", "", number.lstrip(MINUS + PLUS).lstrip(), flags=re.I).rstrip(".,")
+    percent = "%" * len(PERCENT.findall(number))
+    number = re.sub(rf"(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm)+$", "", number.lstrip(MINUS + PLUS).lstrip(), flags=re.I).rstrip(".,")
+    if number[:1] in ".,":
+        number = "0" + number
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
         return sign + currency + re.sub(r"[.,]", "", number) + percent
     return sign + currency + number.replace(",", ".") + percent
@@ -407,12 +412,17 @@ def compat_problems(text: str) -> list:
     viewer but not by this check. A punctuation mark or a symbol outside MARKS (a Unicode hyphen or slash, an emoji ...) is refused for
     the same reason: it can stand in a name or an address without the check seeing it. A control character other than a tab, a line break
     and the break between two values is refused too: it is no part of any text, and a terminal that prints the report or the README acts
-    on it (an ESC starts an escape sequence); it is named by its code, never printed. The text of a video uses plain characters, the
-    marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
+    on it (an ESC starts an escape sequence). So is a format character (zero-width space or joiner, soft hyphen, a direction mark, a bidi
+    override or isolate such as U+202E): shown() drops it when it compares a text with the source, so a number with one inside would be
+    traced as the digits without it, while the voice (numbers_vi.speak_text) says the parts apart and a browser or a terminal may draw
+    them in another order (12 U+202E 34 is traced as 1234, said "mười hai ... ba mươi bốn" and may be drawn 1243). Both are named by
+    their code, never printed. The text of a video uses plain characters, the marks of MARKS, and spaces of any width (a gap, not a
+    character of a name)."""
     found = {}
     for c in unicodedata.normalize("NFC", text):
-        if unicodedata.category(c) == "Cc" and c not in "\t\n\r" + VALUE_BREAK:
-            found.setdefault(c, f"U+{ord(c):04X} (control character)")
+        category = unicodedata.category(c)
+        if category == "Cc" and c not in "\t\n\r" + VALUE_BREAK or category == "Cf":
+            found.setdefault(c, f"U+{ord(c):04X} ({'control' if category == 'Cc' else 'invisible format'} character)")
             continue
         if ord(c) < 128:
             continue

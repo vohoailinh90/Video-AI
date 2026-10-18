@@ -944,7 +944,7 @@ class ReviewFindings(unittest.TestCase):
 
     def test_the_dollar_sign_is_part_of_the_figure_before_a_sign_and_against_letters_too(self):
         for text, value in (("$-19", "-$19"), ("$ -19", "-$19"), ("$+19", "+$19"), ("$ + 19", "+$19"), ("$ - 19", "-$19"), ("$−19", "-$19"), ("＄-19", "-$19"),
-                            ("US$-19", "-$19"), ("HK$-5", "-$5"), ("US$19", "$19"), ("A$19", "$19"), ("$-19%", "-$19%"), ("$-19$", "-$19")):
+                            ("US$-19", "-$19"), ("HK$-5", "-$5"), ("US$19", "$19"), ("A$19", "$19"), ("$-19%", "-$19%")):
             plain = text.replace("＄", "$")                                                       # the full-width one is NFKC's business: refused earlier
             self.assertEqual(check_facts.numbers(plain), {value}, text)
             self.assertEqual(check_facts.numbers(plain), check_facts.numbers(value), text)       # the same value whichever side of the sign it is on
@@ -963,6 +963,64 @@ class ReviewFindings(unittest.TestCase):
         # nothing else changed: a dash is still a dash and a range is still a range
         self.assertEqual(check_facts.numbers("Stars - 62.958 và 5 - 10 phút"), {"62958", "5", "10"})
         self.assertEqual(numbers_vi.speak_text("giá $19 - $25"), "giá mười chín đô la - hai mươi lăm đô la")
+
+    def test_a_format_character_in_the_text_of_a_video_is_refused_whatever_it_does_to_the_digits(self):
+        # shown() drops these when it compares a text with the source, so 12<RLO>34 is traced as 1234; the voice says the parts apart
+        # ("mười hai ... ba mươi bốn") and a browser may draw them in another order: such a text is refused, not read
+        marks = ["‪", "‫", "‬", "‭", "‮", "⁦", "⁧", "⁨", "⁩", "‎", "‏", "؜",
+                 "​", "‌", "‍", "⁠", "­", "﻿"]
+        for mark in marks:
+            for text in (f"12{mark}34", f"{mark}91", f"19{mark}%", f"G{mark}P{mark}T"):
+                problems = check_facts.compat_problems(text)
+                self.assertEqual(len(problems), 1, repr(text))
+                self.assertIn("invisible format character", problems[0], repr(text))
+                self.assertNotIn(mark, problems[0], "named by its code, never printed")
+            self.assertEqual(check_facts.shown(f"12{mark}34"), "1234", repr(mark))              # the source side still drops them
+        self.assertEqual(check_facts.compat_problems("12 34 và tiếng Việt, GPT-4o, 19%"), [])
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        doc["lines"][0]["text"] += "‮"
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("U+202E (invisible format character)", output)
+        self.assertNotIn("‮", output)
+
+    def test_a_decimal_without_an_integer_part_is_that_decimal(self):
+        for text, value in ((".5", "0.5"), (",5", "0.5"), ("-.5", "-0.5"), ("+.5", "+0.5"), (".5%", "0.5%"), ("$.5", "$0.5"), ("- .5", "-0.5"),
+                            ("(.5)", "0.5"), ("0.5", "0.5"), ("v1.5", "1.5"), ("62.958", "62958")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        source = check_facts.blob({"fact": "5 người"})
+        self.assertEqual(check_facts.untraced(".5", source, set()), ["number 0.5"])               # ten times less than the source's 5
+        self.assertEqual(check_facts.untraced("-.5", source, set()), ["number -0.5"])
+        self.assertEqual(check_facts.untraced(".5", check_facts.blob({"fact": "0.5"}), set()), [])
+        self.assertEqual(check_facts.untraced("0.5", check_facts.blob({"fact": "tỷ lệ .5"}), set()), [])        # nor can the source's be missed
+        # a full stop that is not a decimal point is not one
+        for text in ("x.5", "...5", "xong.5 tập", "a,5"):
+            self.assertNotIn("0.5", check_facts.numbers(text), text)
+        self.assertEqual(numbers_vi.speak_text(".5"), "không chấm năm")
+        self.assertEqual(numbers_vi.speak_text(",5"), "không phẩy năm")
+        self.assertEqual(numbers_vi.speak_text("-.5"), "âm không chấm năm")
+        self.assertEqual(numbers_vi.speak_text("tăng .5%"), "tăng không chấm năm phần trăm")
+        self.assertEqual(numbers_vi.speak_text("x.5 và ...5"), "x.5 và ...5")
+
+    def test_a_unit_too_many_is_another_value(self):
+        for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
+                            ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        for source_text in ("$19", "19%", "giá $19, tăng 19%"):
+            source = check_facts.blob({"fact": source_text})
+            for text in ("19$$", "$19$", "$$19", "19%%"):
+                if text.replace("$", "").replace("%", "") == text:
+                    continue
+                self.assertTrue(check_facts.untraced(text, source, set()), f"{text!r} against {source_text!r}")
+        self.assertEqual(check_facts.untraced("19$$", check_facts.blob({"fact": "19$$"}), set()), [])      # only if the digest writes it so
+        # the voice says every unit it shows
+        for text, spoken in (("19$$", "mười chín đô la đô la"), ("$19$", "mười chín đô la đô la"), ("19%%", "mười chín phần trăm phần trăm"),
+                             ("19$", "mười chín đô la"), ("19%", "mười chín phần trăm"), ("tăng $19%", "tăng mười chín phần trăm đô la")):
+            self.assertEqual(numbers_vi.speak_text(text), spoken, text)
 
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):
