@@ -12,9 +12,15 @@ có audio). Quy ước của repo nằm trong [`CLAUDE.md`](CLAUDE.md).
    team nằm trong mục "VPS agent team" của [`CLAUDE.md`](CLAUDE.md).
 
    ```bash
-   # trên VPS, từ bản clone của repo template
+   # trên VPS, từ bản clone của repo template; các bước đầy đủ nằm ở mục 3 và 4 của docs/vps-team-video.md
    sudo ./scripts/team/setup-vps-team.sh --admin "$USER" --with-video
+   # đăng xuất rồi đăng nhập lại để nhóm `team` có hiệu lực, rồi:
+   sudo -u team nano /srv/team-video/workers.env      # key của các model worker (không đặt key Claude)
+   team-video models openrouter --free                # chọn model cho từng vai, rồi ghi vào:
+   nano /srv/team-video/team.env
    team-video doctor --ping --smoke
+   # user `team` cần deploy key SSH có quyền ghi vào repo này trước lệnh sau (docs/vps-team.md, mục "Repo riêng tư"):
+   # lệnh clone và lệnh push dùng cùng URL này
    team-video new V01 --repo git@github.com:vohoailinh90/Video-AI.git
    ```
 
