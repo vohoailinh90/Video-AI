@@ -1375,6 +1375,31 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("C++", "chu\u1ea9n C++11"), ["token 'C++'"])
         self.assertIn("token 'C++11'", untraced("C++11", "chu\u1ea9n C++"))
 
+    def test_a_run_of_hyphens_or_dots_joins_the_parts_of_one_name(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        # foo--bar, 7--Zip, 19---foo, foo.-bar: one name each, as foo-bar is. None of its parts is a name of the source
+        for whole, parts in (("foo--bar", ("foo", "bar")), ("7--Zip", ("Zip",)), ("19---foo", ("foo",)), ("foo.-bar", ("foo", "bar")), ("aa..bb--cc", ("aa", "bb", "cc")),
+                             ("faster--whisper-large-v3", ("faster", "whisper", "faster--whisper"))):
+            self.assertEqual(untraced(whole, f"dùng {whole} nhé"), [], whole)
+            for part in parts:
+                self.assertEqual(untraced(part, f"dùng {whole} nhé"), [f"token '{part}'"], (whole, part))
+        # the name is written as it is: another run of joiners is another name
+        self.assertEqual(untraced("foo-bar", "foo--bar"), ["token 'foo-bar'"])
+        self.assertEqual(untraced("foo--bar", "foo-bar"), ["token 'foo--bar'"])
+        self.assertEqual(untraced("foo.bar", "foo--bar"), ["token 'foo.bar'"])
+        # a run of joiners with no word after it ends the name (a dash or an ellipsis after a name, not part of it)
+        for source in ("foo-", "foo--", "foo...", "xem foo.", "(foo)--", "foo -- bar"):
+            self.assertEqual(untraced("foo", source), [], source)
+        # the same boundary for a token that needs the source to hold it whole: a name with an accented letter, an address
+        for token, longer in (("GPT4é", "GPT4é--extra"), ("GPT4é", "my--GPT4é"), ("GPT4é", "GPT4é.-extra"),
+                              ("github.com/o/r", "github.com/o/r--extra"), ("github.com/o/r", "my--github.com/o/r")):
+            self.assertEqual(untraced(token, f"dùng {longer}"), [f"token '{token}'"], longer)
+            self.assertEqual(untraced(token, f"dùng {token}."), [], token)
+        # C++ and C# keep their own rule, with any run of joiners after them
+        self.assertEqual(untraced("C++--Builder", "dùng C++--Builder"), [])
+        self.assertEqual(untraced("C++", "dùng C++--Builder"), ["token 'C++'"])
+        self.assertEqual(untraced("Builder", "dùng C++--Builder"), ["token 'Builder'"])
+
     def test_the_digits_in_front_of_a_hyphenated_name_are_the_names_own(self):
         # 7-Zip, 19-foo, python-3-venv, 3.5-inch: a hyphen between the digits and the letters after them does not make a figure of them. The voice leaves
         # them (numbers_vi.NUMBER does not read digits that a hyphen follows), and the name is checked as a whole

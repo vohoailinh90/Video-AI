@@ -344,8 +344,8 @@ def blob(value) -> str:
 # letter whose Unicode name starts with LATIN, accents and the extended blocks alike), so \w is exactly those: the two never differ, whichever
 # block a Latin letter is in (café, GPT4é, GPTⱥ).
 # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#, C++Builder, C#Sharp, C++-Builder, C++.NET: a name ends at / : space ... A C++ or a C# with more name
-# after it (joined or by a - or a .) is one name.
-NAME = re.compile(r"\w+(?:[-.]\w+)*(?:(?:\+\+?|#)(?:[-.]?\w+(?:[-.]\w+)*)?)?")
+# after it (joined or by a - or a .) is one name. Any run of - and . joins two parts (foo--bar, 7--Zip, a.-b are one name each).
+NAME = re.compile(r"\w+(?:[-.]+\w+)*(?:(?:\+\+?|#)(?:[-.]*\w+(?:[-.]+\w+)*)?)?")
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
 NAME_CONTINUES = re.compile(r"[\w+#]")      # what may not follow a name for it to be a name of its own (has_name asks the same of a token)
 
@@ -366,6 +366,26 @@ def names_in(source_blob: str) -> set:
     return names
 
 
+def stands_whole(low: str, source_blob: str) -> bool:
+    """The text `low` is somewhere in the source with no name touching it on either side: no word character (and no run of - and . after
+    one) before it, and none after it (nor a run of - and . and then one, nor a + or a #). So foo.com/x is not in my-foo.com/x or in
+    foo.com/x-extra, GPT4é is not in GPT4é--extra or in my--GPT4é, and bar is not in foo--bar."""
+    for match in re.finditer(re.escape(low), source_blob):
+        start, end = match.span()
+        while start > 0 and source_blob[start - 1] in "-.":
+            start -= 1
+        if start > 0 and re.match(r"\w", source_blob[start - 1]):
+            continue
+        after = end
+        while after < len(source_blob) and source_blob[after] in "-.":
+            after += 1
+        if re.match(r"\w", source_blob[end:end + 1]) or after > end and re.match(r"\w", source_blob[after:after + 1]) \
+                or source_blob[end:end + 1] in ("+", "#"):
+            continue
+        return True
+    return False
+
+
 def has_name(token: str, names: set, source_blob: str) -> bool:
     """The token is a name the source writes. A token of several names (github.com/debpalash/VoiceStudio, setup:api) must also be
     written that way in the source, as a whole: its parts turning up separately somewhere do not make an address up."""
@@ -373,7 +393,7 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
     if re.search(r"[^\x00-\x7f]", low):      # a name with an accented letter glued on (GPT4é): the whole of it is in the source, or it is another name
         # whole, by the same grammar as below with every word character (the accented letters too): GPT4é is not in GPT4é-extra, GPT4é.thing,
         # my-GPT4é, GPT4é+ or GPT4é#
-        return re.search(rf"(?<!\w)(?<!\w[-.]){re.escape(low)}(?!\w|[-.]\w|\+|#)", source_blob) is not None
+        return stands_whole(low, source_blob)
     parts = NAME.findall(low)
     if not parts or not all(part in names for part in parts):
         return False
@@ -383,7 +403,7 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
         return True
     # whole, by the grammar of NAME: nothing that continues a name (letters, digits, _, a - or . and a letter after it, + or #) may touch it
     # on either side, so https://foo.com/example/repo is not in https://foo.com/example/repo-extra, nor foo.com/x in my-foo.com/x
-    return re.search(rf"(?<!\w)(?<!\w[-.]){re.escape(low)}(?!\w|[-.]\w|\+|#)", source_blob) is not None
+    return stands_whole(low, source_blob)
 
 
 def canonical(number: str) -> str:
