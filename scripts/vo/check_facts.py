@@ -389,7 +389,8 @@ def stands_whole(low: str, source_blob: str) -> bool:
 
 def has_name(token: str, names: set, source_blob: str) -> bool:
     """The token is a name the source writes. A token of several names (github.com/debpalash/VoiceStudio, setup:api) must also be
-    written that way in the source, as a whole: its parts turning up separately somewhere do not make an address up."""
+    written that way in the source, as a whole: its parts turning up separately somewhere do not make an address up. So must a name with a
+    sign stuck to it (@GPT, $GPT, GPT/, --flag): it is not the plain name."""
     low = token.lower()
     if re.search(r"[^\x00-\x7f]", low):      # a name with an accented letter glued on (GPT4é): the whole of it is in the source, or it is another name
         # whole, by the same grammar as below with every word character (the accented letters too): GPT4é is not in GPT4é-extra, GPT4é.thing,
@@ -400,8 +401,10 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
         return False
     if any(low[m.end():m.end() + 1] in ("+", "#") for m in NAME.finditer(low)):      # C+++ is not C++, nor C## C#
         return False
-    if len(parts) == 1:
+    if len(parts) == 1 and low.strip("`") == parts[0]:      # one name and nothing stuck to it (backticks round it are only quoting)
         return True
+    # anything stuck to a name is another thing: @GPT is a handle, $GPT a variable, GPT/ and src/ paths, --flag an option. It is the source's
+    # only as the source writes it, as a whole. A token of several names is the same.
     # whole, by the grammar of NAME: nothing that continues a name (letters, digits, _, a - or . and a letter after it, + or #) may touch it
     # on either side, so https://foo.com/example/repo is not in https://foo.com/example/repo-extra, nor foo.com/x in my-foo.com/x
     return stands_whole(low, source_blob)
