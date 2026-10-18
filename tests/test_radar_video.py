@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unicodedata
 import unittest
 import unittest.mock
@@ -789,6 +790,61 @@ class ReviewFindings(unittest.TestCase):
                 with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
                     make_video.require_planned_video(path, planned)
                 self.assertIn("not the video the project describes", errors.getvalue())
+
+    def test_scaffold_stops_when_the_facts_gate_refuses_the_draft_it_wrote(self):
+        real_run = make_video.run
+
+        def fake_run(cmd, **kw):         # `npx hyperframes init` needs the network: it only makes the folder and the two files it writes
+            if str(cmd[0]) == "npx":
+                project = Path(kw["cwd"]) / str(cmd[4])
+                project.mkdir()
+                for name in make_video.SCAFFOLD_FILES:
+                    (project / name).write_text("{}", encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return real_run(cmd, **kw)
+
+        source = json.loads((FIXTURES / "voicestudio.json").read_text(encoding="utf-8"))
+        refused = json.loads(json.dumps(source))
+        refused["draft"]["hook"] += " \uff2fpen"         # a full-width letter in a field the video shows
+        results = {}
+        for label, digest in (("clean", source), ("refused", refused)):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / f"{label}.json"
+                path.write_text(json.dumps(digest, ensure_ascii=False), encoding="utf-8")
+                args = type("Args", (), {"digest": str(path), "name": "t", "videos_dir": str(Path(tmp) / "videos"), "speech_seconds": 60.0})()
+                out, err = io.StringIO(), io.StringIO()
+                with unittest.mock.patch.object(make_video, "run", fake_run), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    try:
+                        results[label] = (make_video.cmd_scaffold(args), None)
+                    except SystemExit as stop:
+                        results[label] = (None, stop.code)
+                results[label] += (err.getvalue(), (Path(tmp) / "videos" / "t").is_dir())
+        self.assertEqual(results["clean"][1], None)                                 # a draft the gate accepts is scaffolded as before
+        self.assertEqual(results["clean"][2], "")
+        self.assertEqual(results["refused"][1], 1)                                   # `scaffold` exits non-zero, and `all` never gets to the voice
+        self.assertIn("FAILED", results["refused"][2])                               # the gate's own words are shown, not only that it failed
+        self.assertIn("cannot be voiced or rendered", results["refused"][2])
+        self.assertTrue(results["refused"][3])                                       # the project is left to read
+
+    def test_a_line_with_no_word_in_it_does_not_stop_the_round_trip(self):
+        import roundtrip
+        self.assertEqual(roundtrip.rate(0, 0), 0.0)
+        self.assertEqual(roundtrip.rate(3, 0), 3.0)
+        self.assertEqual(roundtrip.rate(1, 4), 0.25)
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps([{"engine": "e", "voice": "v", "id": "vo-1", "group": "g", "text": "...", "path": "x.wav"},
+                                            {"engine": "e", "voice": "v", "id": "vo-2", "group": "g", "text": "xin chào", "path": "y.wav"}]), encoding="utf-8")
+            results = Path(tmp) / "r.json"
+            fake = types.ModuleType("transformers")
+            fake.pipeline = lambda *a, **k: (lambda path: {"text": "xin chào"})        # what the recognizer heard, for any clip
+            out = io.StringIO()
+            with unittest.mock.patch.dict(sys.modules, {"transformers": fake}), unittest.mock.patch.object(sys, "argv", ["roundtrip.py", "--out", str(results), str(manifest)]), \
+                    contextlib.redirect_stdout(out):
+                self.assertEqual(roundtrip.main(), 0)
+            data = json.loads(results.read_text(encoding="utf-8"))
+        self.assertEqual([(r["ref_words"], r["edits"], r["wer"]) for r in data["rows"]], [(0, 2, 2.0), (2, 0, 0.0)])
+        self.assertEqual([(r["ref_words"], r["edits"]) for r in data["summary"]], [(2, 2)])
 
     def test_a_compound_name_must_be_written_as_one_in_the_source(self):
         source = check_facts.blob({"url": "https://github.com/debpalash/VoiceStudio", "note": "OmniVoice là một mô hình", "cmd": "bun run setup:api"})

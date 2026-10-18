@@ -562,6 +562,10 @@ def cmd_scaffold(args) -> Path:
     print(f"\nscaffolded {rel(project)} (estimated video length {tl['duration']:.0f} s; the real length follows the voice)")
     ok, output = gate(project)
     print("facts gate on the draft:", output.splitlines()[-1] if output else ("ok" if ok else "failed"))
+    if not ok:      # `all` goes on to the voice (slow) and `scaffold` is read by a script as done: neither may follow a draft the gate refuses
+        print(output, file=sys.stderr)
+        fail(f"the facts gate refuses what scaffold wrote from this digest, so {rel(project)} cannot be voiced or rendered. It was left in place to read: "
+             f"fix the digest and scaffold again under another --name (nothing is overwritten)")
     return project
 
 

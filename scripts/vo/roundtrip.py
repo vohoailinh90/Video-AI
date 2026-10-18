@@ -33,6 +33,12 @@ def words(text: str) -> list:
     return re.sub(r"[^\w\s]", "", text.lower()).split()
 
 
+def rate(edits: int, reference_words: int) -> float:
+    """Wrong words per reference word. A line with no word in it (only punctuation: "...") has none to get wrong and nothing to divide by:
+    the denominator is at least 1, as make_video counts it, so the run goes on and the line reads as every word heard being wrong."""
+    return edits / max(reference_words, 1)
+
+
 def edit_distance(a: list, b: list) -> int:
     d = list(range(len(b) + 1))
     for i, x in enumerate(a, 1):
@@ -100,16 +106,16 @@ def main() -> int:
         key = (it["engine"], it["voice"], it["group"])
         totals[key][0] += edits
         totals[key][1] += len(ref)
-        rows.append({**it, "heard": heard, "edits": edits, "ref_words": len(ref), "wer": round(edits / len(ref), 3)})
+        rows.append({**it, "heard": heard, "edits": edits, "ref_words": len(ref), "wer": round(rate(edits, len(ref)), 3)})
         print(f"[{it['engine']} | {it['voice']} | {it['id']}] ({time.time() - t0:.1f}s)\n  read:  {it['text']}\n  heard: {heard}"
               f"   -> {edits}/{len(ref)} words wrong", flush=True)
 
     print("\n=== summary (wrong words / reference words) ===")
     summary = []
     for (engine, voice, group), (edits, n) in sorted(totals.items()):
-        print(f"{engine:26s} {voice:10s} {group:10s} {edits:3d}/{n:<3d} = {edits / n:5.0%}")
+        print(f"{engine:26s} {voice:10s} {group:10s} {edits:3d}/{n:<3d} = {rate(edits, n):5.0%}")
         summary.append({"engine": engine, "voice": voice, "group": group, "edits": edits, "ref_words": n,
-                        "wer": round(edits / n, 3)})
+                        "wer": round(rate(edits, n), 3)})
     Path(args.out).write_text(json.dumps({"model": args.model, "summary": summary, "rows": rows},
                                          ensure_ascii=False, indent=1), encoding="utf-8")
     print("results:", args.out)
