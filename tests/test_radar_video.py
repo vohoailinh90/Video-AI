@@ -1388,13 +1388,23 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("N:loại-agent", "dùng N:loại-agent"), [])
         self.assertEqual(untraced("Việt", "dùng GPT-Việt"), [])
         # an acronym has the shape of a syllable (ai, ui) but is checked as a name, as the same letters are when they stand alone
-        for whole, part in (("AI-Việt", "AI"), ("ML.Việt", "ML"), ("UI-Việt-Nam", "UI"), ("Hồ-Chí-GPU", "GPU")):
+        for whole, part in (("AI-Việt", "AI"), ("ML.Việt", "ML"), ("UI-Việt-Nam", "UI"), ("Hồ-Chí-GPU", "GPU"), ("A.I-Việt", "A.I"), ("U-I-Việt", "U-I"),
+                            ("a.i-Việt", "a.i"), ("G.P.U-Việt", "G.P.U")):
             self.assertEqual(untraced(whole, "dùng VoiceStudio"), [f"token '{whole}'"], whole)
             self.assertEqual(untraced(whole, f"dùng {whole}"), [], whole)
             self.assertEqual(untraced(part, f"dùng {whole}"), [f"token '{part}'"], whole)
         self.assertEqual(untraced("AI", "dùng VoiceStudio"), ["token 'AI'"])
         # words made only of syllables of Vietnamese are still words
         self.assertEqual(untraced("Việt-Nam, Hồ-Chí-Minh, Đà-Nẵng, nghiêng-ngả", "không có gì"), [])
+
+    def test_a_name_made_only_of_latin_letters_outside_ascii_is_still_a_name(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        for name in ("ÆØ", "ßß", "Øl", "Þór", "ŁÓDŹ", "Łódź"):
+            self.assertEqual(untraced(name, "dùng VoiceStudio"), [f"token '{name}'"], name)
+            self.assertEqual(untraced(name, f"dùng {name}."), [], name)
+            self.assertEqual(untraced(f"{name}-Việt", f"dùng {name}"), [f"token '{name}-Việt'"], name)
+        self.assertEqual(check_facts.compat_problems("dùng ÆØ và ßß"), [])           # they are letters of the Latin alphabet: the text may use them
+        self.assertEqual(untraced("Việt, Hà Nội, Đà Nẵng, Nguyễn", "dùng VoiceStudio"), [])             # Vietnamese words with accents are still words
 
     def test_a_sign_stuck_to_a_name_makes_it_another_thing_than_the_name(self):
         untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
