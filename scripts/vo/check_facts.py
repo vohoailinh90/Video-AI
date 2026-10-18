@@ -438,11 +438,20 @@ def compat_problems(text: str) -> list:
 SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
 
 
+# The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x. Digits that touch a letter or an underscore are part of that
+# name (the voice reads them as the name does, numbers_vi.NUMBER), not a figure the text states, so a text cannot take its "4" from GPT4.
+# A version after a hyphen (AGPL-3.0, Apache-2.0) is a figure, as the voice reads it.
+IN_A_NAME = re.compile(r"(?<=[^\W\d])\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*(?=[^\W\d])")
+NOT_A_FIGURE = "\ue000"      # replaces those digits; a private-use character is neither a digit nor a word character
+
+
 def numbers(text: str) -> set:
     """The values of the numbers in a text. A sign written as a word (âm 19%, trừ 5, cộng 3) is the sign: the voice says it either way.
     White space of any length is one space (the page draws it as one, and the voice does not stop at it), so a sign, a $ or a % set apart by
-    a long run of it is still the figure's: `âm    19%` is -19%, `19    %` is 19%, `$    19` is $19."""
-    text = SIGN_WORDS.sub(lambda m: "-" if m.group(1) else "+", GAP.sub(" ", shown(text)))      # a run of white space is one gap, as on the page
+    a long run of it is still the figure's: `âm    19%` is -19%, `19    %` is 19%, `$    19` is $19. Digits that touch a letter or an
+    underscore (GPT4, H100, SHA256, gpt-4o, v1.5, 16GB) belong to a name, which has_name() checks as a whole; they are no figure."""
+    text = IN_A_NAME.sub(lambda m: NOT_A_FIGURE * len(m.group(0)), GAP.sub(" ", shown(text)))      # a run of white space is one gap, as on the page
+    text = SIGN_WORDS.sub(lambda m: "-" if m.group(1) else "+", text)
     return {canonical(n) for n in NUMBER.findall(text)} - {""}
 
 
