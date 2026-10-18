@@ -479,6 +479,7 @@ SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑
 # and is a figure, as the voice reads it.
 DIGITS_OF_A_NAME = re.compile(r"(?<=[A-Za-z_])\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*(?=[A-Za-z_])")
 NOT_A_FIGURE = "\ue000"      # replaces those digits; a private-use character is neither a digit nor a word character
+VALUE_END = "\ue001"         # replaces VALUE_BREAK when figures are read: not white space (\s matches \x1e), not a word character, not a sign
 
 
 def without_the_digits_of_names(text: str) -> str:
@@ -496,6 +497,7 @@ def numbers(text: str) -> set:
     name that latin_tokens checks (GPT4, H100, SHA256, gpt-4o, v1.5, 16GB, GPT4é) belong to that name, which has_name() checks as a
     whole; they are no figure. Digits in a word the name check does not take (999đ) are one."""
     text = without_the_digits_of_names(GAP.sub(" ", shown(text)))      # a run of white space is one gap, as on the page
+    text = text.replace(VALUE_BREAK, VALUE_END)         # the end of a value is no white space: a sign, a $ or a % in one value is not the figure's in the next
     text = SIGN_WORDS.sub(lambda m: "-" if m.group(1) else "+", text)
     return {canonical(n) for n in NUMBER.findall(text)} - {""}
 
