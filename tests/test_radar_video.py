@@ -923,6 +923,24 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(status, 1, char)
             self.assertIn("NFKC", output, char)
 
+    def test_the_dollar_sign_is_part_of_the_figure(self):
+        for text, value in (("$19", "$19"), ("19$", "$19"), ("$ 19", "$19"), ("-$5", "-$5"), ("-$ 5", "-$5"), ("âm $ 5", "-$5"), ("$1,000", "$1000"), ("tăng $19%", "$19%")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        plain = check_facts.blob({"fact": "19 người"})
+        self.assertEqual(check_facts.untraced("$19", plain, set()), ["number $19"])                  # a price the digest does not state
+        self.assertEqual(check_facts.untraced("19$", plain, set()), ["number $19"])
+        self.assertEqual(check_facts.untraced("$19", check_facts.blob({"fact": "giá $19"}), set()), [])
+        self.assertEqual(check_facts.untraced("19$", check_facts.blob({"fact": "giá $19"}), set()), [])         # either side is the same price
+        self.assertEqual(check_facts.untraced("19", check_facts.blob({"fact": "giá $19"}), set()), ["number 19"])
+        # a shell variable or a command substitution is not a figure
+        words = check_facts.blob({"fact": "echo $HOME $(pwd) $1 và 5 $VAR"})
+        self.assertEqual(check_facts.untraced("echo $HOME $(pwd) $1", words, set()), [])
+        # the voice says it
+        self.assertEqual(numbers_vi.speak_text("giá $19"), "giá mười chín đô la")
+        self.assertEqual(numbers_vi.speak_text("giá 19$"), "giá mười chín đô la")
+        self.assertEqual(numbers_vi.speak_text("-$5"), "âm năm đô la")
+        self.assertEqual(numbers_vi.speak_text("echo $HOME"), "echo $HOME")
+
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):
             self.assertEqual(check_facts.numbers(text), {value}, text)
