@@ -1234,6 +1234,29 @@ class ReviewFindings(unittest.TestCase):
                 make_video.cmd_render(args, project)
             self.assertEqual(ran, [], "npm was run")
 
+    def test_the_end_of_a_source_value_is_not_white_space_between_a_figure_and_its_sign_or_unit(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob(source), set())
+        # a sign, a currency or a unit in one value of the source is not the figure's in the next: no field states the joined figure
+        for text, source, flag in (("$19", {"currency": "$", "count": 19}, "number $19"), ("-19", {"sign": "-", "count": 19}, "number -19"),
+                                   ("19%", {"count": 19, "unit": "%"}, "number 19%"), ("19$", {"count": 19, "unit": "$"}, "number $19"),
+                                   ("âm 19", {"word": "âm", "count": 19}, "number -19"), ("trừ 5", {"word": "trừ", "count": 5}, "number -5"),
+                                   ("19 phần trăm", {"count": 19, "unit": "phần trăm"}, "number 19%"),
+                                   ("+3", [{"x": "+"}, {"x": 3}], "number +3"), ("$.5", {"currency": "$", "count": ".5"}, "number $0.5")):
+            self.assertIn(flag, untraced(text, source), f"{text!r} against {source}")
+        # and in one value, however it is laid out, they are the figure's
+        for text, source in (("$19", {"x": "giá $19"}), ("$19", {"x": "$\n19"}), ("-19", {"x": "- 19"}), ("19%", {"x": "19 %"}),
+                             ("âm 19", {"x": "âm   19"}), ("-19", {"a": "ngưỡng", "b": -19}), ("19%", {"a": "19%"})):
+            self.assertEqual(untraced(text, source), [], f"{text!r} against {source}")
+        # the figure that starts a value is a figure of its own
+        self.assertEqual(check_facts.numbers(check_facts.VALUE_BREAK.join(["a", "-19", "b"])), {"-19"})
+        self.assertEqual(check_facts.numbers(check_facts.VALUE_BREAK.join(["19", "%"])), {"19"})
+        # on the page: two text nodes that do not touch are two values (touching ones are one run, see Visible)
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
                             ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
