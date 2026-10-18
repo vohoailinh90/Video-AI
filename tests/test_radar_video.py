@@ -788,6 +788,12 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("GPT4é", check_facts.blob({"field": "dùng GPT4"})), ["token 'GPT4é'"])
         self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPTé"})), [])                  # unless the source writes it so
         self.assertEqual(untraced("GPT4é", check_facts.blob({"field": "dùng GPT4é"})), [])
+        # whole, by the grammar of a name: it is not a part of a longer name, before or after, as an ASCII name is not
+        for longer in ("GPT4é-extra", "GPT4é.thing", "my-GPT4é", "my.GPT4é", "GPT4é+", "GPT4é#", "xGPT4é", "GPT4éx"):
+            self.assertEqual(untraced("GPT4é", check_facts.blob({"field": f"dùng {longer}"})), ["token 'GPT4é'"], longer)
+        for fine in ("dùng GPT4é.", "dùng GPT4é, rồi", "(GPT4é)", "GPT4é: tốt", "'GPT4é'", "dùng GPT4é; GPT4é"):
+            self.assertEqual(untraced("GPT4é", check_facts.blob({"field": fine})), [], fine)
+        self.assertEqual(untraced("faster-whisper", check_facts.blob({"field": "faster-whisper-large-v3"})), ["token 'faster-whisper'"])     # as the ASCII rule
         self.assertEqual(untraced("café, naïve, Müller", check_facts.blob({"field": "café, naïve, Müller"})), [])  # a Latin name with its accents, as the source has it
         self.assertEqual(untraced("cafe", check_facts.blob({"field": "café"})), ["token 'cafe'"])
         self.assertEqual(untraced("Tokyo東京", check_facts.blob({"field": "Tokyo"})), [])                   # the letters of other alphabets stand for a break
