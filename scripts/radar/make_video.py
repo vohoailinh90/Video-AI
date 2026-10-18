@@ -117,6 +117,50 @@ def require_generated_timing(project: Path):
              f"write it into the page: `make_video.py rebuild {rel(project)}` writes it again")
 
 
+SCAFFOLD_FILES = ("package.json", "hyperframes.json")   # what `hyperframes init` writes and render runs through npm; scaffold records their hashes
+
+
+def expected_scripts() -> dict:
+    """The scripts `hyperframes init` puts in package.json, at the version scaffold pins: the only commands `npm run check` and `npm run render` run."""
+    pinned = f"npx --yes hyperframes@{HYPERFRAMES_VERSION}"
+    return {"dev": f"{pinned} preview", "check": f"{pinned} check", "render": f"{pinned} render", "publish": f"{pinned} publish"}
+
+
+def file_sha256(path: Path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def require_scaffold_files(project: Path):
+    """render hands the project to revoice.py, which runs `npm run check` and `npm run render`: npm runs whatever the scripts of package.json
+    say (`npm run` is "run arbitrary package scripts"), and its hooks (prerender, postrender, precheck ...) and the project's .npmrc (a
+    script-shell, node options) as well. The checks before this one cover the digest, the page, the timing and the clips, none of which a
+    script that renders another page, or runs any command at all, has to respect. So the render goes through the files scaffold wrote:
+    package.json is exactly the scaffold's (the four pinned commands, no hook, no other key), hyperframes.json is the one whose hash
+    scaffold recorded in source/provenance.json, and there is no .npmrc."""
+    try:
+        package = json.loads((project / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        package = None
+    problems = []
+    if not (isinstance(package, dict) and set(package) == {"name", "private", "type", "scripts"} and isinstance(package["name"], str)
+            and package["private"] is True and package["type"] == "module" and package["scripts"] == expected_scripts()):
+        problems.append("package.json is not the one scaffold wrote (its scripts are the commands npm runs; they have to be the four pinned `npx hyperframes` "
+                        "ones, with no hook and no other key)")
+    try:
+        recorded = json.loads((project / "source" / "provenance.json").read_text(encoding="utf-8")).get("scaffold_files")
+    except (OSError, ValueError, AttributeError):
+        recorded = None
+    if not isinstance(recorded, dict) or recorded.get("hyperframes.json") is None or recorded.get("hyperframes.json") != file_sha256(project / "hyperframes.json"):
+        problems.append("hyperframes.json is not the one scaffold recorded (source/provenance.json `scaffold_files`)")
+    if (project / ".npmrc").exists():
+        problems.append("there is a .npmrc in the project, which changes how npm runs the scripts")
+    if problems:
+        fail("; ".join(problems) + f". Render only runs what scaffold wrote: scaffold the project again from the digest ({rel(project)})")
+
+
 AUDIBLE_DB = -45.0     # a mean volume below this is a render with no narration in it (the voice sits near -20 dB)
 
 
@@ -457,6 +501,7 @@ def cmd_scaffold(args) -> Path:
         "units": [unit["key"] for unit in plan["units"]],            # the lines the budget chose: voiceover.json may not add or drop one
         "repo": digest["facts"]["full_name"],
         "scanned": digest["facts"].get("scanned"),
+        "scaffold_files": {name: file_sha256(project / name) for name in SCAFFOLD_FILES},       # what render may run through npm
         "generated_by": "scripts/radar/make_video.py scaffold",
     }
     write_json(source / "provenance.json", provenance)
@@ -621,6 +666,7 @@ def cmd_render(args, project=None) -> dict:
     gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
     require_generated_page(project)
     require_generated_timing(project)
+    require_scaffold_files(project)              # before npm runs anything of the project
     refresh_music_bed(project, plan, doc)
     stale = stale_voices(doc, project / "assets")
     if stale:
