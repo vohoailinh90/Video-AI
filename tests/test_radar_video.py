@@ -755,6 +755,33 @@ class ReviewFindings(unittest.TestCase):
         with self.assertRaises(SystemExit):
             make_video.require_audible(float("-inf"), float("-inf"))
 
+    def test_a_render_that_is_not_the_video_the_project_describes_is_not_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def make(name, size="1920x1080", fps=30, seconds=2, video=True):
+                path = Path(tmp) / name
+                cmd = ["ffmpeg", "-y", "-v", "error"]
+                cmd += ["-f", "lavfi", "-i", f"color=c=black:s={size}:r={fps}:d={seconds}"] if video else []
+                cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}", "-c:a", "aac", "-t", str(seconds), str(path)]
+                subprocess.run(cmd, check=True)
+                return path
+            good = make("good.mp4")
+            self.assertEqual(make_video.video_problems(good, 2.0), [])
+            self.assertEqual(make_video.video_problems(good, 2.3), [])                              # a few frames of rounding are not a different video
+            self.assertEqual(make_video.video_problems(make("small.mp4", size="64x64"), 2.0), ["the picture is 64×64, not 1920×1080"])
+            self.assertEqual(make_video.video_problems(make("slow.mp4", fps=25), 2.0), ["the frame rate is 25, not 30"])
+            self.assertEqual(len(make_video.video_problems(good, 5.0)), 1)                           # stopped early, or an older file in renders/
+            self.assertIn("long", make_video.video_problems(good, 5.0)[0])
+            self.assertEqual(make_video.video_problems(make("audio.mp4", video=False), 2.0), ["the file has no video stream"])
+            garbage = Path(tmp) / "garbage.mp4"
+            garbage.write_bytes(b"not a video")
+            self.assertEqual(make_video.video_problems(garbage, 2.0), ["the file has no readable video stream or length"])
+            make_video.require_planned_video(good, 2.0)
+            for path, planned in ((good, 5.0), (garbage, 2.0)):
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+                    make_video.require_planned_video(path, planned)
+                self.assertIn("not the video the project describes", errors.getvalue())
+
     def test_a_compound_name_must_be_written_as_one_in_the_source(self):
         source = check_facts.blob({"url": "https://github.com/debpalash/VoiceStudio", "note": "OmniVoice là một mô hình", "cmd": "bun run setup:api"})
         untraced = lambda text: check_facts.untraced(text, source, set())
@@ -1261,9 +1288,17 @@ class ReviewFindings(unittest.TestCase):
         untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
         for short, source in (("C++", "C++Builder"), ("C#", "C#Sharp"), ("C++", "C+++"), ("C#", "C##"), ("C++", "C++x"), ("C#", "C#1")):
             self.assertEqual(untraced(short, f"dùng {source}"), [f"token '{short}'"], source)
-        for short, source in (("C++", "C++"), ("C#", "C#"), ("C++", "dùng C++, và Go"), ("C++", "C++-based"), ("C#", "dùng C#."), ("C++", "(C++)"),
+        for short, source in (("C++", "C++"), ("C#", "C#"), ("C++", "dùng C++, và Go"), ("C#", "dùng C#."), ("C++", "(C++)"),
                               ("C++", "C++ và C#"), ("C#", "C++ và C#")):
             self.assertEqual(untraced(short, source), [], source)
+        # joined by a - or a . the longer name is still one name: its parts are not the source's names (as faster-whisper is not in
+        # faster-whisper-large-v3), and it traces to itself
+        for whole, first, rest in (("C++-Builder", "C++", "Builder"), ("C#-Sharp", "C#", "Sharp"), ("C++.NET", "C++", "NET"), ("C++-based", "C++", "based")):
+            self.assertEqual(untraced(whole, f"dùng {whole}"), [], whole)
+            self.assertEqual(untraced(first, f"dùng {whole}"), [f"token '{first}'"], whole)
+            self.assertEqual(untraced(rest, f"dùng {whole}"), [f"token '{rest}'"], whole)
+            self.assertEqual(untraced(whole, f"dùng {first}"), [f"token '{whole}'"], whole)
+        self.assertEqual(untraced("C++", "chuẩn C++-11"), [])          # a version after the hyphen is not a name: C++ stays the name before it
         self.assertEqual(untraced("faster-whisper", "faster-whisper-large-v3"), ["token 'faster-whisper'"])      # as before
         self.assertEqual(untraced("AGPL", "AGPL-3.0"), [])
         # the longer name is one name: it traces to itself, and neither of its parts is the source's name

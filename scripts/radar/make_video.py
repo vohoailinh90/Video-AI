@@ -171,6 +171,47 @@ def require_audible(mean, peak):
              f"Check assets/*.wav and the audio of index.html, then render again")
 
 
+VIDEO_SIZE, VIDEO_FPS = (1920, 1080), 30     # what compose.py draws, and what the README and the preview page say of the render
+LENGTH_SLACK = 0.5                            # seconds the MP4 may differ from the planned timeline (a frame is 0.033)
+
+
+def video_problems(path, planned_seconds: float) -> list:
+    """What differs between the MP4 and the video the project describes: no video stream, another size or frame rate, or a length that is
+    not the planned timeline's (a render that stopped early, or an older file left in renders/). The README and the preview page state the
+    size, the frame rate and the length, so they are measured here, not assumed from what the page asks for."""
+    probe = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,avg_frame_rate:format=duration",
+                 "-of", "json", path])
+    try:
+        data = json.loads(probe.stdout or "{}")
+        stream = (data.get("streams") or [None])[0]
+        seconds = float(data["format"]["duration"])
+    except (ValueError, KeyError, TypeError):
+        return ["the file has no readable video stream or length"]
+    if not stream:
+        return ["the file has no video stream"]
+    problems = []
+    size = (stream.get("width"), stream.get("height"))
+    if size != VIDEO_SIZE:
+        problems.append(f"the picture is {size[0]}×{size[1]}, not {VIDEO_SIZE[0]}×{VIDEO_SIZE[1]}")
+    numerator, _, denominator = str(stream.get("avg_frame_rate", "")).partition("/")
+    try:
+        fps = float(numerator) / float(denominator or 1)
+    except (ValueError, ZeroDivisionError):
+        fps = 0.0
+    if abs(fps - VIDEO_FPS) > 0.01:
+        problems.append(f"the frame rate is {fps:g}, not {VIDEO_FPS}")
+    if abs(seconds - planned_seconds) > LENGTH_SLACK:
+        problems.append(f"the file is {seconds:.2f} s long, the timeline {planned_seconds:.2f} s")
+    return problems
+
+
+def require_planned_video(path, planned_seconds: float):
+    problems = video_problems(path, planned_seconds)
+    if problems:
+        fail("the rendered MP4 is not the video the project describes: " + "; ".join(problems) + ". Render again (an older or partial file in renders/ "
+             "is not kept)")
+
+
 NARRATION_OVER_MUSIC_DB = 6.0    # a clip's stretch of the MP4 has to be this much louder than the music bed alone
 
 
@@ -682,6 +723,7 @@ def cmd_render(args, project=None) -> dict:
         fail("revoice.py failed:\n" + text[-2500:])
     check_line = next((l for l in text.splitlines() if l.startswith("check:")), "check: (no summary)")
     warnings = [l.strip() for l in text.splitlines() if "WARNING" in l]
+    require_planned_video(mp4, planlib.timeline(plan, clip_durations(project, doc))["duration"])     # before the report says its size, rate and length
     mean, peak = whole_file_levels(mp4)
     require_audible(mean, peak)                  # before the report, README and preview call this render a success
     silent = silent_narration(project, json.loads((project / "voiceover.json").read_text(encoding="utf-8")), mp4)
