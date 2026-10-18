@@ -874,7 +874,7 @@ class ReviewFindings(unittest.TestCase):
     def test_a_short_name_glued_to_a_letter_is_still_checked(self):
         source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
         untraced = lambda text, source=source: check_facts.untraced(text, source, set())
-        for glued, name in (("GPTé", "GPTé"), ("npmé", "npmé"), ("C++é", "C++é"), ("Việt-GPTé", "GPTé"), ("éGPT", "éGPT"), ("Tōkyō", "Tōkyō")):
+        for glued, name in (("GPTé", "GPTé"), ("npmé", "npmé"), ("C++é", "C++é"), ("Việt-GPTé", "Việt-GPTé"), ("éGPT", "éGPT"), ("Tōkyō", "Tōkyō")):
             self.assertEqual(untraced(glued), [f"token '{name}'"], glued)
         self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPT"})), ["token 'GPTé'"])      # the name the source has is not the name with a letter glued on
         self.assertEqual(untraced("GPT4é", check_facts.blob({"field": "dùng GPT4"})), ["token 'GPT4é'"])
@@ -1374,6 +1374,21 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("C++11", "chu\u1ea9n C++11"), [])
         self.assertEqual(untraced("C++", "chu\u1ea9n C++11"), ["token 'C++'"])
         self.assertIn("token 'C++11'", untraced("C++11", "chu\u1ea9n C++"))
+
+    def test_a_vietnamese_syllable_joined_to_a_name_is_part_of_the_name(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        # GPT-Việt, VoiceStudio-Việt, GPT.Việt, GPT4é-ra: one name each. The part before it is not a name of the source
+        for whole, part in (("GPT-Việt", "GPT"), ("VoiceStudio-Việt", "VoiceStudio"), ("GPT.Việt", "GPT"), ("GPT4é-ra", "GPT4é"), ("Việt-GPTé", "GPTé"),
+                            ("npm-của-tôi", "npm"), ("Việt--GPT", "GPT")):
+            self.assertEqual(untraced(whole, f"dùng {whole} nhé"), [], whole)
+            self.assertEqual(untraced(part, f"dùng {whole} nhé"), [f"token '{part}'"], (whole, part))
+            self.assertEqual(untraced(whole, f"dùng {part} nhé"), [f"token '{whole}'"], (whole, part))
+        # the names of a path or an address are the names of its parts, as for ASCII (GPT/Claude): the syllable alone is a word
+        self.assertEqual(untraced("agent", "N:loại-agent"), ["token 'agent'"])          # but loại-agent is one name
+        self.assertEqual(untraced("N:loại-agent", "dùng N:loại-agent"), [])
+        self.assertEqual(untraced("Việt", "dùng GPT-Việt"), [])
+        # words made only of syllables of Vietnamese are still words
+        self.assertEqual(untraced("Việt-Nam, Hồ-Chí-Minh, Đà-Nẵng, nghiêng-ngả", "không có gì"), [])
 
     def test_a_sign_stuck_to_a_name_makes_it_another_thing_than_the_name(self):
         untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
