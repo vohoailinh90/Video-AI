@@ -942,6 +942,28 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(numbers_vi.speak_text("-$5"), "âm năm đô la")
         self.assertEqual(numbers_vi.speak_text("echo $HOME"), "echo $HOME")
 
+    def test_the_dollar_sign_is_part_of_the_figure_before_a_sign_and_against_letters_too(self):
+        for text, value in (("$-19", "-$19"), ("$ -19", "-$19"), ("$+19", "+$19"), ("$ + 19", "+$19"), ("$ - 19", "-$19"), ("$−19", "-$19"), ("＄-19", "-$19"),
+                            ("US$-19", "-$19"), ("HK$-5", "-$5"), ("US$19", "$19"), ("A$19", "$19"), ("$-19%", "-$19%"), ("$-19$", "-$19")):
+            plain = text.replace("＄", "$")                                                       # the full-width one is NFKC's business: refused earlier
+            self.assertEqual(check_facts.numbers(plain), {value}, text)
+            self.assertEqual(check_facts.numbers(plain), check_facts.numbers(value), text)       # the same value whichever side of the sign it is on
+        negative = check_facts.blob({"fact": "-19 người"})
+        for text in ("$-19", "$ -19"):
+            self.assertEqual(check_facts.untraced(text, negative, set()), ["number -$19"], text)   # a price the digest does not state
+        self.assertIn("number -$19", check_facts.untraced("US$-19", negative, set()))             # and the code US is a name the digest has to hold
+        self.assertEqual(check_facts.untraced("$-19", check_facts.blob({"fact": "lỗ -$19"}), set()), [])
+        self.assertEqual(check_facts.untraced("-$19", check_facts.blob({"fact": "lỗ $-19"}), set()), [])
+        self.assertEqual(check_facts.untraced("$+19", check_facts.blob({"fact": "+19 người"}), set()), ["number +$19"])
+        # the voice says what the gate read: the unit is spoken, and a currency code is a word of its own
+        for text, spoken in (("$-19", "âm mười chín đô la"), ("$ -19", "âm mười chín đô la"), ("$+19", "cộng mười chín đô la"),
+                             ("US$19", "US mười chín đô la"), ("US$-19", "US âm mười chín đô la"), ("giá $19", "giá mười chín đô la"),
+                             ("-$5", "âm năm đô la"), ("echo $HOME", "echo $HOME")):
+            self.assertEqual(numbers_vi.speak_text(text), spoken, text)
+        # nothing else changed: a dash is still a dash and a range is still a range
+        self.assertEqual(check_facts.numbers("Stars - 62.958 và 5 - 10 phút"), {"62958", "5", "10"})
+        self.assertEqual(numbers_vi.speak_text("giá $19 - $25"), "giá mười chín đô la - hai mươi lăm đô la")
+
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):
             self.assertEqual(check_facts.numbers(text), {value}, text)

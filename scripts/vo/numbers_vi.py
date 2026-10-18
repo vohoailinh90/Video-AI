@@ -56,8 +56,10 @@ SIGN_BEFORE = (rf"(?<![\w.,{SIGNS}%])[{SIGNS}](?=(?:\$\s?)?\d)"
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
 VERSION = re.compile(rf"(?<=[A-Za-z])[{re.escape(MINUS)}](\d+(?:[.,]\d+)*)(?![\w])")
-# The dollar sign is the one currency symbol in ASCII and part of the figure: $19 and $ 19 are a price, 19 is not (and 19$).
-NUMBER = re.compile(rf"(?:({SIGN_BEFORE})|(?<![\w.,{re.escape(MINUS)}]))(\$\s?)?(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(\$)?(?![\w\-]|[.,]\d)")
+# The dollar sign is the one currency symbol in ASCII and part of the figure: $19 and $ 19 are a price, 19 is not (and 19$). It may come before
+# the sign ($-19, $ -19), after it (-$19) or against letters (US$19): wherever it stands, the match takes it in, so it is never left out of
+# the figure. The leading one is not a group: a match holds a currency symbol when "$" is in it.
+NUMBER = re.compile(rf"(?:\$\s?)?(?:({SIGN_BEFORE})|(?<![\w.,{re.escape(MINUS)}]))(\$\s?)?(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(\$)?(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -123,7 +125,9 @@ def speak_text(text: str) -> str:
             return match.group(0)
         sign = (match.group(1) or "")[:1]                        # the sign is group 1, with the space after it when it has one
         sign = "cộng " if sign and sign in PLUS else "âm " if sign else ""
-        return sign + words + (" phần trăm" if match.group(4) else "") + (" đô la" if match.group(2) or match.group(5) else "")
+        before = match.string[match.start() - 1:match.start()] if match.start() else ""
+        apart = " " if match.group(0).startswith("$") and before.isalnum() else ""            # US$19 is "US", then the figure
+        return apart + sign + words + (" phần trăm" if match.group(4) else "") + (" đô la" if "$" in match.group(0) else "")
 
     def version(match):
         words = _token_words(match.group(1))
