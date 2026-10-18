@@ -800,6 +800,12 @@ class ReviewFindings(unittest.TestCase):
         for short, source in (("Caf", "café"), ("caf", "café"), ("GPT4", "GPT4é"), ("GPT", "GPTé"), ("npm", "npmé"), ("H100", "H100đ")):
             self.assertEqual(untraced(short, check_facts.blob({"field": f"dùng {source}"})), [f"token '{short}'"], short)
         self.assertEqual(untraced("GPT4", check_facts.blob({"field": "dùng GPT4 và GPT4é"})), [])          # unless the source writes it too
+        # whichever block the Latin letter is in: Latin-1, Extended-A/B, IPA, Extended Additional, Extended-C and -D
+        for letter in ("é", "ǆ", "ɐ", "ḁ", "ⱥ", "ꞅ", "ꟃ"):
+            self.assertTrue(unicodedata.name(letter).startswith("LATIN"), letter)
+            self.assertEqual(untraced("GPT", check_facts.blob({"field": f"dùng GPT{letter}"})), ["token 'GPT'"], letter)
+            self.assertEqual(untraced(f"GPT{letter}", check_facts.blob({"field": "dùng GPT"})), [f"token 'GPT{letter}'"], letter)
+            self.assertEqual(untraced(f"GPT{letter}", check_facts.blob({"field": f"dùng GPT{letter}"})), [], letter)
         self.assertEqual(untraced("github.com/foo/bar", check_facts.blob({"field": "github.com/foo/baré"})), ["token 'github.com/foo/bar'"])
         self.assertEqual(untraced("github.com/foo/bar", check_facts.blob({"field": "github.com/foo/bar"})), [])
         self.assertEqual(untraced("Tokyo東京", check_facts.blob({"field": "Tokyo"})), [])                   # the letters of other alphabets stand for a break
