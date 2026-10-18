@@ -565,6 +565,14 @@ def vietnamese_syllable(piece: str) -> bool:
     return VIETNAMESE_SYLLABLE.fullmatch(base.replace("đ", "d")) is not None
 
 
+def vietnamese_word(piece: str) -> bool:
+    """A part of a chunk that is a word of Vietnamese and not a name. An acronym (AI, ML, UI: ASCII letters in capitals, two or more) has the
+    shape of a syllable too (ai), but a Vietnamese word is not written so in a name like AI-Việt, and the same letters as a chunk of their own
+    are checked as a name; so here. A short word in lower case or Capitalised (Go, Nam, Minh) cannot be told from a name without a dictionary:
+    that is the limit of this check, as for a name with one accent glued on."""
+    return vietnamese_syllable(piece) and not (piece.isascii() and piece.isupper() and len(piece) >= 2)
+
+
 def glued_names(chunk: str):
     """The names in a chunk that holds a letter outside ASCII. A chunk is cut at / and : into the names of a path or an address, and each of
     those is a run of parts joined by - and . (as NAME joins them). A run made only of syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh), with
@@ -574,7 +582,7 @@ def glued_names(chunk: str):
     is not GPT4, GPTα is not GPT, and has_name asks for it as it is)."""
     for segment in re.split(r"[/:]+", chunk):
         parts = [part for part in re.split(r"[-.]+", segment) if part]
-        if parts and all(vietnamese_syllable(part) or not any(c.isalpha() for c in part) for part in parts):      # 3-bước, âm-19%: a word and a figure
+        if parts and all(vietnamese_word(part) or not any(c.isalpha() for c in part) for part in parts):      # 3-bước, âm-19%: a word and a figure
             continue
         cleaned = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in segment)
         for name in cleaned.split():

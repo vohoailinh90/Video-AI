@@ -1387,6 +1387,12 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("agent", "N:loại-agent"), ["token 'agent'"])          # but loại-agent is one name
         self.assertEqual(untraced("N:loại-agent", "dùng N:loại-agent"), [])
         self.assertEqual(untraced("Việt", "dùng GPT-Việt"), [])
+        # an acronym has the shape of a syllable (ai, ui) but is checked as a name, as the same letters are when they stand alone
+        for whole, part in (("AI-Việt", "AI"), ("ML.Việt", "ML"), ("UI-Việt-Nam", "UI"), ("Hồ-Chí-GPU", "GPU")):
+            self.assertEqual(untraced(whole, "dùng VoiceStudio"), [f"token '{whole}'"], whole)
+            self.assertEqual(untraced(whole, f"dùng {whole}"), [], whole)
+            self.assertEqual(untraced(part, f"dùng {whole}"), [f"token '{part}'"], whole)
+        self.assertEqual(untraced("AI", "dùng VoiceStudio"), ["token 'AI'"])
         # words made only of syllables of Vietnamese are still words
         self.assertEqual(untraced("Việt-Nam, Hồ-Chí-Minh, Đà-Nẵng, nghiêng-ngả", "không có gì"), [])
 
