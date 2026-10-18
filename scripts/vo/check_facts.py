@@ -356,7 +356,7 @@ def names_in(source_blob: str) -> set:
     a trailing version (AGPL for AGPL-3.0). faster-whisper-large-v3 is one name: faster-whisper and whisper are not in it, and C++Builder
     is not C++ (a name followed by a word character, a + or a # is part of a longer name, as has_name asks of a token)."""
     names = set()
-    for chunk in ascii_chunks(source_blob, need_letter=False):      # not the pieces of a Vietnamese word: c in công is not the name C
+    for chunk in ascii_chunks(source_blob, need_letter=False, keep_words=True):      # the pieces of a Vietnamese word are not the name C of công; see glued_names
         low = chunk.lower()
         for match in NAME.finditer(low):
             if NAME_CONTINUES.match(low[match.end():match.end() + 1]):      # C++Builder, C#Sharp, C+++, C##: the C++ or C# is part of a longer name
@@ -591,16 +591,20 @@ def vietnamese_word(piece: str) -> bool:
     return vietnamese_syllable(piece) and not (piece.isascii() and (piece.isupper() or len(piece) == 1))
 
 
-def glued_names(chunk: str):
+def glued_names(chunk: str, keep_words: bool = False):
     """The names in a chunk that holds a letter outside ASCII. A chunk is cut at / and : into the names of a path or an address, and each of
     those is a run of parts joined by - and . (as NAME joins them). A run made only of syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh), with
-    or without figures among them (3-bước, âm-19%), is words and is left out; any other is a name, with every part of it: a name with a letter glued on (ElevenLabsé, GPTé, GPTα, npmé, C++é)
-    and a name with a Vietnamese syllable joined to it (GPT-Việt, N:loại-agent) are each one name, however short, so GPT is not GPT-Việt and
-    agent is not loại-agent. Every letter stays in the name, whatever its alphabet, so the name is the whole of what the viewer reads (GPT4é
-    is not GPT4, GPTα is not GPT, and has_name asks for it as it is)."""
+    or without figures among them (3-bước, âm-19%), is words and is left out; any other is a name, with every part of it: a name with a
+    letter glued on (ElevenLabsé, GPTé, GPTα, npmé, C++é) and a name with a Vietnamese syllable joined to it (GPT-Việt, N:loại-agent) are
+    each one name, however short, so GPT is not GPT-Việt and agent is not loại-agent. Every letter stays in the name, whatever its alphabet, so the name is the whole of what the viewer reads (GPT4é
+    is not GPT4, GPTα is not GPT, and has_name asks for it as it is).
+
+    The words are left out of the text, which is not to be held to a name for each Vietnamese word it says. The source is read with
+    keep_words: it is lower case by then (see blob), so AI in AI/GPTé looks like the word ai and would be lost, and the text that copies
+    AI/GPTé from it would then fail against itself. A word the source keeps only lets the text say the same word."""
     for segment in re.split(r"[/:]+", chunk):
         parts = [part for part in re.split(r"[-.]+", segment) if part]
-        if parts and all(vietnamese_word(part) or not any(c.isalpha() for c in part) for part in parts):      # 3-bước, âm-19%: a word and a figure
+        if not keep_words and parts and all(vietnamese_word(part) or not any(c.isalpha() for c in part) for part in parts):      # 3-bước, âm-19%: a word and a figure
             continue
         cleaned = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in segment)
         for name in cleaned.split():
@@ -613,7 +617,7 @@ SPLIT_KEEP = re.compile(f"({SPLIT.pattern})")      # the same, keeping what it s
 GAP = re.compile(rf"[^\S{VALUE_BREAK}]+")               # any whitespace inside a value: letters apart by it are still a row of letters
 
 
-def ascii_chunks(text: str, need_letter: bool = True):
+def ascii_chunks(text: str, need_letter: bool = True, keep_words: bool = False):
     """The chunks of a text made only of ASCII (names, acronyms, commands, addresses; a chunk ends at a space or at one of SPLIT).
     Single letters apart by spaces only (G P T) are read as the name they spell, GPT: a voice says it as one acronym.
     A character outside ASCII that is not a letter (a symbol like (tm) or an emoji) ends a word and hides nothing, while one that draws
@@ -634,7 +638,7 @@ def ascii_chunks(text: str, need_letter: bool = True):
         if letter:
             continue
         if re.search(r"[^\x00-\x7f]", chunk):
-            for name in glued_names(chunk):
+            for name in glued_names(chunk, keep_words):
                 if not need_letter or any(name_letter(c) for c in name):      # ÆØ and ßß are names with no ASCII letter in them; 999đ is not
                     yield name
         elif chunk and (not need_letter or re.search(r"[A-Za-z]", chunk)):
