@@ -341,11 +341,26 @@ def require_chosen_lines(project: Path, selection):
              f"from the digest, with --speech-seconds for a shorter or longer video")
 
 
+LINE_ID = re.compile(r"vo-[1-9]\d*")      # what plan.py names a unit; also the file name of its clip, assets/<id>.wav
+
+
+def require_line_ids(doc):
+    """A line id is a file name: synth.py writes <id>.wav, voice copies it into assets/, render reads it. An id with a slash, `..` or a
+    drive in it (`/tmp/target`, `../../x`) would write or read a file outside the project, and this runs before the facts gate does.
+    scaffold writes vo-1, vo-2 ...; nothing else is a line of a generated project."""
+    bad = [line.get("id") if isinstance(line, dict) else line for line in doc.get("lines") or []
+           if not isinstance(line, dict) or not isinstance(line.get("id"), str) or not LINE_ID.fullmatch(line["id"])]
+    if bad:
+        fail(f"voiceover.json has a line id that is not vo-N ({bad[:3]!r}): an id is the name of the line's clip file, and scaffold is the "
+             f"only thing that writes one. Scaffold the project again from the digest")
+
+
 def load_project(project: Path):
     """(digest, plan, voiceover doc) rebuilt from source/ and voiceover.json."""
     require_source_unchanged(project)
     digest = planlib.load_digest(project / "source" / "draft-vi.json")
     doc = json.loads((project / "voiceover.json").read_text(encoding="utf-8"))
+    require_line_ids(doc)
     selection = [line.get("unit") for line in doc.get("lines") or []]
     require_chosen_lines(project, selection)
     return digest, planlib.build_plan(digest, selection=selection), doc
@@ -680,35 +695,60 @@ def write_preview_json(project: Path, plan, report):
     write_json(project / "preview.json", doc)
 
 
+MD_ACTIVE = re.compile(r"([\\`*_{}\[\]()<>#!|&~:/@])")
+
+
+def md_line(value) -> str:
+    """A value as one line of plain characters: white space of any kind is one space, and no control character is left."""
+    return "".join(c for c in " ".join(str(value).split()) if unicodedata.category(c) != "Cc")
+
+
+def md_text(value) -> str:
+    """Text for the README that Markdown shows as it is. A line of the digest is untrusted: `![x](https://host/pixel)` would load that
+    address when the README is viewed, `<!-- ... -->` would hide the words after it, `<img>` and a link would be markup. A backslash
+    before each character that Markdown reads (and before | , which would split a table row) makes it a letter on the page; the
+    facts gate has checked the words, not that they are free of markup."""
+    return MD_ACTIVE.sub(r"\\\1", md_line(value))
+
+
+def md_code(value) -> str:
+    """A value in a code span, which Markdown shows as it is: a fence longer than any run of backticks inside it, so no text closes it early."""
+    text = md_line(value)
+    fence = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
 def write_readme(project: Path, plan, doc, report):
     base, voice, render = rel(project), report.get("voice", {}), report.get("render", {})
-    narrator = voice.get("voice", DEFAULT_VOICE)
+    narrator = md_text(voice.get("voice", DEFAULT_VOICE))
     prov = json.loads((project / "source" / "provenance.json").read_text(encoding="utf-8")) if (project / "source" / "provenance.json").exists() else {}
     rows = []
     for line in doc["lines"]:
         c = voice.get("chosen", {}).get(line["id"], {})
         measured = f"{c['edits']}/{c['ref_words']}" if c.get("edits") is not None else "chưa đo"
         shown = line["text"] if len(line["text"]) <= 150 else line["text"][:147] + "..."
-        shown = " ".join(shown.split()).replace("|", "\\|")      # a pipe or a line break would split the Markdown table
-        rows.append(f"| `{line['id']}` | {line['start']:g} s | {shown} | {c.get('take', '?')} | {measured}{' (cờ)' if c.get('flagged') else ''} |")
+        shown = md_text(shown)      # markup, a pipe or a line break in the text would be markup, or split the table row
+        rows.append(f"| {md_code(line['id'])} | {line['start']:g} s | {shown} | {c.get('take', '?')} | {measured}{' (cờ)' if c.get('flagged') else ''} |")
     if prov.get("path_in_repo"):
-        origin_text = (f"file `{prov['path_in_repo']}` trong repo `{prov.get('git_remote')}` (bản ghi cuối cùng của file: `{prov.get('last_commit_of_file')}`)")
+        origin_text = (f"file {md_code(prov['path_in_repo'])} trong repo {md_code(prov.get('git_remote'))} "
+                       f"(bản ghi cuối cùng của file: {md_code(prov.get('last_commit_of_file'))})")
     else:
-        origin_text = f"file `{prov.get('file', '?')}`"
+        origin_text = f"file {md_code(prov.get('file', '?'))}"
     if prov.get("also_via"):
-        origin_text += f"; {prov['also_via']}"
+        origin_text += f"; {md_text(prov['also_via'])}"
     final = render.get("final_mix")
     levels = (f"âm thanh cả file trung bình {render['mean_db']} dB, đỉnh {render['peak_db']} dB" if render.get("mean_db") is not None else "chưa đo mức âm")
     errors = (f"PhoWhisper-small nghe lại âm thanh cắt từ MP4: sai {final['edits']}/{final['ref_words']} từ "
               f"({100 * final['edits'] / max(final['ref_words'], 1):.0f}%)" if final else "Mức dễ hiểu chưa được đo")
-    text = f"""# Video thử: {plan['name']} (tự động từ bài GitHub Radar {plan['scan']})
+    text = f"""# Video thử: {md_text(plan['name'])} (tự động từ bài GitHub Radar {md_text(plan['scan'])})
 
 Video {render.get('duration', 0):.1f} giây, 1920×1080, 30 khung hình/giây, {len(plan['scenes'])} cảnh, lời đọc tiếng Việt giọng {narrator} (VieNeu-TTS) và nhạc nền tự tạo.
 File này do `scripts/radar/make_video.py` tạo ra; cách làm và giới hạn: `docs/radar-to-video.md`.
 
 ## Nguồn
 
-`source/draft-vi.json` là bản sao nguyên văn của {origin_text} (sha256 `{prov.get('sha256', '?')[:16]}...`). Repo được viết về: `{plan['full_name']}`. Video không dùng mã, hình hay âm thanh nào của repo đó.
+`source/draft-vi.json` là bản sao nguyên văn của {origin_text} (sha256 {md_code(str(prov.get('sha256', '?'))[:16] + '...')}). Repo được viết về: {md_code(plan['full_name'])}. Video không dùng mã, hình hay âm thanh nào của repo đó.
 Cảnh, lời đọc và chữ trên màn hình đều lấy từ các trường của bài; mỗi dòng của `voiceover.json` ghi trường nó lấy (`source`).
 
 ## Chạy lại
@@ -731,11 +771,11 @@ Sửa lời đọc trong `voiceover.json` rồi chạy `make_video.py voice {bas
 
 ## Đã kiểm tra
 
-- Cổng đối chiếu bài (`check_facts.py`): {report.get('gate', {}).get('output', '?').splitlines()[-1] if report.get('gate', {}).get('output') else '?'}
-- `npm run check`: {render.get('check', 'chưa chạy')}
+- Cổng đối chiếu bài (`check_facts.py`): {md_text(report.get('gate', {}).get('output', '?').splitlines()[-1] if report.get('gate', {}).get('output') else '?')}
+- `npm run check`: {md_text(render.get('check', 'chưa chạy'))}
 - File MP4: {render.get('duration', '?')} giây; {levels}
 - {errors}. Máy nghe lại không thay được người nghe: từ tiếng Anh đọc kiểu Việt hóa có thể vẫn dễ hiểu với người Việt.
-{chr(10).join('- ' + w for w in render.get('warnings', []))}
+{chr(10).join('- ' + md_text(w) for w in render.get('warnings', []))}
 
 ## Giới hạn
 

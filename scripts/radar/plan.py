@@ -18,6 +18,7 @@ When the narration would run past the speech budget, groups are cut in a fixed o
 """
 import json
 import re
+import unicodedata
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -64,8 +65,35 @@ def estimate(text: str) -> float:
     return len(speak_text(clean(text))) / CHARS_PER_SECOND + CLIP_PAD
 
 
+LAYOUT_CONTROLS = "\t\n\r"   # the control characters that are only white space; clean() turns them into a space
+
+
+def control_character_at(node, where="digest"):
+    """The JSON path of the first string (a key or a value) that holds a control character other than a tab or a line break, else None.
+    The plan, the scaffold report and the errors print digest text; an ESC or BEL in it starts an escape sequence that a terminal acts on
+    (a title, the clipboard, a forged log line), and a C1 control (CSI U+009B, OSC U+009D) does the same in terminals that read 8-bit
+    controls. A real digest has none, so a digest with one is not used."""
+    if isinstance(node, str):
+        return where if any(unicodedata.category(c) == "Cc" and c not in LAYOUT_CONTROLS for c in node) else None
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found = control_character_at(key, f"{where}.<key>") or control_character_at(value, f"{where}.{key}")
+            if found:
+                return found
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found = control_character_at(value, f"{where}[{index}]")
+            if found:
+                return found
+    return None
+
+
 def load_digest(path) -> dict:
     digest = json.loads(Path(path).read_text(encoding="utf-8"))
+    where = control_character_at(digest)
+    if where:
+        # the place only, never the text: printing it is what a terminal would act on (and repr() shows a path's own control characters)
+        raise ValueError(f"{where!r} holds a control character (an escape sequence for the terminal that prints it), so this digest is not used")
     if not isinstance(digest.get("draft"), dict) or not isinstance(digest.get("facts"), dict):
         raise ValueError("not a radar digest: draft-<lang>.json must have `draft` and `facts`")
     if digest.get("lang", "vi") != "vi":

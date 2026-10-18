@@ -25,6 +25,9 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # line_ids.py next to this file; -I does not add the script's folder
+from line_ids import require_file_name_ids  # noqa: E402
+
 
 def words(text: str) -> list:
     return re.sub(r"[^\w\s]", "", text.lower()).split()
@@ -41,6 +44,7 @@ def edit_distance(a: list, b: list) -> int:
 
 def items_from_video(video: Path, lines_path: Path, label: str, work: Path) -> list:
     lines = json.loads(lines_path.read_text(encoding="utf-8"))["lines"]
+    require_file_name_ids(lines)
     work.mkdir(parents=True, exist_ok=True)
     items = []
     for line in lines:

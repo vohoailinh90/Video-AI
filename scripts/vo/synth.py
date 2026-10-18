@@ -17,6 +17,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # line_ids.py next to this file; -I does not add the script's folder
+from line_ids import require_file_name_ids  # noqa: E402
+
 DEFAULT_VOICE = "Hải Đăng"  # the owner's default narrator (male, northern); pass --voice for another
 
 
@@ -28,6 +31,9 @@ def main() -> int:
     ap.add_argument("--only", help="comma-separated line ids to (re)generate; the others in an existing manifest are kept")
     ap.add_argument("--list-voices", action="store_true", help="print the preset voices and exit")
     args = ap.parse_args()
+
+    if args.lines and not args.list_voices:     # before the model is loaded: a bad id writes nothing, and costs nothing
+        require_file_name_ids(json.loads(Path(args.lines).read_text(encoding="utf-8"))["lines"])
 
     from vieneu import Vieneu  # imported late so --help works without the package
 

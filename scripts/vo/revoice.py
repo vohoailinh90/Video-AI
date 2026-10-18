@@ -27,6 +27,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # line_ids.py next to this file; -I does not add the script's folder
+from line_ids import require_file_name_ids  # noqa: E402
+
 FADE_OUT = 0.35  # seconds; the fade-out of every scene in index.html
 
 
@@ -68,6 +71,7 @@ def main() -> int:
 
     project, clips, out = Path(args.project), Path(args.clips), Path(args.out).resolve()
     lines = json.loads(Path(args.lines).read_text(encoding="utf-8"))["lines"]
+    require_file_name_ids(lines)
     work = Path(tempfile.mkdtemp(prefix="revoice-")) / project.name
     shutil.copytree(project, work, ignore=shutil.ignore_patterns("renders", ".hyperframes", "node_modules", "voices"))
     html_path = work / "index.html"
