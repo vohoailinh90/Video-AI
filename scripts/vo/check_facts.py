@@ -432,7 +432,9 @@ def compat_problems(text: str) -> list:
     override or isolate such as U+202E): shown() drops it when it compares a text with the source, so a number with one inside would be
     traced as the digits without it, while the voice (numbers_vi.speak_text) says the parts apart and a browser or a terminal may draw
     them in another order (12 U+202E 34 is traced as 1234, said "mười hai ... ba mươi bốn" and may be drawn 1243). Both are named by
-    their code, never printed. So is a combining mark that stays on a Latin letter or a digit after NFC (x with a circumflex, i with a dot
+    their code, never printed. So is a letter of another alphabet than Latin (Greek, Cyrillic, Han, Arabic ...): the check traces only
+    numbers and Latin names, so a word in that alphabet is nothing it can compare with the source, and one glued to a name (GPTα) would make
+    a name the source does not write. So is a combining mark that stays on a Latin letter or a digit after NFC (x with a circumflex, i with a dot
     above), which a viewer sees and the name or the figure of the source never has. A numeral that has no ASCII digit (the ideographic zero 〇, the Chinese 一 and 十, Tamil and Ethiopic
     numbers, ↂ) is refused as well: NFKC leaves it as it is and it is no punctuation, yet a viewer reads a number in it that numbers()
     cannot (the digits that plain_char folds to ASCII, Arabic-Indic ones among them, are read and traced). The text of a video uses plain
@@ -452,6 +454,9 @@ def compat_problems(text: str) -> list:
         if ord(c) < 128:
             continue
         kind = unicodedata.category(c)[0]
+        if kind == "L" and not unicodedata.name(c, "").startswith("LATIN"):      # a letter of another alphabet (α Ж 東 ا א): nothing here traces it
+            found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
+            continue
         if unicodedata.numeric(c, None) is not None and plain_char(c) == c:      # a numeral that has no ASCII digit: 〇 一 十 ௰ ፲ ↂ
             found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
             continue
@@ -513,13 +518,13 @@ def vietnamese_syllable(piece: str) -> bool:
 
 def glued_names(chunk: str):
     """The names in a chunk that holds a letter outside ASCII. Its syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh) are words and are
-    left out; whatever is not one is a name with a letter glued on (ElevenLabsé, GPTé, npmé, C++é), however short. The Latin letters
-    with their accents stay in the name, so the name is the whole of what the viewer reads (GPT4é is not GPT4, and has_name asks for it as
-    it is); the letters of other alphabets stand for a break."""
+    left out; whatever is not one is a name with a letter glued on (ElevenLabsé, GPTé, GPTα, npmé, C++é), however short. Every letter
+    stays in the name, whatever its alphabet, so the name is the whole of what the viewer reads (GPT4é is not GPT4, GPTα is not GPT, and
+    has_name asks for it as it is)."""
     kept = []
     for piece in re.split(r"([-./:]+)", chunk):
         if re.fullmatch(r"[-./:]+", piece) or not vietnamese_syllable(piece):
-            kept.append("".join(c if ord(c) < 128 or unicodedata.name(c, "").startswith("LATIN") else " " for c in piece))
+            kept.append("".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in piece))
         else:
             kept.append(" ")
     for name in "".join(kept).split():
