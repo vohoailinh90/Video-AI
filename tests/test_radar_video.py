@@ -1423,8 +1423,15 @@ class ReviewFindings(unittest.TestCase):
                             ("Trừ: 5", "-5"), ("cộng:3", "+3"), ("dương \u201c2\u201d", "+2")):
             self.assertEqual(check_facts.numbers(text), {value}, text)
             self.assertEqual(check_facts.untraced(text, positive, set()), [f"number {value}"], text)
+        # however many of them there are: the voice says the word and then the number, whatever stands between, so the value is still negative
+        for text, value in (("âm::::19", "-19"), ("âm ----- 19%", "-19%"), ("trừ ===== 5", "-5"), ("cộng (((( 3", "+3"), ("dương :: \u201c\u201c 2", "+2"),
+                            ("âm" + ":" * 200 + "19", "-19"), ("âm::::.5", "-0.5")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+            self.assertEqual(check_facts.untraced(text, positive, set()), [f"number {value}"], text)
+        self.assertEqual(check_facts.untraced("âm::::19", check_facts.blob({"x": "giảm -19"}), set()), [])
+        self.assertEqual(numbers_vi.speak_text("âm::::19"), "âm::::mười chín")                  # what the viewer hears is a negative nineteen
         # a full stop, a comma or a semicolon ends a clause: the number after it is another one
-        for text in ("âm. 5 điểm", "âm, 19", "nghe âm; 5", "âm19"):
+        for text in ("âm. 5 điểm", "âm, 19", "nghe âm; 5", "âm19", "âm::::. 5", "âm:::;19"):
             self.assertNotIn("-", "".join(check_facts.numbers(text)), text)
         # the same words not before a number are only words
         self.assertEqual(check_facts.numbers("âm thanh 19 và cộng đồng 5 người, âm, cộng"), {"19", "5"})
@@ -2054,6 +2061,13 @@ class ReviewFindings(unittest.TestCase):
                     make_video.cmd_voice(args, project)
                 self.assertIn("not vo-N", errors.getvalue(), repr(bad))
                 self.assertFalse(ran.exists(), f"{bad!r} reached the synthesizer")
+            doc["lines"][1]["id"] = "vo-1"                                                  # two lines, one clip file: the later overwrites the earlier
+            (project / "voiceover.json").write_text(json.dumps(doc), encoding="utf-8")
+            errors = io.StringIO()
+            with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+                make_video.cmd_voice(args, project)
+            self.assertIn("two lines with the id 'vo-1'", errors.getvalue())
+            self.assertFalse(ran.exists(), "a repeated id reached the synthesizer")
             doc["lines"][1]["id"] = "vo-2"
             (project / "voiceover.json").write_text(json.dumps(doc), encoding="utf-8")
             make_video.load_project(project)                                                # the id scaffold writes: fine
@@ -2075,6 +2089,19 @@ class ReviewFindings(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, f"{script}: {result.stderr}")
                 self.assertIn("a line id is the name of its clip file", result.stderr, script)
             self.assertEqual(sorted(path.name for path in tmp.iterdir()), ["lines.json"], "nothing was written, in or outside the project")
+            # two lines with one id share a clip file (synth.py overwrites it, revoice.py sets one audio element twice): refused the same way
+            self.assertEqual(line_ids.duplicate_line_ids([{"id": "vo-1"}, {"id": "vo-2"}, {"id": "vo-1"}, {"id": "vo-1"}]), ["vo-1"])
+            self.assertEqual(line_ids.duplicate_line_ids([{"id": "vo-1"}, {"id": "VO-1"}, {"id": "vo-2"}]), ["VO-1"])      # one file on a disk that ignores case
+            self.assertEqual(line_ids.duplicate_line_ids([{"id": "vo-1"}, {"id": "vo-2"}, {}, "vo-1", {"id": 1}]), [])
+            lines.write_text(json.dumps({"lines": [{"id": "vo-1", "text": "x", "start": 1, "scene_end": 3}, {"id": "vo-1", "text": "y", "start": 3, "scene_end": 5}]}),
+                             encoding="utf-8")
+            for script, extra in (("synth.py", ["--lines", str(lines), "--out", str(tmp / "out")]),
+                                  ("revoice.py", ["--project", str(tmp), "--lines", str(lines), "--clips", str(tmp), "--out", str(tmp / "x.mp4")]),
+                                  ("roundtrip.py", ["--out", str(tmp / "r.json"), "--video", str(tmp / "v.mp4"), "--lines", str(lines), "--work", str(work)])):
+                result = subprocess.run([sys.executable, "-I", str(REPO / "scripts" / "vo" / script), *extra], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, f"{script}: {result.stderr}")
+                self.assertIn("two lines have the id 'vo-1'", result.stderr, script)
+            self.assertEqual(sorted(path.name for path in tmp.iterdir()), ["lines.json"], "nothing was written for a repeated id either")
 
     def test_a_digest_with_a_terminal_control_character_is_not_used_or_printed(self):
         attacks = {"an OSC that sets the clipboard": "x\x1b]52;c;ZXZpbA==\x07", "a CSI": "x\x1b[2J", "a bell": "x\x07", "a NUL": "x\x00",

@@ -473,9 +473,10 @@ def compat_problems(text: str) -> list:
     return list(found.values())
 
 
-# the words speak_text says for a sign, and their kin, up to three spaces, colons, equals signs, dashes, opening brackets or quotes before the
-# number; not a full stop, comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
-SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
+# the words speak_text says for a sign, and their kin, with spaces, colons, equals signs, dashes, opening brackets or quotes, however many, before
+# the number (the voice says the word and then the number, whatever stands between: "âm::::19" is still a negative value); not a full stop,
+# comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
+SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]+(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
 
 
 # The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x, GPT4é. The name check (latin_tokens, ascii_chunks) takes a
