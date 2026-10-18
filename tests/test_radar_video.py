@@ -893,7 +893,7 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(len(problems), 1, char)
             self.assertIn(f"U+{ord(char):04X}", problems[0], char)
         # a punctuation mark or a symbol outside the known marks is refused too: a Unicode hyphen, slash or colon can stand in a name
-        for char in ("\u2011", "\u2010", "\u2215", "\u2044", "\u2236", "\U0001F680", "\u2116", "\u2796", "\u2212", "\u2030", "\u2031"):
+        for char in ("\u2011", "\u2010", "\u2215", "\u2044", "\u2236", "\U0001F680", "\u2116", "\u2796", "\u2212", "\u2030", "\u2031", "\u00a9", "\u00ae", "\u00b0", "\u00d7", "\u20ac", "\u2265", "\u2022", "\u2190"):
             problems = check_facts.compat_problems(f"Open{char}AI")
             self.assertEqual(len(problems), 1, repr(char))
             self.assertIn(f"U+{ord(char):04X}", problems[0], repr(char))
@@ -904,7 +904,7 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.numbers("\u22123 và \u20105"), {"-3", "-5"})
         # what is left alone: the Vietnamese alphabet (also decomposed), ASCII, signs NFKC keeps, punctuation, spaces
         for text in ("Việt Nam, Hồ-Chí-Minh, nghiêng, Đức, ư ơ ê ô â ă", "Việt", "WeChat（微信）：ok，ok", "chờ… xong", "a b　c d",
-                     "© ® ° × → ← · • – — € $5 50% C++ C# 1/2 Python ≥ 3.10 “x” ‘y’"):
+                     "→ … – — · “x” ‘y’ $5 50% C++ C# 1/2 >= 3.10"):
             self.assertEqual(check_facts.compat_problems(text), [], text)
         # end to end, in the narration and on the page
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")

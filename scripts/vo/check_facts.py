@@ -389,10 +389,13 @@ def shown(text: str) -> str:
     return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
-# the marks beyond ASCII that the text of a video may use: quotes, dashes, the ellipsis, arrows, bullets, units and the like, and the full-width
-# brackets, colons and commas that stand around a name in another script (plain_char reads those as their ASCII twins)
-# A mark that is the unit of a number the check reads, as % is (‰, the per mille sign), is not in the list: the check would not read the figure.
-MARKS = set("“”‘’‚„«»‹›–—…→←↔·•©®°×÷±≈≠≤≥∞€£¥′″§¶†‡（）：，；！？［］。、「」『』〈〉《》【】～")
+# The marks beyond ASCII that the text of a video may use: only those that the real digests' text has (the arrow, the ellipsis, the en and em
+# dash) and the hand-made page has (the middle dot between the items of a list), plus curly quotes, and the full-width brackets, colon and
+# comma that stand around a name in another script (plain_char reads those as their ASCII twins). All of them but the full-width ones are
+# separators for the chunker (SPLIT), so none can join the parts of a name. The shorter the list, the fewer marks that can stand in a name or beside a figure without the check seeing them;
+# a mark the owner needs is one more character here. A mark that is the unit of a number the check reads, as % is (the per mille sign), is
+# not in the list.
+MARKS = set("“”‘’–—…→·（）：，")
 
 
 def compat_problems(text: str) -> list:
