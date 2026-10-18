@@ -114,7 +114,7 @@ thu ti to toi tu tua tui va vai van vao ve vi vo vua xa xe xi xo xu y yeu
 
 # a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
 # or 10-20, and a plus after one, as in 1+1 or x+5, are not signs) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
-NUMBER = re.compile(rf"(?:{SIGN_BEFORE})?(?:\$\s?)?\d[\d.,]*(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b)?\$?", re.I)    # PHẦN TRĂM is the same words
+NUMBER = re.compile(rf"(?:\$\s?)?(?:{SIGN_BEFORE})?(?:\$\s?)?\d[\d.,]*(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b)?\$?", re.I)    # PHẦN TRĂM is the same words
 PERCENT = re.compile(rf"[{PERCENT_CLASS}]|phần\s+trăm", re.I)
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
@@ -373,8 +373,8 @@ def canonical(number: str) -> str:
     """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
     three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus or plus sign and a percent sign belong
     to the value: -19 is not 19, +19% is not 19%, and 19% (or 19 phần trăm) is not 19."""
-    currency = "$" if "$" in number else ""                       # $19 and 19$ are the price, 19 is not
-    number = number.replace("$", "")
+    currency = "$" if "$" in number else ""                       # $19, 19$, $-19 and -$19 are the price, 19 is not
+    number = number.replace("$", "").lstrip()
     sign = "-" if number[:1] in MINUS else "+" if number[:1] in PLUS else ""
     percent = "%" if PERCENT.search(number) else ""
     number = re.sub(rf"\s?[{PERCENT_CLASS}]$|\s+phần\s+trăm$", "", number.lstrip(MINUS + PLUS).lstrip(), flags=re.I).rstrip(".,")
