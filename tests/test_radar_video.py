@@ -1682,6 +1682,18 @@ class ReviewFindings(unittest.TestCase):
         for row in rows:
             self.assertEqual(re.sub(r"\\.", "", row).count("|"), 6, "five cells, whatever the text says")
 
+    def test_the_readme_scaffold_leaves_is_as_safe_as_the_one_render_writes(self):
+        for name in ("![x](https://attacker.example/pixel)", "<img src=x onerror=alert(1)>", "<!-- hide", "a_b*c [d](e)"):
+            digest = digest_with(lambda d: d["facts"].__setitem__("full_name", f"owner/{name}"))
+            plan = planlib.build_plan(digest)
+            self.assertEqual(plan["name"], name)
+            readme = make_video.scaffold_readme(plan)
+            bare = re.sub(r"\\.", "", readme)                                              # without the backslash-escaped characters
+            for active in ("![", "](", "<img", "<!--", "https://attacker", "_b*"):
+                self.assertNotIn(active, bare, f"{name!r}: {active}")
+            self.assertTrue(readme.startswith("# Video thử: "))
+            self.assertEqual(len(readme.splitlines()[0].splitlines()), 1, "the title is one line")
+
 
 class Narration(unittest.TestCase):
     def test_reworded_lines_are_kept_and_judged_by_the_gate(self):
