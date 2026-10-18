@@ -9,9 +9,9 @@ Hai team dùng chung worker miễn phí (tester, coder, reviewer); khác nhau �
 |---|---|
 | Nhánh gốc | `main` |
 | Mức nhạy cảm | `public` |
-| Stack phát hiện | none |
-| Lệnh cài cho gates (có mạng) | không có (không cần cài gì) |
-| Lệnh kiểm gợi ý | chưa phát hiện được |
+| Stack phát hiện | python, node |
+| Lệnh cài cho gates (có mạng) | `(cd videos/demo-video && npm install) && (cd videos/voicestudio && npm install) && (cd videos/voicestudio-auto && npm install)` |
+| Lệnh kiểm gợi ý | `python3 -m unittest discover -s tests` |
 
 Các giá trị này nằm trong `repos.conf` trên VPS, không nằm trong repo này (worker ghi được vào repo, nên cấu hình chạy lệnh
 có mạng không được đặt ở đây). Muốn đổi thì sửa ở VPS.
@@ -27,7 +27,7 @@ nano /srv/team/work/F12/request.md                 # viết yêu cầu, tiếng 
 Mẫu `acceptance.md` (mỗi dòng phải thoát 0; trước khi code, tester phải làm chúng FAIL):
 
 ```bash
-# TODO: lệnh kiểm tra của feature
+python3 -m unittest discover -s tests
 ```
 
 ## Quy trình PR: Claude tự tạo PR, tự merge khi Codex và CI đều xanh
@@ -44,5 +44,10 @@ Nếu chính repo này đã ghi quy tắc riêng cho một bước ở trên (ai
 
 ## Ghi chú riêng của repo này
 
-- no recognised toolchain: documentation or static content; acceptance commands are plain shell checks
+- scripts/vo/ has Python dependencies of its own: the setup does not install them
+- Python without a requirements file or pyproject.toml: the gates run on the image's Python only
+- videos/demo-video/package.json has no lockfile: ?npm install? resolves versions at gate time
+- videos/voicestudio/package.json has no lockfile: ?npm install? resolves versions at gate time
+- videos/voicestudio-auto/package.json has no lockfile: ?npm install? resolves versions at gate time
+- package.json without a test script: write the acceptance commands by hand
 - Exception in this repository (replaces the matching rule above): Every video is its own project under videos/NAME. After each composition edit run `npm run check` in that directory (CLAUDE.md "Commands" and "Composition rules"); the team gates do not run it, because it needs the project's dependencies and the Chrome headless shell, so state in the report that it was run and what it printed.

@@ -7,7 +7,7 @@ This repository's working rules are in `CLAUDE.md`; read it as well as this file
 
 `vohoailinh90/Video-AI` is registered with the free-model team: `team` (Claude leads) and `team-codex` (Codex leads), with free models writing the tests, the code and a pre-review. The details are in `docs/TEAM.md`; the settings that differ per repository live in `repos.conf` on the VPS, not here.
 
-- Base branch `main`; sensitivity `public`; gates setup none (nothing to install); suggested test commands none detected.
+- Base branch `main`; sensitivity `public`; gates setup `(cd videos/demo-video && npm install) && (cd videos/voicestudio && npm install) && (cd videos/voicestudio-auto && npm install)`; suggested test commands `python3 -m unittest discover -s tests`.
 - If you are a team worker (tester, coder or reviewer), follow the handoff files you are given and touch only the files the task names. Never edit CI (`.github/`), agent instructions (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`), lockfiles or `repos.conf` unless the task says so.
 
 If you are Claude Code or Codex working on this repository directly (a spec, an audit or an ordinary change), this is the pull-request process:
