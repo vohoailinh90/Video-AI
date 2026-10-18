@@ -566,20 +566,21 @@ def vietnamese_syllable(piece: str) -> bool:
 
 
 def glued_names(chunk: str):
-    """The names in a chunk that holds a letter outside ASCII. Its syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh) are words and are
-    left out; whatever is not one is a name with a letter glued on (ElevenLabsé, GPTé, GPTα, npmé, C++é), however short. Every letter
-    stays in the name, whatever its alphabet, so the name is the whole of what the viewer reads (GPT4é is not GPT4, GPTα is not GPT, and
-    has_name asks for it as it is)."""
-    kept = []
-    for piece in re.split(r"([-./:]+)", chunk):
-        if re.fullmatch(r"[-./:]+", piece) or not vietnamese_syllable(piece):
-            kept.append("".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in piece))
-        else:
-            kept.append(" ")
-    for name in "".join(kept).split():
-        name = name.strip(".:,;-/")
-        if name:
-            yield name
+    """The names in a chunk that holds a letter outside ASCII. A chunk is cut at / and : into the names of a path or an address, and each of
+    those is a run of parts joined by - and . (as NAME joins them). A run made only of syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh), with
+    or without figures among them (3-bước, âm-19%), is words and is left out; any other is a name, with every part of it: a name with a letter glued on (ElevenLabsé, GPTé, GPTα, npmé, C++é)
+    and a name with a Vietnamese syllable joined to it (GPT-Việt, N:loại-agent) are each one name, however short, so GPT is not GPT-Việt and
+    agent is not loại-agent. Every letter stays in the name, whatever its alphabet, so the name is the whole of what the viewer reads (GPT4é
+    is not GPT4, GPTα is not GPT, and has_name asks for it as it is)."""
+    for segment in re.split(r"[/:]+", chunk):
+        parts = [part for part in re.split(r"[-.]+", segment) if part]
+        if parts and all(vietnamese_syllable(part) or not any(c.isalpha() for c in part) for part in parts):      # 3-bước, âm-19%: a word and a figure
+            continue
+        cleaned = "".join(c if ord(c) < 128 or unicodedata.category(c)[0] == "L" else " " for c in segment)
+        for name in cleaned.split():
+            name = name.strip(".:,;-/")
+            if name:
+                yield name
 
 
 SPLIT_KEEP = re.compile(f"({SPLIT.pattern})")      # the same, keeping what it split on
