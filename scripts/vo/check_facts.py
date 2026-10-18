@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
 from numbers_vi import MINUS, PERCENT_CLASS, PERCENT_SIGNS, PLUS, SIGN_BEFORE, plain_char, speak_text  # noqa: E402
+from numbers_vi import NUMBER as VOICE_NUMBER, VERSION as VOICE_VERSION  # noqa: E402     # what the voice reads as a number
 
 # The video template's own words. An element marked data-label is skipped by the trace only when its text is exactly one of these;
 # any other text in such an element is read like the rest of the page. scripts/radar/compose.py takes its labels from here.
@@ -480,23 +481,33 @@ def compat_problems(text: str) -> list:
 SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]+(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
 
 
-# The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x, GPT4é. The name check (latin_tokens, ascii_chunks) takes a
-# chunk with a letter as a name and has_name() checks it as a whole against the source, so the digits that touch a letter or an underscore
-# inside such a chunk are the name's own: the voice reads them that way too (numbers_vi.NUMBER), and they are no figure the text states,
-# so a text cannot take its "4" from GPT4. The chunks are the ones latin_tokens checks, no others: digits in a word the name check does not
-# take stay figures and are checked as figures (999đ, 2025năm). Digits that start a name and are parted from the letters after them by a
-# hyphen (7-Zip, 19-foo, 3.5-inch) are the name's too: the voice leaves them (numbers_vi.NUMBER does not read digits that a hyphen follows),
-# and the name is checked as a whole. Digits after a hyphen (AGPL-3.0, Apache-2.0-or-later, python-3-venv) are a version, which the voice
-# reads as a number (numbers_vi.VERSION), so it is a figure here too.
-DIGITS_OF_A_NAME = re.compile(r"(?<=[A-Za-z_])\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*(?=[A-Za-z_])|(?<![\w.,-])\d+(?:[.,]\d+)*(?=-[A-Za-z_])")
+# The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x, GPT4é, 7-Zip, 19---foo, 7-8-Zip. The name check (latin_tokens,
+# ascii_chunks) takes a chunk with a letter as a name and has_name() checks it as a whole against the source. A run of digits inside such a
+# chunk is a figure the text may state only when the voice reads it as a number, and the voice does that in two cases and no other
+# (numbers_vi): a number that stands alone (nothing of a word, a point, a comma or a hyphen before it, no letter, digit or hyphen after it:
+# 1280*704, python@3.10, --depth=1) and a version after a letter and a single hyphen (AGPL-3.0, Apache-2.0-or-later, python-3-venv). Every
+# other run is left as it is by the voice (it says GPT4 and 7-Zip as they are written), so it is the name's own and no figure: a text cannot
+# take its "4" from GPT4 or its "7" from 7-Zip, however many hyphens, letters or digits stand around it. The chunks are the ones latin_tokens
+# checks, no others: digits in a word the name check does not take stay figures and are checked as figures (999đ, 2025năm).
+DIGIT_RUN = re.compile(r"\d+(?:[.,]\d+)*")
 NOT_A_FIGURE = "\ue000"      # replaces those digits; a private-use character is neither a digit nor a word character
 VALUE_END = "\ue001"         # replaces VALUE_BREAK when figures are read: not white space (\s matches \x1e), not a word character, not a sign
 
 
+def digits_of_a_name(name: str) -> str:
+    """The name with every run of digits that the voice does not read as a number replaced by NOT_A_FIGURE."""
+    read = set()
+    for match in VOICE_VERSION.finditer(name):
+        read.update(range(*match.span(1)))
+    for match in VOICE_NUMBER.finditer(name):
+        read.update(range(*match.span(2)))
+    return DIGIT_RUN.sub(lambda run: run.group(0) if run.start() in read else NOT_A_FIGURE * len(run.group(0)), name)
+
+
 def without_the_digits_of_names(text: str) -> str:
     for name in sorted(set(ascii_chunks(text)), key=len, reverse=True):
-        if len(name) >= 2 and DIGITS_OF_A_NAME.search(name):
-            masked = DIGITS_OF_A_NAME.sub(lambda digits: NOT_A_FIGURE * len(digits.group(0)), name)
+        masked = digits_of_a_name(name) if len(name) >= 2 else name
+        if masked != name:
             text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", lambda _: masked, text)
     return text
 

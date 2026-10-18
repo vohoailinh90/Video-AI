@@ -1378,7 +1378,7 @@ class ReviewFindings(unittest.TestCase):
     def test_the_digits_in_front_of_a_hyphenated_name_are_the_names_own(self):
         # 7-Zip, 19-foo, python-3-venv, 3.5-inch: a hyphen between the digits and the letters after them does not make a figure of them. The voice leaves
         # them (numbers_vi.NUMBER does not read digits that a hyphen follows), and the name is checked as a whole
-        for name in ("7-Zip", "19-foo", "3.5-inch", "3-step", "v2-beta", "gpt-4o"):
+        for name in ("7-Zip", "19-foo", "3.5-inch", "3-step", "v2-beta", "gpt-4o", "7--Zip", "19---foo", "7-8-Zip", "foo--3.0", "12-34-56-ab"):
             self.assertEqual(check_facts.numbers(name), set(), name)
             self.assertEqual(check_facts.numbers(f"dùng {name} và {name}"), set(), name)
             self.assertEqual(numbers_vi.speak_text(name), name, name)
@@ -1398,6 +1398,14 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(numbers_vi.speak_text(name), spoken, name)
             self.assertEqual(untraced(figure, name), [], name)
             self.assertEqual(untraced(figure, "dùng một thứ khác"), [f"number {figure}"], name)
+        self.assertEqual(untraced("7", "7--Zip"), ["number 7"])
+        self.assertEqual(untraced("19", "19---foo"), ["number 19"])
+        self.assertEqual(untraced("8", "7-8-Zip"), ["number 8"])
+        # the rule is the voice's: a run of digits in a name is a figure exactly when the voice says it as a number, whatever stands around it
+        for name in ("7-Zip", "7--Zip", "7-8-Zip", "python-3-venv", "AGPL-3.0", "AGPL-3.0-only", "Apache-2.0-or-later", "3.5-inch", "gpt-4o", "GPT4",
+                     "H100", "x86_64", "16GB", "3.5x", "v1.5", "python@3.10", "--depth=1", "1280*704", "US$19", "foo--3.0", "node-v18.2.0", "Qwen3", "a.b-7-c",
+                     "foo-1,000", "foo_3", "3d", "MP4", "ab-12-cd-3.4"):
+            self.assertEqual(bool(check_facts.numbers(name)), numbers_vi.speak_text(name) != name, name)
         # a range, and digits that no name check takes, stay figures
         self.assertEqual(check_facts.numbers("5-10 và 10-20 phút"), {"5", "10", "20"})
         self.assertEqual(check_facts.numbers("quy trình 3-bước"), {"3"})
