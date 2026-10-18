@@ -344,8 +344,9 @@ def blob(value) -> str:
 # letter whose Unicode name starts with LATIN, accents and the extended blocks alike), so \w is exactly those: the two never differ, whichever
 # block a Latin letter is in (café, GPT4é, GPTⱥ).
 # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#, C++Builder, C#Sharp, C++-Builder, C++.NET: a name ends at / : space ... A C++ or a C# with more name
-# after it (joined or by a - or a .) is one name. Any run of - and . joins two parts (foo--bar, 7--Zip, a.-b are one name each).
-NAME = re.compile(r"\w+(?:[-.]+\w+)*(?:(?:\+\+?|#)(?:[-.]*\w+(?:[-.]+\w+)*)?)?")
+# after it (joined or by a - or a .) is one name, and so is a chain of them (foo+bar+baz, C++Builder+Addon, a#b#c). Any run of - and . joins two
+# parts (foo--bar, 7--Zip, a.-b are one name each).
+NAME = re.compile(r"\w+(?:[-.]+\w+)*(?:(?:\+\+?|#)(?:[-.]*\w+(?:[-.]+\w+)*)?)*")
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
 NAME_CONTINUES = re.compile(r"[\w+#]")      # what may not follow a name for it to be a name of its own (has_name asks the same of a token)
 
