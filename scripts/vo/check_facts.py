@@ -339,7 +339,8 @@ def blob(value) -> str:
     return VALUE_BREAK.join(parts).lower()
 
 
-NAME = re.compile(r"[a-z0-9_]+(?:[-.][a-z0-9_]+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
+NAME_CHARS = "a-z0-9_\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff"      # lower case; the Latin letters with accents are part of a name (café, GPT4é)
+NAME = re.compile(rf"[{NAME_CHARS}]+(?:[-.][{NAME_CHARS}]+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
 
 
@@ -372,7 +373,7 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
         return True
     # whole, by the grammar of NAME: nothing that continues a name (letters, digits, _, a - or . and a letter after it, + or #) may touch it
     # on either side, so https://foo.com/example/repo is not in https://foo.com/example/repo-extra, nor foo.com/x in my-foo.com/x
-    return re.search(rf"(?<![a-z0-9_])(?<![a-z0-9_][-.]){re.escape(low)}(?![a-z0-9_]|[-.][a-z0-9_]|\+|#)", source_blob) is not None
+    return re.search(rf"(?<!\w)(?<!\w[-.]){re.escape(low)}(?!\w|[-.]\w|\+|#)", source_blob) is not None
 
 
 def canonical(number: str) -> str:
