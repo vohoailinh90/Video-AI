@@ -450,9 +450,10 @@ def compat_problems(text: str) -> list:
     previous = ""
     for c in unicodedata.normalize("NFC", text):
         category, before, previous = unicodedata.category(c), previous, c
-        if category in ("Mn", "Me"):
-            # a combining mark that NFC could not join to its letter (x with a circumflex, i with a dot above) or that has nothing to join but a
-            # sign or a space ($ with an enclosing circle): it is drawn, and no name or number of the source has it, so it is refused
+        if category[0] == "M":
+            # a combining mark (Mn, Me, and the spacing ones, Mc, such as a Devanagari vowel sign) that NFC could not join to its letter (x with a
+            # circumflex, i with a dot above) or that has nothing to join but a sign or a space ($ with an enclosing circle): it is drawn, and
+            # no name or number of the source has it, so it is refused
             found.setdefault(c, f"U+{ord(c):04X} (combining mark on {before!r})")
             continue
         if category == "Cc" and c not in "\t\n\r" + VALUE_BREAK or category == "Cf":
@@ -483,9 +484,11 @@ SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑
 # chunk with a letter as a name and has_name() checks it as a whole against the source, so the digits that touch a letter or an underscore
 # inside such a chunk are the name's own: the voice reads them that way too (numbers_vi.NUMBER), and they are no figure the text states,
 # so a text cannot take its "4" from GPT4. The chunks are the ones latin_tokens checks, no others: digits in a word the name check does not
-# take stay figures and are checked as figures (999đ, 2025năm). A version after a hyphen (AGPL-3.0, Apache-2.0) does not touch a letter,
-# and is a figure, as the voice reads it.
-DIGITS_OF_A_NAME = re.compile(r"(?<=[A-Za-z_])\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*(?=[A-Za-z_])")
+# take stay figures and are checked as figures (999đ, 2025năm). Digits that start a name and are parted from the letters after them by a
+# hyphen (7-Zip, 19-foo, 3.5-inch) are the name's too: the voice leaves them (numbers_vi.NUMBER does not read digits that a hyphen follows),
+# and the name is checked as a whole. Digits after a hyphen (AGPL-3.0, Apache-2.0-or-later, python-3-venv) are a version, which the voice
+# reads as a number (numbers_vi.VERSION), so it is a figure here too.
+DIGITS_OF_A_NAME = re.compile(r"(?<=[A-Za-z_])\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*(?=[A-Za-z_])|(?<![\w.,-])\d+(?:[.,]\d+)*(?=-[A-Za-z_])")
 NOT_A_FIGURE = "\ue000"      # replaces those digits; a private-use character is neither a digit nor a word character
 VALUE_END = "\ue001"         # replaces VALUE_BREAK when figures are read: not white space (\s matches \x1e), not a word character, not a sign
 

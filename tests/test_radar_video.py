@@ -1375,9 +1375,36 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("C++", "chu\u1ea9n C++11"), ["token 'C++'"])
         self.assertIn("token 'C++11'", untraced("C++11", "chu\u1ea9n C++"))
 
+    def test_the_digits_in_front_of_a_hyphenated_name_are_the_names_own(self):
+        # 7-Zip, 19-foo, python-3-venv, 3.5-inch: a hyphen between the digits and the letters after them does not make a figure of them. The voice leaves
+        # them (numbers_vi.NUMBER does not read digits that a hyphen follows), and the name is checked as a whole
+        for name in ("7-Zip", "19-foo", "3.5-inch", "3-step", "v2-beta", "gpt-4o"):
+            self.assertEqual(check_facts.numbers(name), set(), name)
+            self.assertEqual(check_facts.numbers(f"dùng {name} và {name}"), set(), name)
+            self.assertEqual(numbers_vi.speak_text(name), name, name)
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        self.assertEqual(untraced("7", "7-Zip"), ["number 7"])                    # a part of a name is not a figure the text may state
+        self.assertEqual(untraced("19", "dùng 19-foo"), ["number 19"])
+        self.assertEqual(untraced("3.5", "3.5-inch"), ["number 3.5"])
+        self.assertEqual(untraced("7-Zip", "dùng 7-Zip"), [])                     # the name traces to itself
+        self.assertEqual(untraced("3.5-inch", "màn 3.5-inch"), [])
+        self.assertEqual(untraced("9-Zip", "7-Zip"), ["token '9-Zip'"])           # and another name does not
+        self.assertEqual(untraced("7 người dùng 7-Zip", "7 người dùng 7-Zip"), [])      # a figure of its own is still one
+        self.assertEqual(untraced("7", "7 người dùng 7-Zip"), [])
+        # digits after a hyphen are a version, which the voice reads as a number (python-3-venv is said "python ba-venv"): a figure here too
+        for name, figure, spoken in (("AGPL-3.0", "3.0", "AGPL ba chấm không"), ("Apache-2.0-or-later", "2.0", "Apache hai chấm không-or-later"),
+                                     ("python-3-venv", "3", "python ba-venv")):
+            self.assertEqual(check_facts.numbers(name), {figure}, name)
+            self.assertEqual(numbers_vi.speak_text(name), spoken, name)
+            self.assertEqual(untraced(figure, name), [], name)
+            self.assertEqual(untraced(figure, "dùng một thứ khác"), [f"number {figure}"], name)
+        # a range, and digits that no name check takes, stay figures
+        self.assertEqual(check_facts.numbers("5-10 và 10-20 phút"), {"5", "10", "20"})
+        self.assertEqual(check_facts.numbers("quy trình 3-bước"), {"3"})
+
     def test_a_combining_mark_is_refused_whatever_it_sits_on(self):
         # on a sign, a punctuation mark or a space it is drawn too, and shown() would drop it (it has nothing to join)
-        for text in ("$⃝19", "⃝", "a !́ b", "a ́b", "5⃝", "(̈)", "% ⃣", "a-̂b"):
+        for text in ("$⃝19", "⃝", "a !́ b", "a ́b", "5⃝", "(̈)", "% ⃣", "a-̂b", "GPT\u093e", "a\u0903b", "5\u093e", "$\u093e19", "GPT\u0bcd"):
             problems = check_facts.compat_problems(f"có {text} đây")
             self.assertTrue(problems, repr(text))
             self.assertTrue(all("combining mark" in p for p in problems), (text, problems))
