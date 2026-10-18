@@ -1400,6 +1400,16 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("C++", "dùng C++--Builder"), ["token 'C++'"])
         self.assertEqual(untraced("Builder", "dùng C++--Builder"), ["token 'Builder'"])
 
+    def test_a_plus_or_a_hash_before_a_name_with_an_accented_letter_makes_it_part_of_a_longer_name(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        for longer in ("C++GPTé", "C#GPTé", "foo+GPTé", "foo#GPTé", "C++-GPTé", "C+++GPTé", "1+GPTé", "foo++.GPTé"):
+            self.assertEqual(untraced("GPTé", f"dùng {longer}"), ["token 'GPTé'"], longer)
+        for fine in ("GPTé", "dùng GPTé.", "#GPTé", "(+GPTé)", "xem: GPTé, và", "C++ và GPTé", "C++/GPTé"):
+            self.assertEqual(untraced("GPTé", fine), [], fine)
+        for longer in ("x#github.com/o/r", "C++github.com/o/r", "foo+github.com/o/r"):
+            self.assertEqual(untraced("github.com/o/r", longer), ["token 'github.com/o/r'"], longer)
+        self.assertEqual(untraced("github.com/o/r", "#github.com/o/r"), [])
+
     def test_the_digits_in_front_of_a_hyphenated_name_are_the_names_own(self):
         # 7-Zip, 19-foo, python-3-venv, 3.5-inch: a hyphen between the digits and the letters after them does not make a figure of them. The voice leaves
         # them (numbers_vi.NUMBER does not read digits that a hyphen follows), and the name is checked as a whole
@@ -1488,6 +1498,17 @@ class ReviewFindings(unittest.TestCase):
                             ("âm" + ":" * 200 + "19", "-19"), ("âm::::.5", "-0.5")):
             self.assertEqual(check_facts.numbers(text), {value}, text)
             self.assertEqual(check_facts.untraced(text, positive, set()), [f"number {value}"], text)
+        # whatever stands between the word and the number, if it is not the end of a clause or of a value: a slash, a bar, an arrow, a star, an at sign
+        for separator in ("/", "\\", "|", "\u2192", "*", "@", "\u00b7", "\u2022", "<", ">", "^", "&", "`", "~", "#", "/ ", " / ", "//", "|||", "\u2192\u2192"):
+            text = f"âm{separator}19"
+            self.assertEqual(check_facts.numbers(text), {"-19"}, text)
+            self.assertIn("number -19", check_facts.untraced(text, positive, set()), text)
+        self.assertEqual(check_facts.numbers("trừ/5 và cộng/3 và dương|.5"), {"-5", "+3", "+0.5"})
+        self.assertEqual(check_facts.untraced("âm/19", check_facts.blob({"x": "giảm -19"}), set()), [])      # and a source that has the negative value traces it
+        for text in ("âm. 19", "âm, 19", "âm; 19", "âm! 19", "âm? 19", "âm\u2026 19", "(âm) 19", "[âm] 19", "{âm} 19", "âm/. 19", "âm/, 19", "âm/;19"):
+            self.assertEqual(check_facts.numbers(text), {"19"}, text)              # the end of a clause: the number after it is another one
+        self.assertEqual(check_facts.numbers("âm\u00a0 \t\n19"), {"-19"})
+        self.assertEqual(check_facts.numbers(check_facts.VALUE_BREAK.join(["âm", "19"])), {"19"})            # the end of a value is not a gap
         self.assertEqual(check_facts.untraced("âm::::19", check_facts.blob({"x": "giảm -19"}), set()), [])
         self.assertEqual(numbers_vi.speak_text("âm::::19"), "âm::::mười chín")                  # what the viewer hears is a negative nineteen
         # a full stop, a comma or a semicolon ends a clause: the number after it is another one

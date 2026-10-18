@@ -367,12 +367,13 @@ def names_in(source_blob: str) -> set:
 
 
 def stands_whole(low: str, source_blob: str) -> bool:
-    """The text `low` is somewhere in the source with no name touching it on either side: no word character (and no run of - and . after
-    one) before it, and none after it (nor a run of - and . and then one, nor a + or a #). So foo.com/x is not in my-foo.com/x or in
-    foo.com/x-extra, GPT4é is not in GPT4é--extra or in my--GPT4é, and bar is not in foo--bar."""
+    """The text `low` is somewhere in the source with no name touching it on either side: no word character (nor a run of -, ., + and #
+    after one) before it, and none after it (nor a run of - and . and then one, nor a + or a #). So foo.com/x is not in my-foo.com/x or in
+    foo.com/x-extra, GPT4é is not in GPT4é--extra, my--GPT4é, C++GPTé or foo#GPTé, and bar is not in foo--bar. A # or a + with no word before
+    it (a hashtag, (+GPTé)) is not a name's."""
     for match in re.finditer(re.escape(low), source_blob):
         start, end = match.span()
-        while start > 0 and source_blob[start - 1] in "-.":
+        while start > 0 and source_blob[start - 1] in "-.+#":      # C++GPTé, foo#GPTé, GPTé after a run of - and .: the rest of a longer name
             start -= 1
         if start > 0 and re.match(r"\w", source_blob[start - 1]):
             continue
@@ -495,10 +496,11 @@ def compat_problems(text: str) -> list:
     return list(found.values())
 
 
-# the words speak_text says for a sign, and their kin, with spaces, colons, equals signs, dashes, opening brackets or quotes, however many, before
-# the number (the voice says the word and then the number, whatever stands between: "âm::::19" is still a negative value); not a full stop,
-# comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
-SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]+(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
+# the words speak_text says for a sign, and their kin, and whatever stands between them and the number: the voice says the word and then the number,
+# so "âm/19", "âm::::19", "âm | 19" and "âm → 19" are all a negative value. What stands between is anything that is not a word character, the
+# end of a clause (a full stop, comma, semicolon, ! ? or an ellipsis, a closing bracket: "âm. 5 điểm" is a sentence and then a number) or part of
+# the figure ($, %, a +, which the figure takes for itself), and not the end of a value (VALUE_END) or a masked name digit (NOT_A_FIGURE)
+SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[^\w.,;!?\u2026$%)\]}+\ue000\ue001]+(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
 
 
 # The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x, GPT4é, 7-Zip, 19---foo, 7-8-Zip. The name check (latin_tokens,
