@@ -808,7 +808,7 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(untraced(f"GPT{letter}", check_facts.blob({"field": f"dùng GPT{letter}"})), [], letter)
         self.assertEqual(untraced("github.com/foo/bar", check_facts.blob({"field": "github.com/foo/baré"})), ["token 'github.com/foo/bar'"])
         self.assertEqual(untraced("github.com/foo/bar", check_facts.blob({"field": "github.com/foo/bar"})), [])
-        self.assertEqual(untraced("Tokyo東京", check_facts.blob({"field": "Tokyo"})), [])                   # the letters of other alphabets stand for a break
+        self.assertEqual(untraced("Tokyo\u6771\u4eac", check_facts.blob({"field": "Tokyo"})), ["token 'Tokyo\u6771\u4eac'"])     # nor is a name with a word of another alphabet glued on
         # a syllable of Vietnamese is a word, not a name, whatever it is made of
         self.assertEqual(untraced("Việt, Hà Nội, Hồ-Chí-Minh, nghiêng, khuỷu, Nguyễn, quyển, thuyền, uống, ngoằn, Đức, ừm, ý, giường, gì, loắt, hoặc"), [])
         self.assertTrue(all(check_facts.vietnamese_syllable(word) for word in ("Việt", "Đà", "nghiêng", "ừ", "ơ", "Huế", "yêu", "khuỷu")))
@@ -929,7 +929,7 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(check_facts.untraced("Open-AI", check_facts.blob({"fact": f"Open{char}AI"}), set()), [], repr(char))
         self.assertEqual(check_facts.numbers("\u22123 và \u20105"), {"-3", "-5"})
         # what is left alone: the Vietnamese alphabet (also decomposed), ASCII, signs NFKC keeps, punctuation, spaces
-        for text in ("Việt Nam, Hồ-Chí-Minh, nghiêng, Đức, ư ơ ê ô â ă", "Việt", "WeChat（微信）：ok，ok", "chờ… xong", "a b　c d",
+        for text in ("Việt Nam, Hồ-Chí-Minh, nghiêng, Đức, ư ơ ê ô â ă", "Việt", "WeChat（Weixin）：ok，ok", "chờ… xong", "a b　c d",
                      "→ … – — · “x” ‘y’ $5 50% C++ C# 1/2 >= 3.10"):
             self.assertEqual(check_facts.compat_problems(text), [], text)
         # end to end, in the narration and on the page
@@ -1133,8 +1133,32 @@ class ReviewFindings(unittest.TestCase):
             problems = check_facts.compat_problems(f"có {text} đây")
             self.assertEqual(len(problems), 1, repr(text))
             self.assertIn("combining mark", problems[0])
-        for fine in ("tiếng Việt, Hà Nội", "é và â (NFC joins them)", "İstanbul", "नमस्ते"):
+        for fine in ("tiếng Việt, Hà Nội", "é và â (NFC joins them)", "İstanbul"):
             self.assertEqual(check_facts.compat_problems(fine), [], fine)
+
+    def test_a_letter_of_another_alphabet_is_refused_and_is_part_of_the_name_it_touches(self):
+        # nothing in the check traces a Greek, Cyrillic, Han or Devanagari word, so none is allowed in the text of a video
+        for char in ("α", "Ж", "東", "न", "ا", "א", "あ", "ア", "한", "ก"):
+            problems = check_facts.compat_problems(f"có {char} đây")
+            self.assertEqual(len(problems), 1, repr(char))
+            self.assertIn(f"U+{ord(char):04X}", problems[0], repr(char))
+        self.assertEqual(check_facts.compat_problems("tiếng Việt, GPT-4o, café, İstanbul, đ, 62.958"), [])
+        # and a name the source writes with such a letter glued on is that whole name, both ways
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        for name, glued in (("GPT", "GPTα"), ("GPT", "GPTЖ"), ("GPT", "使用GPT模型"), ("npm", "npmन")):
+            self.assertEqual(untraced(name, f"dùng {glued}"), [f"token '{name}'"], glued)
+            self.assertEqual(untraced(glued, f"dùng {name}"), [f"token '{glued}'"], glued)
+            self.assertEqual(untraced(glued, f"dùng {glued}"), [], glued)
+        self.assertEqual(untraced("GPT", "dùng GPT α"), [])                       # apart, they are two words
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        doc["lines"][0]["text"] += " GPTα"
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("U+03B1 GREEK SMALL LETTER ALPHA", output)
 
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
