@@ -796,6 +796,12 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("faster-whisper", check_facts.blob({"field": "faster-whisper-large-v3"})), ["token 'faster-whisper'"])     # as the ASCII rule
         self.assertEqual(untraced("café, naïve, Müller", check_facts.blob({"field": "café, naïve, Müller"})), [])  # a Latin name with its accents, as the source has it
         self.assertEqual(untraced("cafe", check_facts.blob({"field": "café"})), ["token 'cafe'"])
+        # and the other way: the source's name is the whole of it, so no ASCII prefix of it is a name the source writes
+        for short, source in (("Caf", "café"), ("caf", "café"), ("GPT4", "GPT4é"), ("GPT", "GPTé"), ("npm", "npmé"), ("H100", "H100đ")):
+            self.assertEqual(untraced(short, check_facts.blob({"field": f"dùng {source}"})), [f"token '{short}'"], short)
+        self.assertEqual(untraced("GPT4", check_facts.blob({"field": "dùng GPT4 và GPT4é"})), [])          # unless the source writes it too
+        self.assertEqual(untraced("github.com/foo/bar", check_facts.blob({"field": "github.com/foo/baré"})), ["token 'github.com/foo/bar'"])
+        self.assertEqual(untraced("github.com/foo/bar", check_facts.blob({"field": "github.com/foo/bar"})), [])
         self.assertEqual(untraced("Tokyo東京", check_facts.blob({"field": "Tokyo"})), [])                   # the letters of other alphabets stand for a break
         # a syllable of Vietnamese is a word, not a name, whatever it is made of
         self.assertEqual(untraced("Việt, Hà Nội, Hồ-Chí-Minh, nghiêng, khuỷu, Nguyễn, quyển, thuyền, uống, ngoằn, Đức, ừm, ý, giường, gì, loắt, hoặc"), [])
