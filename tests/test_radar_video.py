@@ -1420,6 +1420,20 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("--flag", "chạy flag"), ["token '--flag'"])
         self.assertEqual(untraced("src/", "mở thư mục src"), ["token 'src/'"])
 
+    def test_a_chain_of_plus_or_hash_groups_is_one_name(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        # foo+bar+baz, C++Builder+Addon, a#bb#cc: every group joined by + or # belongs to the name, not only the first
+        for whole, parts in (("foo+bar+baz", ("bar", "baz", "foo+bar")), ("C++Builder+Addon", ("Addon", "Builder", "C++Builder")),
+                             ("aa#bb#cc", ("bb", "cc", "aa#bb")), ("foo+bar#baz+qux", ("baz", "qux", "foo+bar#baz")), ("C+++Builder", ("Builder", "C++"))):
+            self.assertEqual(untraced(whole, f"dùng {whole} nhé"), [], whole)
+            for part in parts:
+                self.assertEqual(untraced(part, f"dùng {whole} nhé"), [f"token '{part}'"], (whole, part))
+        # as before: C++ and C# alone, and a + or a # that is not a name's
+        for text, source in (("C++", "C++"), ("C#", "C#"), ("C+", "C+"), ("C++11", "chuẩn C++11"), ("3.10+", "Python 3.10+")):
+            self.assertEqual(untraced(text, source), [], text)
+        for text, source in (("C+++", "C++"), ("C++", "C+++"), ("C##", "C#"), ("C++Builder", "C++")):
+            self.assertEqual(untraced(text, source), [f"token '{text}'"], text)
+
     def test_a_run_of_hyphens_or_dots_joins_the_parts_of_one_name(self):
         untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
         # foo--bar, 7--Zip, 19---foo, foo.-bar: one name each, as foo-bar is. None of its parts is a name of the source
