@@ -565,12 +565,29 @@ def vietnamese_syllable(piece: str) -> bool:
     return VIETNAMESE_SYLLABLE.fullmatch(base.replace("đ", "d")) is not None
 
 
+VIETNAMESE_MARKS = {0x0300, 0x0301, 0x0302, 0x0303, 0x0306, 0x0309, 0x031B, 0x0323}      # the tones and the marks of ă â ê ô ơ ư
+
+
+def name_letter(c: str) -> bool:
+    """A letter that makes a chunk a name: any ASCII letter, and any Latin letter that is not a letter of Vietnamese (Æ Ø ß Þ Ł). The letters
+    of Vietnamese outside ASCII (đ, and a base letter with the tones and marks above) do not: 999đ is a price and 5đ a price, not names."""
+    if not c.isalpha():
+        return False
+    if c.isascii():
+        return True
+    if c in "đĐ":
+        return False
+    decomposed = unicodedata.normalize("NFD", c)
+    return not (decomposed[0].isascii() and all(ord(mark) in VIETNAMESE_MARKS for mark in decomposed[1:]))
+
+
 def vietnamese_word(piece: str) -> bool:
-    """A part of a chunk that is a word of Vietnamese and not a name. An acronym (AI, ML, UI: ASCII letters in capitals, two or more) has the
-    shape of a syllable too (ai), but a Vietnamese word is not written so in a name like AI-Việt, and the same letters as a chunk of their own
-    are checked as a name; so here. A short word in lower case or Capitalised (Go, Nam, Minh) cannot be told from a name without a dictionary:
+    """A part of a chunk that is a word of Vietnamese and not a name. An acronym (AI, ML, UI: ASCII letters in capitals) has the shape of a
+    syllable too (ai), and so has each letter of one that is spelled with dots or hyphens (A.I-Việt, U-I-Việt): a Vietnamese word is not
+    written so in a name like AI-Việt, and the same letters as a chunk of their own are checked as a name; so here. A single ASCII letter is
+    an initial, never a word. A short word in lower case or Capitalised (Go, Nam, Minh) cannot be told from a name without a dictionary:
     that is the limit of this check, as for a name with one accent glued on."""
-    return vietnamese_syllable(piece) and not (piece.isascii() and piece.isupper() and len(piece) >= 2)
+    return vietnamese_syllable(piece) and not (piece.isascii() and (piece.isupper() or len(piece) == 1))
 
 
 def glued_names(chunk: str):
@@ -617,7 +634,7 @@ def ascii_chunks(text: str, need_letter: bool = True):
             continue
         if re.search(r"[^\x00-\x7f]", chunk):
             for name in glued_names(chunk):
-                if not need_letter or re.search(r"[A-Za-z]", name):
+                if not need_letter or any(name_letter(c) for c in name):      # ÆØ and ßß are names with no ASCII letter in them; 999đ is not
                     yield name
         elif chunk and (not need_letter or re.search(r"[A-Za-z]", chunk)):
             yield chunk
