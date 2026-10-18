@@ -424,6 +424,13 @@ def cmd_plan(args):
     print(planlib.format_plan(planlib.build_plan(digest, speech_seconds=args.speech_seconds)))
 
 
+def scaffold_readme(plan) -> str:
+    """The README a scaffolded project has until `render` writes the real one. The repository name is the digest's, so it goes through
+    md_text like every other value of a README that comes from the digest."""
+    return (f"# Video thử: {md_text(plan['name'])} (từ bài GitHub Radar)\n\nMới tạo khung (scaffold), chưa có giọng đọc và chưa render. "
+            f"Nguồn: `source/draft-vi.json`. Chạy `scripts/radar/make_video.py voice` rồi `render`: xem `docs/radar-to-video.md`.\n")
+
+
 def cmd_scaffold(args) -> Path:
     digest = planlib.load_digest(args.digest)
     plan = planlib.build_plan(digest, speech_seconds=args.speech_seconds)
@@ -459,9 +466,7 @@ def cmd_scaffold(args) -> Path:
     tl = planlib.timeline(plan, {u["id"]: u["est"] for u in plan["units"]})
     write_composition(project, plan, tl)
     make_pad(project / "assets" / "pad.wav", tl["duration"])
-    (project / "README.md").write_text(
-        f"# Video thử: {plan['name']} (từ bài GitHub Radar)\n\nMới tạo khung (scaffold), chưa có giọng đọc và chưa render. "
-        f"Nguồn: `source/draft-vi.json`. Chạy `scripts/radar/make_video.py voice` rồi `render`: xem `docs/radar-to-video.md`.\n", encoding="utf-8")
+    (project / "README.md").write_text(scaffold_readme(plan), encoding="utf-8")
 
     print(planlib.format_plan(plan))
     print(f"\nscaffolded {rel(project)} (estimated video length {tl['duration']:.0f} s; the real length follows the voice)")
