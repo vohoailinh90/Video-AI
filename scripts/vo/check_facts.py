@@ -438,31 +438,30 @@ def compat_problems(text: str) -> list:
 SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
 
 
-# The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x. Digits that touch an ASCII letter inside a word of ASCII (letters,
-# digits, _ and a . or , between them) belong to that name, which has_name() checks as a whole (latin_tokens); the voice reads them the same way
-# (numbers_vi.NUMBER), so they are no figure the text states and a text cannot take its "4" from GPT4. Only those: digits that touch a letter
-# outside ASCII (999đ, 2025năm, Việt4) are in a word the name check does not take, so they stay figures and are checked as figures. A version
-# after a hyphen (AGPL-3.0, Apache-2.0) is a word of its own with no letter, and is a figure, as the voice reads it.
-ASCII_WORD = re.compile(r"(?<!\w)[A-Za-z0-9_]+(?:[.,][A-Za-z0-9_]+)*(?!\w)")
+# The digits of a name: GPT4, H100, SHA256, MP4, gpt-4o, v1.5, x86, 16GB, 3.5x, GPT4é. The name check (latin_tokens, ascii_chunks) takes a
+# chunk with a letter as a name and has_name() checks it as a whole against the source, so the digits that touch a letter or an underscore
+# inside such a chunk are the name's own: the voice reads them that way too (numbers_vi.NUMBER), and they are no figure the text states,
+# so a text cannot take its "4" from GPT4. The chunks are the ones latin_tokens checks, no others: digits in a word the name check does not
+# take stay figures and are checked as figures (999đ, 2025năm). A version after a hyphen (AGPL-3.0, Apache-2.0) does not touch a letter,
+# and is a figure, as the voice reads it.
 DIGITS_OF_A_NAME = re.compile(r"(?<=[A-Za-z_])\d+(?:[.,]\d+)*|\d+(?:[.,]\d+)*(?=[A-Za-z_])")
 NOT_A_FIGURE = "\ue000"      # replaces those digits; a private-use character is neither a digit nor a word character
 
 
 def without_the_digits_of_names(text: str) -> str:
-    def word(match):
-        found = match.group(0)
-        if not re.search(r"[A-Za-z]", found):
-            return found
-        return DIGITS_OF_A_NAME.sub(lambda digits: NOT_A_FIGURE * len(digits.group(0)), found)
-    return ASCII_WORD.sub(word, text)
+    for name in sorted(set(ascii_chunks(text)), key=len, reverse=True):
+        if len(name) >= 2 and DIGITS_OF_A_NAME.search(name):
+            masked = DIGITS_OF_A_NAME.sub(lambda digits: NOT_A_FIGURE * len(digits.group(0)), name)
+            text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", lambda _: masked, text)
+    return text
 
 
 def numbers(text: str) -> set:
     """The values of the numbers in a text. A sign written as a word (âm 19%, trừ 5, cộng 3) is the sign: the voice says it either way.
     White space of any length is one space (the page draws it as one, and the voice does not stop at it), so a sign, a $ or a % set apart by
-    a long run of it is still the figure's: `âm    19%` is -19%, `19    %` is 19%, `$    19` is $19. Digits that touch an ASCII letter in
-    a word of ASCII (GPT4, H100, SHA256, gpt-4o, v1.5, 16GB) belong to a name, which has_name() checks as a whole; they are no figure.
-    Digits beside a letter outside ASCII (999đ, 2025năm) are one: that word is not a name this check takes."""
+    a long run of it is still the figure's: `âm    19%` is -19%, `19    %` is 19%, `$    19` is $19. Digits that touch a letter in a
+    name that latin_tokens checks (GPT4, H100, SHA256, gpt-4o, v1.5, 16GB, GPT4é) belong to that name, which has_name() checks as a
+    whole; they are no figure. Digits in a word the name check does not take (999đ) are one."""
     text = without_the_digits_of_names(GAP.sub(" ", shown(text)))      # a run of white space is one gap, as on the page
     text = SIGN_WORDS.sub(lambda m: "-" if m.group(1) else "+", text)
     return {canonical(n) for n in NUMBER.findall(text)} - {""}
