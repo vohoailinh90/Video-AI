@@ -101,6 +101,32 @@ version in `package.json` so re-renders stay identical; move up with `npx hyperf
   and the source built in JavaScript. Build it with `scripts/preview/build_preview.py` and publish `build/preview/index.html` as the
   page file (16 MB limit per page); details in `docs/voiceover-workflow.md`, section 6.
 
+## VPS agent team (`team-video`)
+
+A free-model team can make videos on a VPS with Claude Code as architect and auditor. The team itself (conductor, worker image,
+gate script, setup and the Vietnamese guide `docs/vps-team-video.md`) lives in `vohoailinh90/claude-agent-routing-template`, under
+`scripts/team/`; this repository holds only the videos it makes. It follows this file's layout and rules; what it adds:
+
+- **Roles.** In a `/srv/team-video/work/<id>` session the prompt printed by `team-video prompt video-spec|video-audit <id>` is the
+  task: write `spec.md`, `tasks.md`, `acceptance.md`, or write `verdict.md` from `audit-pack.md` only. Builders (free models)
+  create `videos/<id>/` with `hyperframes init <id> --example blank`, vendor GSAP, make the audio and edit nothing else.
+- **The gate is a script.** `scripts/team/video/video_gates.py` (in the template) judges a render's streams, length, size, loudness, true peak and
+  silence from `videos/<id>.expected.json`. Do not re-judge those by model; to check a render yourself run the same script.
+- **Audit BLOCKs:** a loosened `expected.json`; any change under `.claude/` the spec did not ask for; a project `AGENTS.md` or
+  `CLAUDE.md` that is more than the unmodified `hyperframes init` text; an `.mp4`; a binary the spec does not list with a licence.
+- **Audio.** Local Kokoro voices only (no Vietnamese, see Language above). Vietnamese narration is made before the run with this repo's own
+  pipeline (`docs/voiceover-workflow.md`: `voiceover.json` lines, then `scripts/vo/synth.py`, then the `scripts/vo/roundtrip.py` check), and the chosen
+  `vo-N.wav` clips plus that `voiceover.json` are committed to `videos/<id>.inputs/` (beside the project, because `init` refuses a non-empty folder).
+  The builder keeps this file's layout: `assets/vo-N.wav`, `<audio id="vo-N">`, and a `voiceover.json` in the project.
+  Each model worker gets only its own model provider's API key and the gates get none; a TTS or other audio provider key
+  (Gemini, HeyGen, ElevenLabs) never goes to a worker container.
+- **Not for this team.** A video made from a GitHub Radar digest is made by `python3 -I scripts/radar/make_video.py` (see Language above), never by
+  the free models: the spec step stops and says so.
+- **Language.** `verdict.md`, the pre-review and the gate output are English, machine-read artifacts; summarise them to the owner in
+  Vietnamese, as above.
+- **Changing the team itself:** do it in the template repository, where its tests and mutation checks run, not here. Its docs:
+  `docs/vps-team.md` (security model), `docs/vps-team-video.md` (this team).
+
 <!-- team-onboarding:start -->
 ## Team agent process
 
