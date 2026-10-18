@@ -772,6 +772,14 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(len(make_video.video_problems(good, 5.0)), 1)                           # stopped early, or an older file in renders/
             self.assertIn("long", make_video.video_problems(good, 5.0)[0])
             self.assertEqual(make_video.video_problems(make("audio.mp4", video=False), 2.0), ["the file has no video stream"])
+            # the picture stops after one second while the narration runs on for three: the container is as long as the timeline, the picture is not
+            cut = Path(tmp) / "cut.mp4"
+            subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=1", "-f", "lavfi", "-i",
+                            "sine=frequency=440:duration=3", "-c:a", "aac", str(cut)], check=True)
+            self.assertAlmostEqual(make_video.clip_seconds(cut), 3.0, delta=0.2)
+            problems = make_video.video_problems(cut, 3.0)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertTrue(problems[0].startswith("the picture is 1.") and problems[0].endswith("s long, the timeline 3.00 s"), problems)
             garbage = Path(tmp) / "garbage.mp4"
             garbage.write_bytes(b"not a video")
             self.assertEqual(make_video.video_problems(garbage, 2.0), ["the file has no readable video stream or length"])

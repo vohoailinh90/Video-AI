@@ -177,18 +177,22 @@ LENGTH_SLACK = 0.5                            # seconds the MP4 may differ from 
 
 def video_problems(path, planned_seconds: float) -> list:
     """What differs between the MP4 and the video the project describes: no video stream, another size or frame rate, or a length that is
-    not the planned timeline's (a render that stopped early, or an older file left in renders/). The README and the preview page state the
-    size, the frame rate and the length, so they are measured here, not assumed from what the page asks for."""
-    probe = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,avg_frame_rate:format=duration",
-                 "-of", "json", path])
+    not the planned timeline's (a render that stopped early, or an older file left in renders/). The length is the video stream's own: the
+    container is as long as its longest stream, so narration that runs to the end hides a picture that stopped short. The README and the
+    preview page state the size, the frame rate and the length, so they are measured here, not assumed from what the page asks for."""
+    probe = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,avg_frame_rate,duration", "-of", "json", path])
     try:
         data = json.loads(probe.stdout or "{}")
-        stream = (data.get("streams") or [None])[0]
-        seconds = float(data["format"]["duration"])
+        streams = data["streams"]
     except (ValueError, KeyError, TypeError):
         return ["the file has no readable video stream or length"]
-    if not stream:
+    if not streams:
         return ["the file has no video stream"]
+    stream = streams[0]
+    try:
+        seconds = float(stream["duration"])          # the picture's own length, not the container's: sound that runs on keeps the container long
+    except (ValueError, KeyError, TypeError):
+        return ["the video stream has no readable length"]
     problems = []
     size = (stream.get("width"), stream.get("height"))
     if size != VIDEO_SIZE:
@@ -201,7 +205,7 @@ def video_problems(path, planned_seconds: float) -> list:
     if abs(fps - VIDEO_FPS) > 0.01:
         problems.append(f"the frame rate is {fps:g}, not {VIDEO_FPS}")
     if abs(seconds - planned_seconds) > LENGTH_SLACK:
-        problems.append(f"the file is {seconds:.2f} s long, the timeline {planned_seconds:.2f} s")
+        problems.append(f"the picture is {seconds:.2f} s long, the timeline {planned_seconds:.2f} s")
     return problems
 
 
