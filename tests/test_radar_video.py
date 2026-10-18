@@ -1420,6 +1420,20 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("--flag", "chạy flag"), ["token '--flag'"])
         self.assertEqual(untraced("src/", "mở thư mục src"), ["token 'src/'"])
 
+    def test_a_text_copied_from_the_source_traces_to_it_whatever_the_case_of_its_acronyms(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        # the source is lower case when the names are read, so AI beside a name with an accent is not the word ai; the text that copies it is the source's
+        for same in ("AI/GPTé", "AI:Việt", "AI-Việt", "A.I-Việt", "ML/Việt", "dùng AI/GPTé và UI:Việt", "AI/GPTé/ML"):
+            self.assertEqual(untraced(same, same), [], same)
+        self.assertEqual(untraced("AI", "dùng AI/GPTé"), [])
+        self.assertEqual(untraced("GPTé", "dùng AI/GPTé"), [])
+        # and what the source does not have is still reported
+        self.assertEqual(untraced("AI/GPTé", "VoiceStudio"), ["token 'AI'", "token 'GPTé'"])
+        self.assertEqual(untraced("GPT", "GPT-Việt"), ["token 'GPT'"])
+        self.assertEqual(untraced("Minh", "Hồ-Chí-Minh"), ["token 'Minh'"])        # a Vietnamese word of the source is not a name of the text
+        self.assertEqual(untraced("Việt-Nam, Hồ-Chí-Minh", "không có gì"), [])
+        self.assertEqual(untraced("3-bước", "không có gì"), ["number 3"])             # a figure beside a Vietnamese word is still a figure
+
     def test_a_chain_of_plus_or_hash_groups_is_one_name(self):
         untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
         # foo+bar+baz, C++Builder+Addon, a#bb#cc: every group joined by + or # belongs to the name, not only the first
