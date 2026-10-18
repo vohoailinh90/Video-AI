@@ -726,8 +726,10 @@ class ReviewFindings(unittest.TestCase):
     def test_a_name_glued_to_a_vietnamese_letter_is_still_checked(self):
         source = check_facts.blob({"x": "VoiceStudio, tiếng Việt, ông Nguyễn Văn An ở Hà Nội"})
         untraced = lambda text: check_facts.untraced(text, source, set())
-        self.assertEqual(untraced("ElevenLabsé"), ["token 'ElevenLabs'"])
-        self.assertEqual(untraced("ElevenLabsế và VoiceStudioé"), ["token 'ElevenLabs'"])      # a name the source has, with a letter glued on, is that name
+        self.assertEqual(untraced("ElevenLabsé"), ["token 'ElevenLabsé'"])
+        # a name the source has, with a letter glued on, is another name: the viewer reads the whole of it, and so is it checked
+        self.assertEqual(untraced("ElevenLabsế và VoiceStudioé"), ["token 'ElevenLabsế'", "token 'VoiceStudioé'"])
+        self.assertEqual(untraced("VoiceStudio"), [])
         # Vietnamese words are not names: no syllable has five ASCII letters in a row
         self.assertEqual(untraced("tiếng Việt thương nghiêng khuyến chuyển nghĩa quyền thuyết Nguyễn trường Hồ-Chí-Minh"), [])
         self.assertTrue(all(len(run) <= 4 for word in "nghiêng khuyến chuyển nghĩa quyền thuyết Nguyễn trường thương khuỷu".split()
@@ -780,10 +782,15 @@ class ReviewFindings(unittest.TestCase):
     def test_a_short_name_glued_to_a_letter_is_still_checked(self):
         source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
         untraced = lambda text, source=source: check_facts.untraced(text, source, set())
-        for glued, name in (("GPTé", "GPT"), ("npmé", "npm"), ("C++é", "C++"), ("Việt-GPTé", "GPT"), ("éGPT", "GPT"), ("Tōkyō", "ky")):
+        for glued, name in (("GPTé", "GPTé"), ("npmé", "npmé"), ("C++é", "C++é"), ("Việt-GPTé", "GPTé"), ("éGPT", "éGPT"), ("Tōkyō", "Tōkyō")):
             self.assertEqual(untraced(glued), [f"token '{name}'"], glued)
-        self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPT"})), [])            # the name the source has, with a letter glued on
-        self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPTé"})), [])
+        self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPT"})), ["token 'GPTé'"])      # the name the source has is not the name with a letter glued on
+        self.assertEqual(untraced("GPT4é", check_facts.blob({"field": "dùng GPT4"})), ["token 'GPT4é'"])
+        self.assertEqual(untraced("GPTé", check_facts.blob({"field": "dùng GPTé"})), [])                  # unless the source writes it so
+        self.assertEqual(untraced("GPT4é", check_facts.blob({"field": "dùng GPT4é"})), [])
+        self.assertEqual(untraced("café, naïve, Müller", check_facts.blob({"field": "café, naïve, Müller"})), [])  # a Latin name with its accents, as the source has it
+        self.assertEqual(untraced("cafe", check_facts.blob({"field": "café"})), ["token 'cafe'"])
+        self.assertEqual(untraced("Tokyo東京", check_facts.blob({"field": "Tokyo"})), [])                   # the letters of other alphabets stand for a break
         # a syllable of Vietnamese is a word, not a name, whatever it is made of
         self.assertEqual(untraced("Việt, Hà Nội, Hồ-Chí-Minh, nghiêng, khuỷu, Nguyễn, quyển, thuyền, uống, ngoằn, Đức, ừm, ý, giường, gì, loắt, hoặc"), [])
         self.assertTrue(all(check_facts.vietnamese_syllable(word) for word in ("Việt", "Đà", "nghiêng", "ừ", "ơ", "Huế", "yêu", "khuỷu")))
@@ -1140,8 +1147,8 @@ class ReviewFindings(unittest.TestCase):
     def test_a_word_is_vietnamese_only_in_the_casing_of_a_word(self):
         source = check_facts.blob({"field": "VoiceStudio chạy cục bộ"})
         untraced = lambda text, source=source: check_facts.untraced(text, source, set())
-        self.assertEqual(untraced("AIé"), ["token 'AI'"])
-        self.assertEqual(untraced("iOSé"), ["token 'iOS'"])
+        self.assertEqual(untraced("AIé"), ["token 'AIé'"])
+        self.assertEqual(untraced("iOSé"), ["token 'iOSé'"])
         self.assertEqual(untraced("Việt, VIỆT, việt, Đức, ĐỨC, Nguyễn, NGUYỄN"), [])
         self.assertFalse(check_facts.vietnamese_syllable("AIé"))
         self.assertTrue(check_facts.vietnamese_syllable("VIỆT"))

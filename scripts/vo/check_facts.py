@@ -359,6 +359,8 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
     """The token is a name the source writes. A token of several names (github.com/debpalash/VoiceStudio, setup:api) must also be
     written that way in the source, as a whole: its parts turning up separately somewhere do not make an address up."""
     low = token.lower()
+    if re.search(r"[^\x00-\x7f]", low):      # a name with an accented letter glued on (GPT4é): the whole of it is in the source, or it is another name
+        return re.search(rf"(?<!\w){re.escape(low)}(?!\w)", source_blob) is not None
     parts = NAME.findall(low)
     if not parts or not all(part in names for part in parts):
         return False
@@ -485,12 +487,13 @@ def vietnamese_syllable(piece: str) -> bool:
 
 def glued_names(chunk: str):
     """The names in a chunk that holds a letter outside ASCII. Its syllables of Vietnamese (Việt-Nam, Hồ-Chí-Minh) are words and are
-    left out; whatever is not one is a name with a letter glued on (ElevenLabsé, GPTé, npmé, C++é), however short, and the letters
-    of other alphabets stand for a break."""
+    left out; whatever is not one is a name with a letter glued on (ElevenLabsé, GPTé, npmé, C++é), however short. The Latin letters
+    with their accents stay in the name, so the name is the whole of what the viewer reads (GPT4é is not GPT4, and has_name asks for it as
+    it is); the letters of other alphabets stand for a break."""
     kept = []
     for piece in re.split(r"([-./:]+)", chunk):
         if re.fullmatch(r"[-./:]+", piece) or not vietnamese_syllable(piece):
-            kept.append(re.sub(r"[^\x00-\x7f]", " ", piece))
+            kept.append("".join(c if ord(c) < 128 or unicodedata.name(c, "").startswith("LATIN") else " " for c in piece))
         else:
             kept.append(" ")
     for name in "".join(kept).split():
