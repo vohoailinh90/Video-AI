@@ -122,7 +122,7 @@ def _token_words(token: str):
 
 
 def speak_text(text: str) -> str:
-    text = plain_text(text)         # what is read is what the viewer sees: ¹⁹% is 19%
+    text = re.sub(r"\s+", " ", plain_text(text))     # what is read is what the viewer sees: ¹⁹% is 19%, and a run of white space is one gap
     def replace(match):
         words = _token_words(match.group(2))
         if words is None:
