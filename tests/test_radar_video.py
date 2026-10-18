@@ -1044,12 +1044,18 @@ class ReviewFindings(unittest.TestCase):
                 self.assertEqual(check_facts.untraced(figure, check_facts.blob({"x": name}), set()), [f"number {figure}"], name)
             # ... and the name itself, whole, still traces to itself
             self.assertEqual(check_facts.untraced(name, check_facts.blob({"x": name}), set()), [], name)
-        # digits beside a letter outside ASCII are in a word the name check does not take (Vietnamese): they stay figures, and are checked
-        for text, value in (("999đ", "999"), ("5đ", "5"), ("1.000đ", "1000"), ("2025năm", "2025"), ("Việt4", "4"), ("999 đ", "999")):
+        # a name with an accented letter glued on: the name check takes its ASCII part (GPT4), so the digits are the name's
+        self.assertEqual(check_facts.numbers("GPT4é, H100đ"), set())
+        self.assertEqual(check_facts.untraced("4", check_facts.blob({"x": "GPT4é"}), set()), ["number 4"])
+        self.assertEqual(check_facts.untraced("100", check_facts.blob({"x": "H100é"}), set()), ["number 100"])
+        # digits in a word the name check does not take (a figure beside a Vietnamese letter) stay figures and are checked as figures
+        for text, value in (("999đ", "999"), ("5đ", "5"), ("1.000đ", "1000"), ("999 đ", "999")):
             self.assertEqual(check_facts.numbers(text), {value}, text)
-            self.assertIn(f"number {value}", check_facts.untraced(text, check_facts.blob({"x": "VoiceStudio"}), set()), text)
-        self.assertEqual(check_facts.untraced("999đ", check_facts.blob({"x": "VoiceStudio"}), set()), ["number 999"])
+            self.assertEqual(check_facts.untraced(text, check_facts.blob({"x": "VoiceStudio"}), set()), [f"number {value}"], text)
         self.assertEqual(check_facts.untraced("999đ", check_facts.blob({"x": "giá 999đ"}), set()), [])           # and trace when the digest has them
+        # a Vietnamese word with ASCII letters and digits glued on is refused by the name check, whichever way it is split
+        for text in ("2025năm", "Việt4"):
+            self.assertTrue(check_facts.untraced(text, check_facts.blob({"x": "VoiceStudio"}), set()), text)
         # a figure beside a name is still a figure, and so is a version after a hyphen (the voice reads both as numbers)
         self.assertEqual(check_facts.numbers("H100 và 100 GPU, 4K và 4 bước, GPT4 chạy 4 lần"), {"100", "4"})
         self.assertEqual(check_facts.numbers("AGPL-3.0, Apache-2.0, Python 3.10"), {"3.0", "2.0", "3.10"})
