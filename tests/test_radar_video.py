@@ -1114,6 +1114,28 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("U+3007 IDEOGRAPHIC NUMBER ZERO", output)
 
+    def test_a_letter_with_a_mark_the_text_cannot_join_is_not_the_plain_letter(self):
+        # lower() writes the dotted capital I as i and a combining dot; the dot is drawn, so İGPT is not the name IGPT, whichever way round
+        self.assertEqual([hex(ord(c)) for c in "İ".lower()], ["0x69", "0x307"])
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        self.assertEqual(untraced("IGPT", "İGPT"), ["token 'IGPT'"])
+        self.assertEqual(untraced("İGPT", "IGPT"), ["token 'İGPT'"])
+        self.assertEqual(untraced("İGPT", "İGPT"), [])
+        self.assertEqual(untraced("İstanbul", "İstanbul"), [])
+        self.assertEqual(untraced("Istanbul", "İstanbul"), ["token 'Istanbul'"])
+        # shown keeps a mark that follows a letter or a digit, and drops one that has nothing to join
+        self.assertEqual(check_facts.shown("i̇"), "i̇")
+        self.assertEqual(check_facts.shown("x\u0302\u0323"), "x\u0323\u0302")                        # both stay, in the canonical order of NFC
+        self.assertEqual(check_facts.shown("̇x ̇a"), "x a")
+        self.assertEqual(check_facts.shown("é Việt"), "é Việt")                   # NFC joins what it can
+        # in the text of a video such a mark is refused: the viewer sees the letter with it and the source never has it
+        for text in ("GPT̂", "x̂", "i̇", "5̇", "H100̃"):
+            problems = check_facts.compat_problems(f"có {text} đây")
+            self.assertEqual(len(problems), 1, repr(text))
+            self.assertIn("combining mark", problems[0])
+        for fine in ("tiếng Việt, Hà Nội", "é và â (NFC joins them)", "İstanbul", "नमस्ते"):
+            self.assertEqual(check_facts.compat_problems(fine), [], fine)
+
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
                             ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
