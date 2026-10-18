@@ -398,9 +398,18 @@ def canonical(number: str) -> str:
 def shown(text: str) -> str:
     """What a viewer reads of a text. A format character (zero-width space or joiner, soft hyphen, a direction mark), a control character
     and a combining mark that has no letter to join draw nothing, so they are dropped and do not break a word: G<zero-width>P<zero-width>T
-    is GPT. A symbol (a trademark sign, an emoji) is drawn and a space of any width is a gap, so those stay and break one. A letter in a
-    compatibility form is the plain letter (see numbers_vi.plain_char)."""
-    return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
+    is GPT. A combining mark that follows a letter or a digit is drawn on it and stays (the dot of İ, which lower() writes as i and a dot, is
+    not dropped to make İGPT the name IGPT). A symbol (a trademark sign, an emoji) is drawn and a space of any width is a gap, so those stay
+    and break one. A letter in a compatibility form is the plain letter (see numbers_vi.plain_char)."""
+    kept = []
+    for c in unicodedata.normalize("NFC", text):
+        category = unicodedata.category(c)
+        if category in ("Mn", "Me"):
+            if kept and (kept[-1].isalnum() or unicodedata.category(kept[-1]) in ("Mn", "Me")):
+                kept.append(c)
+        elif c.isspace() or category not in ("Cc", "Cf"):
+            kept.append(plain_char(c))
+    return "".join(kept)
 
 
 # The marks beyond ASCII that the text of a video may use: only those that the real digests' text has (the arrow, the ellipsis, the en and em
@@ -423,13 +432,20 @@ def compat_problems(text: str) -> list:
     override or isolate such as U+202E): shown() drops it when it compares a text with the source, so a number with one inside would be
     traced as the digits without it, while the voice (numbers_vi.speak_text) says the parts apart and a browser or a terminal may draw
     them in another order (12 U+202E 34 is traced as 1234, said "mười hai ... ba mươi bốn" and may be drawn 1243). Both are named by
-    their code, never printed. A numeral that has no ASCII digit (the ideographic zero 〇, the Chinese 一 and 十, Tamil and Ethiopic
+    their code, never printed. So is a combining mark that stays on a Latin letter or a digit after NFC (x with a circumflex, i with a dot
+    above), which a viewer sees and the name or the figure of the source never has. A numeral that has no ASCII digit (the ideographic zero 〇, the Chinese 一 and 十, Tamil and Ethiopic
     numbers, ↂ) is refused as well: NFKC leaves it as it is and it is no punctuation, yet a viewer reads a number in it that numbers()
     cannot (the digits that plain_char folds to ASCII, Arabic-Indic ones among them, are read and traced). The text of a video uses plain
     characters, the marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
     found = {}
+    previous = ""
     for c in unicodedata.normalize("NFC", text):
-        category = unicodedata.category(c)
+        category, before, previous = unicodedata.category(c), previous, c
+        if category in ("Mn", "Me") and (before.isalnum() and unicodedata.name(before, "").startswith(("LATIN", "DIGIT")) or before.isdigit()):
+            # a combining mark that NFC could not join to its Latin letter or digit (x with a circumflex, i with a dot above): it is drawn on
+            # it, and no name or number of the source has it, so it is refused
+            found.setdefault(c, f"U+{ord(c):04X} (combining mark on {before})")
+            continue
         if category == "Cc" and c not in "\t\n\r" + VALUE_BREAK or category == "Cf":
             found.setdefault(c, f"U+{ord(c):04X} ({'control' if category == 'Cc' else 'invisible format'} character)")
             continue
