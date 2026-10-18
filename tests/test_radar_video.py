@@ -1079,6 +1079,29 @@ class ReviewFindings(unittest.TestCase):
         for text, spoken in (("GPT4", "GPT4"), ("gpt-4o", "gpt-4o"), ("H100", "H100"), ("AGPL-3.0", "AGPL ba chấm không"), ("100 GPU", "một trăm GPU")):
             self.assertEqual(numbers_vi.speak_text(text), spoken, text)
 
+    def test_a_numeral_with_no_ascii_digit_is_refused_in_the_text_of_a_video(self):
+        # NFKC leaves these as they are and none is punctuation, but a viewer reads a number in each and numbers() cannot
+        for char in ("〇", "௰", "፲", "一", "二", "十", "百", "千", "万", "壹", "ↂ", "\U00010107", "〡"):
+            problems = check_facts.compat_problems(f"có {char} người")
+            self.assertEqual(len(problems), 1, repr(char))
+            self.assertIn(char, problems[0])
+            self.assertEqual(check_facts.numbers(f"có {char} người"), set(), repr(char))                    # which is why they cannot be left to it
+        # the digits that plain_char folds to ASCII are read and traced, and are not refused
+        for char, digit in (("٣", "3"), ("۵", "5"), ("३", "3"), ("９", "9")):
+            self.assertEqual(check_facts.numbers(f"có {char} người"), {digit}, repr(char))
+        self.assertEqual(check_facts.compat_problems("có ٣ người"), [])
+        # a text without such a numeral is untouched, whatever the language of the rest
+        self.assertEqual(check_facts.compat_problems("Việt Nam có 62.958 sao, GPT-4o, 19% và 3,5 triệu"), [])
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        doc["lines"][0]["text"] += " 〇"
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("U+3007 IDEOGRAPHIC NUMBER ZERO", output)
+
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
                             ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
