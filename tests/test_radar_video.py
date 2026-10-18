@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
@@ -1562,6 +1563,124 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(sorted(report["voice"]["chosen"]), ["vo-1", "vo-2", "vo-3"])
         unmeasured = make_video.record_voice({}, "Hải Đăng", 1, False, {"vo-1": {"take": 1, "edits": None, "ref_words": None, "heard": None}})
         self.assertIsNone(unmeasured["chosen"]["vo-1"]["wer"])
+
+    def test_a_line_id_that_is_not_a_clip_name_is_refused_before_anything_is_written(self):
+        outside = ["/tmp/target", "../../x", "vo-1/../../x", "vo-1/x", "vo-0", "vo-01", "vo-1.wav", "vo-1\n", "vo-", "VO-1", "", None, 3]
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "p"
+            project.mkdir()
+            write_source(project)
+            plan = planlib.build_plan(planlib.load_digest(project / "source" / "draft-vi.json"))
+            doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
+            ran = Path(tmp) / "the-synthesizer-ran"
+            tts = Path(tmp) / "fake-tts"
+            tts.write_text(f"#!/bin/sh\ntouch {ran}\nexit 1\n", encoding="utf-8")
+            tts.chmod(0o755)
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp, "tts_python": str(tts), "asr_python": None, "only": None,
+                                     "voice": None, "takes": 1, "tts_hf_home": None, "asr_hf_home": None})()
+            for bad in outside:
+                doc["lines"][1]["id"] = bad
+                (project / "voiceover.json").write_text(json.dumps(doc), encoding="utf-8")
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=repr(bad)):
+                    make_video.cmd_voice(args, project)
+                self.assertIn("not vo-N", errors.getvalue(), repr(bad))
+                self.assertFalse(ran.exists(), f"{bad!r} reached the synthesizer")
+            doc["lines"][1]["id"] = "vo-2"
+            (project / "voiceover.json").write_text(json.dumps(doc), encoding="utf-8")
+            make_video.load_project(project)                                                # the id scaffold writes: fine
+
+    def test_the_scripts_that_join_a_line_id_to_a_path_refuse_one_that_is_not_a_file_name(self):
+        import line_ids
+        self.assertEqual(line_ids.bad_line_ids([{"id": "vo-1"}, {"id": "intro_2"}, {"id": "a-b"}]), [])
+        self.assertEqual(line_ids.bad_line_ids([{"id": "/tmp/x"}, {"id": "../a"}, {"id": 3}, {}, "x", {"id": "a.b"}, {"id": "vo-1\n"}]),
+                         ["/tmp/x", "../a", 3, None, "x", "a.b", "vo-1\n"])
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            lines = tmp / "lines.json"
+            lines.write_text(json.dumps({"lines": [{"id": str(tmp / "target"), "text": "x", "start": 1, "scene_end": 3}]}), encoding="utf-8")
+            work = tmp / "work"
+            for script, extra in (("synth.py", ["--lines", str(lines), "--out", str(tmp / "out")]),
+                                  ("revoice.py", ["--project", str(tmp), "--lines", str(lines), "--clips", str(tmp), "--out", str(tmp / "x.mp4")]),
+                                  ("roundtrip.py", ["--out", str(tmp / "r.json"), "--video", str(tmp / "v.mp4"), "--lines", str(lines), "--work", str(work)])):
+                result = subprocess.run([sys.executable, "-I", str(REPO / "scripts" / "vo" / script), *extra], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, f"{script}: {result.stderr}")
+                self.assertIn("a line id is the name of its clip file", result.stderr, script)
+            self.assertEqual(sorted(path.name for path in tmp.iterdir()), ["lines.json"], "nothing was written, in or outside the project")
+
+    def test_a_digest_with_a_terminal_control_character_is_not_used_or_printed(self):
+        attacks = {"an OSC that sets the clipboard": "x\x1b]52;c;ZXZpbA==\x07", "a CSI": "x\x1b[2J", "a bell": "x\x07", "a NUL": "x\x00",
+                   "a C1 CSI": "x\u009b2J", "a C1 OSC": "x\u009d0;t", "a DEL": "x\x7f"}
+        places = {"draft.hook": lambda d, text: d["draft"].__setitem__("hook", text),
+                  "draft.learn[1]": lambda d, text: d["draft"].__setitem__("learn", ["fine", text]),
+                  "a key": lambda d, text: d["draft"].__setitem__(text, 1)}
+        for what, text in attacks.items():
+            for place, put in places.items():
+                with self.assertRaises(ValueError, msg=f"{what} in {place}") as caught:
+                    digest_with(lambda d: put(d, text))
+                message = str(caught.exception)
+                self.assertIn("control character", message)
+                self.assertTrue(all(unicodedata.category(c) != "Cc" for c in message), f"{what} in {place}: the message holds the character")
+        with self.assertRaises(ValueError) as caught:
+            digest_with(lambda d: d["draft"].__setitem__("hook", "x\x1b[2J"))
+        self.assertIn("'digest.draft.hook'", str(caught.exception))                         # the place is named, the text is not
+        digest_with(lambda d: d["draft"].__setitem__("hook", "dòng một\ndòng\thai\r\nba"))     # white space is only white space
+
+    def test_a_control_character_in_the_text_of_a_video_is_refused_and_never_printed(self):
+        for char in ("\x1b", "\x07", "\x00", "\x7f", "\u0085", "\u009b", "\u009d"):
+            problems = check_facts.compat_problems(f"a{char}b")
+            self.assertEqual(len(problems), 1, repr(char))
+            self.assertIn("control character", problems[0])
+            self.assertNotIn(char, problems[0])                                              # named by its code, not printed
+        for fine in ("a\tb", "a\nb", "a\r\nb", f"a{check_facts.VALUE_BREAK}b"):
+            self.assertEqual(check_facts.compat_problems(fine), [], repr(fine))
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        doc["lines"][0]["text"] += "\x1b]52;c;ZXZpbA==\x07"
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("control character", output)
+        self.assertNotIn("\x1b", output)
+        self.assertNotIn("\x07", output)
+
+    def test_the_readme_shows_the_words_of_a_line_as_text_not_as_markup(self):
+        self.assertEqual(make_video.md_text("![x](https://a.b/c)"), r"\!\[x\]\(https\:\/\/a.b\/c\)")
+        self.assertEqual(make_video.md_text("<!-- x -->\n\ta | b\x1b"), r"\<\!-- x --\> a \| b")
+        self.assertEqual(make_video.md_code("a``b"), "```a``b```")
+        self.assertEqual(make_video.md_code("`x"), "`` `x ``")
+        self.assertEqual(make_video.md_code("a\nb\x1b"), "`a b`")
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        attacks = ["![x](https://attacker.example/pixel)", "<!-- hide the rest", "<img src=x onerror=alert(1)>", "[click](https://attacker.example/)",
+                   "*bold* _em_ ~~gone~~ `code` &amp; # head", "a | b", "https://attacker.example/ user@attacker.example"]
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "p"
+            (project / "source").mkdir(parents=True)
+            (project / "source" / "provenance.json").write_text(json.dumps({
+                "sha256": "ab" * 32, "path_in_repo": "digests/x`y", "git_remote": "https://example.com/o/r.git", "last_commit_of_file": "abc",
+                "also_via": "[a](https://attacker.example/also) <b>"}), encoding="utf-8")
+            doc = make_video.write_composition(project, plan, tl)
+            self.assertGreaterEqual(len(doc["lines"]), len(attacks))
+            for line, attack in zip(doc["lines"], attacks):
+                line["text"] = attack
+            hostile = {**plan, "name": "my_repo*", "full_name": "o/`x", "scan": "<b>2026</b>"}
+            report = {"voice": {"voice": "Mai <i>Anh"},
+                      "render": {"duration": 60.0, "check": "![c](https://attacker.example/c)", "warnings": ["WARNING: <img src=x> overflow"]}}
+            make_video.write_readme(project, hostile, doc, report)
+            readme = (project / "README.md").read_text(encoding="utf-8")
+        bare = re.sub(r"\\.", "", readme)                  # what is left of the README when every backslash-escaped character is only a letter
+        for active in ("![", "](http", "<!--", "<img", "<b>", "<i>", "https://attacker", "user@attacker", "my_repo*"):
+            self.assertNotIn(active, bare)
+        for literal in (r"\*bold\* \_em\_ \~\~gone\~\~ \`code\` \&amp; \# head", "``o/`x``", "``digests/x`y``", r"Mai \<i\>Anh", r"WARNING\: \<img src=x\> overflow"):
+            self.assertIn(literal, readme)
+        rows = [line for line in readme.splitlines() if line.startswith("| `vo-")]
+        self.assertEqual(len(rows), len(doc["lines"]))
+        for row in rows:
+            self.assertEqual(re.sub(r"\\.", "", row).count("|"), 6, "five cells, whatever the text says")
 
 
 class Narration(unittest.TestCase):

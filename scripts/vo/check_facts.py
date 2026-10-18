@@ -405,10 +405,15 @@ def compat_problems(text: str) -> list:
     changes (a full-width or mathematical letter, a superscript or circled digit, a Roman numeral, a fraction, a ligature, ™ ...) is a
     different character that looks like a plain one, so a name, a number or an address made of them would be read by the voice and the
     viewer but not by this check. A punctuation mark or a symbol outside MARKS (a Unicode hyphen or slash, an emoji ...) is refused for
-    the same reason: it can stand in a name or an address without the check seeing it. The text of a video uses plain characters, the
+    the same reason: it can stand in a name or an address without the check seeing it. A control character other than a tab, a line break
+    and the break between two values is refused too: it is no part of any text, and a terminal that prints the report or the README acts
+    on it (an ESC starts an escape sequence); it is named by its code, never printed. The text of a video uses plain characters, the
     marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
     found = {}
     for c in unicodedata.normalize("NFC", text):
+        if unicodedata.category(c) == "Cc" and c not in "\t\n\r" + VALUE_BREAK:
+            found.setdefault(c, f"U+{ord(c):04X} (control character)")
+            continue
         if ord(c) < 128:
             continue
         kind = unicodedata.category(c)[0]
