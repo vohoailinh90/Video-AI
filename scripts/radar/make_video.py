@@ -38,6 +38,7 @@ sys.path.insert(0, str(REPO / "scripts" / "vo"))  # numbers_vi, shared with chec
 import compose  # noqa: E402
 import plan as planlib  # noqa: E402
 from numbers_vi import speak_text  # noqa: E402
+from line_ids import duplicate_line_ids  # noqa: E402
 
 DEFAULT_VOICE = "Hải Đăng"          # the same default as scripts/vo/synth.py
 HYPERFRAMES_VERSION = "0.8.168"   # pinned into each project's package.json by `hyperframes init`
@@ -442,6 +443,10 @@ def require_line_ids(doc):
     if bad:
         fail(f"voiceover.json has a line id that is not vo-N ({bad[:3]!r}): an id is the name of the line's clip file, and scaffold is the "
              f"only thing that writes one. Scaffold the project again from the digest")
+    repeated = duplicate_line_ids(doc.get("lines") or [])
+    if repeated:
+        fail(f"voiceover.json has two lines with the id {", ".join(map(repr, repeated[:3]))}: they would share one clip file and only the later would be heard. "
+             f"Scaffold the project again from the digest")
 
 
 def load_project(project: Path):

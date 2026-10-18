@@ -18,8 +18,24 @@ def bad_line_ids(lines) -> list:
             for line in lines if not isinstance(line, dict) or not isinstance(line.get("id"), str) or not LINE_ID.fullmatch(line["id"])]
 
 
+def duplicate_line_ids(lines) -> list:
+    """The ids that more than one line has. Compared without regard to case: vo-1 and VO-1 are one file on a disk that ignores case."""
+    seen, repeated = set(), []
+    for line in lines:
+        if isinstance(line, dict) and isinstance(line.get("id"), str):
+            key = line["id"].casefold()
+            if key in seen and line["id"] not in repeated:
+                repeated.append(line["id"])
+            seen.add(key)
+    return repeated
+
+
 def require_file_name_ids(lines):
-    """Stop the script, before it writes anything, when a line id is not a plain file name. The ids are shown with repr()."""
+    """Stop the script, before it writes anything, when a line id is not a plain file name, or when two lines have the same one (they would
+    share a clip: the later line overwrites the earlier one's file, and only the later is heard). The ids are shown with repr()."""
     bad = bad_line_ids(lines)
     if bad:
         raise SystemExit(f"error: a line id is the name of its clip file (letters, digits, - and _), not {bad[:3]!r}")
+    repeated = duplicate_line_ids(lines)
+    if repeated:
+        raise SystemExit(f"error: two lines have the id {", ".join(map(repr, repeated[:3]))}: an id is the name of its clip file, so the later line would overwrite the clip of the earlier")
