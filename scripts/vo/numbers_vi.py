@@ -49,8 +49,8 @@ PERCENT_SIGNS = "%％﹪٪"
 SIGNS, PERCENT_CLASS = re.escape(PLUS + MINUS), re.escape(PERCENT_SIGNS)
 # A sign stands right before its digits (-19), or one space before them (- 19, as a table or a bullet shows a change) when what comes
 # before it is neither a word nor a number: "Stars - 62.958", "tăng + 19%" and "5 - 10" have a dash, an addition and a range, not a sign.
-SIGN_BEFORE = (rf"(?<![\w.,{SIGNS}%])[{SIGNS}](?=(?:\$\s?)?\d)"
-               rf"|(?<![\w.,{SIGNS}%])(?<![\w.,{SIGNS}%]\s)[{SIGNS}]\s(?=(?:\$\s?)?\d)")
+SIGN_BEFORE = (rf"(?<![\w.,{SIGNS}%])[{SIGNS}](?=(?:\$\s?)*[.,]?\d)"
+               rf"|(?<![\w.,{SIGNS}%])(?<![\w.,{SIGNS}%]\s)[{SIGNS}]\s(?=(?:\$\s?)*[.,]?\d)")
 
 # a number that stands alone: not glued to letters, a hyphen or another number; an optional minus (read "âm") or plus (read "cộng") sign in front and an
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
@@ -58,8 +58,10 @@ SIGN_BEFORE = (rf"(?<![\w.,{SIGNS}%])[{SIGNS}](?=(?:\$\s?)?\d)"
 VERSION = re.compile(rf"(?<=[A-Za-z])[{re.escape(MINUS)}](\d+(?:[.,]\d+)*)(?![\w])")
 # The dollar sign is the one currency symbol in ASCII and part of the figure: $19 and $ 19 are a price, 19 is not (and 19$). It may come before
 # the sign ($-19, $ -19), after it (-$19) or against letters (US$19): wherever it stands, the match takes it in, so it is never left out of
-# the figure. The leading one is not a group: a match holds a currency symbol when "$" is in it.
-NUMBER = re.compile(rf"(?:\$\s?)?(?:({SIGN_BEFORE})|(?<![\w.,{re.escape(MINUS)}]))(\$\s?)?(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(\$)?(?![\w\-]|[.,]\d)")
+# the figure. A figure may start with its decimal point (.5 and ,5 are 0.5), and every unit that follows the digits belongs to it (19$$, 19%%):
+# the voice says each one, and the gate reads the same count, so no unit is left over unread. The units and the leading dollar signs are not
+# groups: a match holds a currency symbol when "$" is in it, and the group after the digits is the run of % and $ that follows them.
+NUMBER = re.compile(rf"(?:\$\s?)*(?:({SIGN_BEFORE})|(?<![\w.,{re.escape(MINUS)}]))(?:\$\s?)*(\d+(?:[.,]\d+)*|[.,]\d+)((?:\s?[{PERCENT_CLASS}]|\$)*)(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -103,6 +105,8 @@ def _digit_by_digit(token: str) -> str:
 
 def _token_words(token: str):
     """Words for one number token, or None to leave it as it is."""
+    if token[:1] in ".,":                                    # .5 and ,5 are 0.5, as the facts gate reads them
+        token = "0" + token
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", token):  # 62.958 and 62,958 -> thousands separators, as the facts gate reads them
         token = re.sub(r"[.,]", "", token)
     if re.fullmatch(r"\d+", token):
@@ -120,14 +124,15 @@ def _token_words(token: str):
 def speak_text(text: str) -> str:
     text = plain_text(text)         # what is read is what the viewer sees: ¹⁹% is 19%
     def replace(match):
-        words = _token_words(match.group(3))
+        words = _token_words(match.group(2))
         if words is None:
             return match.group(0)
         sign = (match.group(1) or "")[:1]                        # the sign is group 1, with the space after it when it has one
         sign = "cộng " if sign and sign in PLUS else "âm " if sign else ""
         before = match.string[match.start() - 1:match.start()] if match.start() else ""
         apart = " " if match.group(0).startswith("$") and before.isalnum() else ""            # US$19 is "US", then the figure
-        return apart + sign + words + (" phần trăm" if match.group(4) else "") + (" đô la" if "$" in match.group(0) else "")
+        percents = len(re.findall(rf"[{PERCENT_CLASS}]", match.group(3)))
+        return apart + sign + words + " phần trăm" * percents + " đô la" * match.group(0).count("$")
 
     def version(match):
         words = _token_words(match.group(1))
