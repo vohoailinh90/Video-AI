@@ -1006,6 +1006,19 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(numbers_vi.speak_text("tăng .5%"), "tăng không chấm năm phần trăm")
         self.assertEqual(numbers_vi.speak_text("x.5 và ...5"), "x.5 và ...5")
 
+    def test_a_sign_word_before_a_decimal_without_an_integer_part_is_the_sign(self):
+        for text, value in (("âm .5", "-0.5"), ("trừ ,5", "-0.5"), ("cộng .5", "+0.5"), ("dương ,5%", "+0.5%"), ("âm: .5", "-0.5"), ("âm $.5", "-$0.5"),
+                            ("âm 0.5", "-0.5"), ("âm (.5)", "-0.5")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        positive = check_facts.blob({"x": ".5"})
+        self.assertEqual(check_facts.untraced("âm .5", positive, set()), ["number -0.5"])        # the voice would say a negative value
+        self.assertEqual(check_facts.untraced("trừ ,5", positive, set()), ["number -0.5"])
+        self.assertEqual(check_facts.untraced("cộng .5", check_facts.blob({"x": "0.5"}), set()), ["number +0.5"])
+        self.assertEqual(check_facts.untraced("âm .5", check_facts.blob({"x": "-.5"}), set()), [])
+        self.assertEqual(numbers_vi.speak_text("âm .5"), "âm không chấm năm")                      # the word the voice says is the sign the gate reads
+        # a clause end between the word and the point still ends the clause
+        self.assertEqual(check_facts.numbers("âm. .5 và âm, ,5"), {"0.5"})
+
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
                             ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
@@ -1694,13 +1707,15 @@ class ReviewFindings(unittest.TestCase):
         places = {"draft.hook": lambda d, text: d["draft"].__setitem__("hook", text),
                   "draft.learn[1]": lambda d, text: d["draft"].__setitem__("learn", ["fine", text]),
                   "a key": lambda d, text: d["draft"].__setitem__(text, 1)}
+        attacks.update({"a right-to-left override": "x\u202e91", "a bidi isolate": "x\u2066y", "a zero-width space": "x\u200by", "a soft hyphen": "x\u00ady",
+                        "a BOM": "\ufeffx", "a joiner": "x\u200dy"})
         for what, text in attacks.items():
             for place, put in places.items():
                 with self.assertRaises(ValueError, msg=f"{what} in {place}") as caught:
                     digest_with(lambda d: put(d, text))
                 message = str(caught.exception)
-                self.assertIn("control character", message)
-                self.assertTrue(all(unicodedata.category(c) != "Cc" for c in message), f"{what} in {place}: the message holds the character")
+                self.assertIn("control or invisible format character", message)
+                self.assertTrue(all(unicodedata.category(c) not in ("Cc", "Cf") for c in message), f"{what} in {place}: the message holds the character")
         with self.assertRaises(ValueError) as caught:
             digest_with(lambda d: d["draft"].__setitem__("hook", "x\x1b[2J"))
         self.assertIn("'digest.draft.hook'", str(caught.exception))                         # the place is named, the text is not
