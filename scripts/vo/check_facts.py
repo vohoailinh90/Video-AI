@@ -420,8 +420,10 @@ def compat_problems(text: str) -> list:
     override or isolate such as U+202E): shown() drops it when it compares a text with the source, so a number with one inside would be
     traced as the digits without it, while the voice (numbers_vi.speak_text) says the parts apart and a browser or a terminal may draw
     them in another order (12 U+202E 34 is traced as 1234, said "mười hai ... ba mươi bốn" and may be drawn 1243). Both are named by
-    their code, never printed. The text of a video uses plain characters, the marks of MARKS, and spaces of any width (a gap, not a
-    character of a name)."""
+    their code, never printed. A numeral that has no ASCII digit (the ideographic zero 〇, the Chinese 一 and 十, Tamil and Ethiopic
+    numbers, ↂ) is refused as well: NFKC leaves it as it is and it is no punctuation, yet a viewer reads a number in it that numbers()
+    cannot (the digits that plain_char folds to ASCII, Arabic-Indic ones among them, are read and traced). The text of a video uses plain
+    characters, the marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
     found = {}
     for c in unicodedata.normalize("NFC", text):
         category = unicodedata.category(c)
@@ -431,6 +433,9 @@ def compat_problems(text: str) -> list:
         if ord(c) < 128:
             continue
         kind = unicodedata.category(c)[0]
+        if unicodedata.numeric(c, None) is not None and plain_char(c) == c:      # a numeral that has no ASCII digit: 〇 一 十 ௰ ፲ ↂ
+            found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
+            continue
         if kind == "Z" or (kind in "PS" and c in MARKS) or (kind not in "PS" and unicodedata.normalize("NFKC", c) == c):
             continue
         found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
