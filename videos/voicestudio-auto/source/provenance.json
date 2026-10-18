@@ -17,5 +17,9 @@
   ],
   "repo": "debpalash/VoiceStudio",
   "scanned": "2026-10-13",
-  "generated_by": "scripts/radar/make_video.py scaffold"
+  "generated_by": "scripts/radar/make_video.py scaffold",
+  "scaffold_files": {
+    "package.json": "9c1418c511576b57d3394c8ffce817eee995f0e890e10ac6a3a1696b85f6d0c6",
+    "hyperframes.json": "53dbce1e19aa713cbb12ee0bc4d206143b45ab15e6ffbfcaa8f69572d4d24d50"
+  }
 }
