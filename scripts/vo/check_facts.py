@@ -342,7 +342,8 @@ def blob(value) -> str:
 # A name is made of word characters. The chunks it is read from (ascii_chunks) hold only ASCII and the Latin letters that glued_names keeps (any
 # letter whose Unicode name starts with LATIN, accents and the extended blocks alike), so \w is exactly those: the two never differ, whichever
 # block a Latin letter is in (café, GPT4é, GPTⱥ).
-NAME = re.compile(r"\w+(?:[-.]\w+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
+# faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#, C++Builder, C#Sharp: a name ends at / : space ... A C++ or a C# with more name after it is one name.
+NAME = re.compile(r"\w+(?:[-.]\w+)*(?:(?:\+\+?|#)(?:\w+(?:[-.]\w+)*)?)?")
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
 NAME_CONTINUES = re.compile(r"[\w+#]")      # what may not follow a name for it to be a name of its own (has_name asks the same of a token)
 
