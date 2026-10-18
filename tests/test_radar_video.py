@@ -1375,6 +1375,20 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("C++", "chu\u1ea9n C++11"), ["token 'C++'"])
         self.assertIn("token 'C++11'", untraced("C++11", "chu\u1ea9n C++"))
 
+    def test_a_sign_stuck_to_a_name_makes_it_another_thing_than_the_name(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        # a handle, a shell variable, a path, a macro, an option, a redirect: not the plain name the source has
+        for stuck in ("@GPT", "$GPT", "GPT/", "*GPT*", "<GPT>", "GPT>", "=GPT", "GPT=", "--GPT", "-GPT", "%GPT%", "~GPT", "&GPT", "^GPT"):
+            self.assertEqual(untraced(stuck, "dùng GPT trong bài"), [f"token '{stuck}'"], stuck)
+            self.assertEqual(untraced(stuck, f"dùng {stuck} trong bài"), [], stuck)       # written so in the source, it is the source's
+        # what ends a sentence or quotes a name is not stuck to it
+        for fine in ("GPT.", "GPT:", "GPT,", "GPT;", "`GPT`", "(GPT)", "\"GPT\"", "GPT!", "GPT?", "GPT|GPT"):
+            self.assertEqual(untraced(fine, "dùng GPT trong bài"), [], fine)
+        self.assertEqual(untraced("GPT", "dùng @GPT và $GPT"), [])               # the plain name in a longer thing of the source is still the name
+        self.assertEqual(untraced("--flag", "chạy --flag=1"), [])
+        self.assertEqual(untraced("--flag", "chạy flag"), ["token '--flag'"])
+        self.assertEqual(untraced("src/", "mở thư mục src"), ["token 'src/'"])
+
     def test_a_run_of_hyphens_or_dots_joins_the_parts_of_one_name(self):
         untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
         # foo--bar, 7--Zip, 19---foo, foo.-bar: one name each, as foo-bar is. None of its parts is a name of the source
