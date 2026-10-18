@@ -466,8 +466,8 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(check_facts.numbers("ngưỡng -19 dB và 19 dB"), {"-19", "19"})
         self.assertEqual(check_facts.numbers("ngưỡng −19 dB"), {"-19"})              # U+2212 is the same sign
         self.assertEqual(check_facts.numbers("(-0,5)"), {"-0.5"})
-        # a hyphen inside a name, a date or a range is not a sign
-        self.assertEqual(check_facts.numbers("AGPL-3.0, gpt-4o, 10-20, 2026-10-13"), {"3.0", "4", "10", "20", "2026", "13"})
+        # a hyphen inside a name, a date or a range is not a sign (and the 4 of gpt-4o is part of that name, not a figure)
+        self.assertEqual(check_facts.numbers("AGPL-3.0, gpt-4o, 10-20, 2026-10-13"), {"3.0", "10", "20", "2026", "13"})
         source = check_facts.blob({"field": "ngưỡng -19 dB, cao hơn -3.5 dB"})
         self.assertEqual(check_facts.untraced("ngưỡng -19 dB", source, set()), [])
         self.assertEqual(check_facts.untraced("ngưỡng 19 dB", source, set()), ["number 19"])       # the sign cannot be dropped
@@ -593,7 +593,7 @@ class ReviewFindings(unittest.TestCase):
         self.assertEqual(untraced("VoiceStudio, debpalash/VoiceStudio, github.com/debpalash/VoiceStudio"), ["token 'github.com/debpalash/VoiceStudio'"])
         self.assertEqual(untraced("bun run setup:api, setup, api"), [])
         self.assertEqual(untraced("v2.1.3"), [])
-        self.assertEqual(untraced("v2.1"), ["number 2.1", "token 'v2.1'"])
+        self.assertEqual(untraced("v2.1"), ["token 'v2.1'"])                               # a name the digest does not write; its digits are its own
 
     def test_a_digest_whose_url_carries_credentials_is_refused_before_anything_is_written(self):
         for url in ("https://user:ghp_SECRET@example.com/o/r", "https://ghp_SECRET@github.com/o/r", "http://u:p@example.com/o/r"):
@@ -990,7 +990,7 @@ class ReviewFindings(unittest.TestCase):
 
     def test_a_decimal_without_an_integer_part_is_that_decimal(self):
         for text, value in ((".5", "0.5"), (",5", "0.5"), ("-.5", "-0.5"), ("+.5", "+0.5"), (".5%", "0.5%"), ("$.5", "$0.5"), ("- .5", "-0.5"),
-                            ("(.5)", "0.5"), ("0.5", "0.5"), ("v1.5", "1.5"), ("62.958", "62958")):
+                            ("(.5)", "0.5"), ("0.5", "0.5"), ("AGPL-1.5", "1.5"), ("62.958", "62958")):
             self.assertEqual(check_facts.numbers(text), {value}, text)
         source = check_facts.blob({"fact": "5 người"})
         self.assertEqual(check_facts.untraced(".5", source, set()), ["number 0.5"])               # ten times less than the source's 5
@@ -1033,6 +1033,26 @@ class ReviewFindings(unittest.TestCase):
         # what a space does not join is still not joined: a dash after a word, and a range
         self.assertEqual(check_facts.numbers("Stars -     62.958"), {"62958"})
         self.assertEqual(check_facts.numbers("5     -     10 phút"), {"5", "10"})
+
+    def test_the_digits_of_a_name_are_not_a_figure_the_text_may_state(self):
+        for name in ("GPT4", "H100", "SHA256", "Qwen3", "MP4", "gpt-4o", "v1.5", "x86", "16GB", "7B", "2FA", "S3", "Web3.0", "3.5x", "x_4"):
+            self.assertEqual(check_facts.numbers(name), set(), name)
+            digits = "".join(c for c in name if c.isdigit() or c in ".")
+            # the digits of the name do not trace a figure of the same value ...
+            figure = digits.strip(".")
+            if figure:
+                self.assertEqual(check_facts.untraced(figure, check_facts.blob({"x": name}), set()), [f"number {figure}"], name)
+            # ... and the name itself, whole, still traces to itself
+            self.assertEqual(check_facts.untraced(name, check_facts.blob({"x": name}), set()), [], name)
+        # a figure beside a name is still a figure, and so is a version after a hyphen (the voice reads both as numbers)
+        self.assertEqual(check_facts.numbers("H100 và 100 GPU, 4K và 4 bước, GPT4 chạy 4 lần"), {"100", "4"})
+        self.assertEqual(check_facts.numbers("AGPL-3.0, Apache-2.0, Python 3.10"), {"3.0", "2.0", "3.10"})
+        self.assertEqual(check_facts.untraced("4 bước", check_facts.blob({"x": "GPT4 chạy"}), set()), ["number 4"])
+        self.assertEqual(check_facts.untraced("4 bước", check_facts.blob({"x": "GPT4 chạy 4 lần"}), set()), [])
+        self.assertEqual(check_facts.untraced("3.0", check_facts.blob({"x": "giấy phép AGPL-3.0"}), set()), [])
+        # the voice agrees: a name keeps its digits, a figure and a version are said
+        for text, spoken in (("GPT4", "GPT4"), ("gpt-4o", "gpt-4o"), ("H100", "H100"), ("AGPL-3.0", "AGPL ba chấm không"), ("100 GPU", "một trăm GPU")):
+            self.assertEqual(numbers_vi.speak_text(text), spoken, text)
 
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
