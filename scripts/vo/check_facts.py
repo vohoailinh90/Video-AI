@@ -339,8 +339,10 @@ def blob(value) -> str:
     return VALUE_BREAK.join(parts).lower()
 
 
-NAME_CHARS = "a-z0-9_\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff"      # lower case; the Latin letters with accents are part of a name (café, GPT4é)
-NAME = re.compile(rf"[{NAME_CHARS}]+(?:[-.][{NAME_CHARS}]+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
+# A name is made of word characters. The chunks it is read from (ascii_chunks) hold only ASCII and the Latin letters that glued_names keeps (any
+# letter whose Unicode name starts with LATIN, accents and the extended blocks alike), so \w is exactly those: the two never differ, whichever
+# block a Latin letter is in (café, GPT4é, GPTⱥ).
+NAME = re.compile(r"\w+(?:[-.]\w+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
 
 
