@@ -360,7 +360,9 @@ def has_name(token: str, names: set, source_blob: str) -> bool:
     written that way in the source, as a whole: its parts turning up separately somewhere do not make an address up."""
     low = token.lower()
     if re.search(r"[^\x00-\x7f]", low):      # a name with an accented letter glued on (GPT4é): the whole of it is in the source, or it is another name
-        return re.search(rf"(?<!\w){re.escape(low)}(?!\w)", source_blob) is not None
+        # whole, by the same grammar as below with every word character (the accented letters too): GPT4é is not in GPT4é-extra, GPT4é.thing,
+        # my-GPT4é, GPT4é+ or GPT4é#
+        return re.search(rf"(?<!\w)(?<!\w[-.]){re.escape(low)}(?!\w|[-.]\w|\+|#)", source_blob) is not None
     parts = NAME.findall(low)
     if not parts or not all(part in names for part in parts):
         return False
