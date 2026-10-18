@@ -18,12 +18,16 @@ def plain_char(c: str) -> str:
     … into three dots, which are not what is on the screen. Vietnamese letters, symbols and other alphabets are left alone."""
     if ord(c) < 128:
         return c
+    if c in "\u2010\u2011\u2212":                         # the hyphen, the non-breaking hyphen and the minus sign: NFKC leaves them, they read as -
+        return "-"
     category, folded = unicodedata.category(c), unicodedata.normalize("NFKC", c)
-    if category[0] == "L":
+    if category[0] == "L" or category == "Nl":              # Nl: the Roman numeral characters, Ⅹ Ⅸ ... (NFKC: X IX)
         return folded if folded.isascii() and folded.isalpha() else c
     if category in ("Nd", "No"):
         if folded.isascii() and folded.isdigit():
             return folded
+        if "\u2044" in folded and folded.replace("\u2044", "").isascii() and folded.replace("\u2044", "").isdigit():     # a vulgar fraction, ½ ⅓ ¼ (NFKC: 1⁄2): the numerator and the denominator, set apart
+            return " " + folded.replace("\u2044", "/") + " "      # from a digit before it (1½ is 1 and 1/2) and from a % after it
         digit = unicodedata.digit(c, None)
         return str(digit) if digit is not None else c
     if category == "So" and len(folded) == 1 and folded.isascii() and folded.isalpha():
@@ -43,12 +47,17 @@ PLUS = "+＋﹢➕⁺"
 MINUS = "-−－﹣➖⁻‐‑"
 PERCENT_SIGNS = "%％﹪٪"
 SIGNS, PERCENT_CLASS = re.escape(PLUS + MINUS), re.escape(PERCENT_SIGNS)
+# A sign stands right before its digits (-19), or one space before them (- 19, as a table or a bullet shows a change) when what comes
+# before it is neither a word nor a number: "Stars - 62.958", "tăng + 19%" and "5 - 10" have a dash, an addition and a range, not a sign.
+SIGN_BEFORE = (rf"(?<![\w.,{SIGNS}%])[{SIGNS}](?=(?:\$\s?)?\d)"
+               rf"|(?<![\w.,{SIGNS}%])(?<![\w.,{SIGNS}%]\s)[{SIGNS}]\s(?=(?:\$\s?)?\d)")
 
 # a number that stands alone: not glued to letters, a hyphen or another number; an optional minus (read "âm") or plus (read "cộng") sign in front and an
 # optional percent sign after it (19% and 19 % are the same value to the facts gate, so both are read "phần trăm")
 # a version glued to a name by a hyphen (AGPL-3.0, Apache-2.0) is read as a number; Qwen3, MP4 and gpt-4o keep their digits
 VERSION = re.compile(rf"(?<=[A-Za-z])[{re.escape(MINUS)}](\d+(?:[.,]\d+)*)(?![\w])")
-NUMBER = re.compile(rf"(?:(?<![\w.,{SIGNS}])([{SIGNS}])|(?<![\w.,{re.escape(MINUS)}]))(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(?![\w\-]|[.,]\d)")
+# The dollar sign is the one currency symbol in ASCII and part of the figure: $19 and $ 19 are a price, 19 is not (and 19$).
+NUMBER = re.compile(rf"(?:({SIGN_BEFORE})|(?<![\w.,{re.escape(MINUS)}]))(\$\s?)?(\d+(?:[.,]\d+)*)(\s?[{PERCENT_CLASS}])?(\$)?(?![\w\-]|[.,]\d)")
 
 
 def _three(n: int, spoken_hundreds: bool) -> str:
@@ -109,11 +118,12 @@ def _token_words(token: str):
 def speak_text(text: str) -> str:
     text = plain_text(text)         # what is read is what the viewer sees: ¹⁹% is 19%
     def replace(match):
-        words = _token_words(match.group(2))
+        words = _token_words(match.group(3))
         if words is None:
             return match.group(0)
-        sign = "cộng " if match.group(1) and match.group(1) in PLUS else "âm " if match.group(1) else ""
-        return sign + words + (" phần trăm" if match.group(3) else "")
+        sign = (match.group(1) or "")[:1]                        # the sign is group 1, with the space after it when it has one
+        sign = "cộng " if sign and sign in PLUS else "âm " if sign else ""
+        return sign + words + (" phần trăm" if match.group(4) else "") + (" đô la" if match.group(2) or match.group(5) else "")
 
     def version(match):
         words = _token_words(match.group(1))

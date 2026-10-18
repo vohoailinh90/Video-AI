@@ -44,7 +44,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # numbers_vi, next to this file; -I does not add the script's folder
-from numbers_vi import MINUS, PERCENT_CLASS, PERCENT_SIGNS, PLUS, SIGNS, plain_char, speak_text  # noqa: E402
+from numbers_vi import MINUS, PERCENT_CLASS, PERCENT_SIGNS, PLUS, SIGN_BEFORE, plain_char, speak_text  # noqa: E402
 
 # The video template's own words. An element marked data-label is skipped by the trace only when its text is exactly one of these;
 # any other text in such an element is read like the rest of the page. scripts/radar/compose.py takes its labels from here.
@@ -114,7 +114,7 @@ thu ti to toi tu tua tui va vai van vao ve vi vo vua xa xe xi xo xu y yeu
 
 # a number, with its sign when a minus or plus stands in front of it (-19, −3,5, +19%; a hyphen after a letter or digit, as in AGPL-3.0
 # or 10-20, and a plus after one, as in 1+1 or x+5, are not signs) and with its unit when it is a percentage (19%, 19 %, 19 phần trăm)
-NUMBER = re.compile(rf"(?:(?<![\w.,{SIGNS}])[{SIGNS}])?\d[\d.,]*(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b)?", re.I)    # PHẦN TRĂM is the same words
+NUMBER = re.compile(rf"(?:{SIGN_BEFORE})?(?:\$\s?)?\d[\d.,]*(?:\s?[{PERCENT_CLASS}]|\s+phần\s+trăm\b)?\$?", re.I)    # PHẦN TRĂM is the same words
 PERCENT = re.compile(rf"[{PERCENT_CLASS}]|phần\s+trăm", re.I)
 SPLIT = re.compile(r"[\s·—–,;()\[\]{}!?\"'“”‘’…→←•|]+")
 
@@ -373,12 +373,14 @@ def canonical(number: str) -> str:
     """A number as a value: 62.958 and 62,958 (thousands, a first group of 1-3 digits not starting with 0, then groups of exactly
     three) are 62958; 3.14 and 3,14 stay one decimal number, 3.14, and never become 314. A minus or plus sign and a percent sign belong
     to the value: -19 is not 19, +19% is not 19%, and 19% (or 19 phần trăm) is not 19."""
+    currency = "$" if "$" in number else ""                       # $19 and 19$ are the price, 19 is not
+    number = number.replace("$", "")
     sign = "-" if number[:1] in MINUS else "+" if number[:1] in PLUS else ""
     percent = "%" if PERCENT.search(number) else ""
-    number = re.sub(rf"\s?[{PERCENT_CLASS}]$|\s+phần\s+trăm$", "", number.lstrip(MINUS + PLUS), flags=re.I).rstrip(".,")
+    number = re.sub(rf"\s?[{PERCENT_CLASS}]$|\s+phần\s+trăm$", "", number.lstrip(MINUS + PLUS).lstrip(), flags=re.I).rstrip(".,")
     if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", number):
-        return sign + re.sub(r"[.,]", "", number) + percent
-    return sign + number.replace(",", ".") + percent
+        return sign + currency + re.sub(r"[.,]", "", number) + percent
+    return sign + currency + number.replace(",", ".") + percent
 
 
 def shown(text: str) -> str:
@@ -389,9 +391,36 @@ def shown(text: str) -> str:
     return "".join(plain_char(c) for c in unicodedata.normalize("NFC", text) if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Mn", "Me"))
 
 
+# The marks beyond ASCII that the text of a video may use: only those that the real digests' text has (the arrow, the ellipsis, the en and em
+# dash) and the hand-made page has (the middle dot between the items of a list), plus curly quotes, and the full-width brackets, colon and
+# comma that stand around a name in another script (plain_char reads those as their ASCII twins). All of them but the full-width ones are
+# separators for the chunker (SPLIT), so none can join the parts of a name. The shorter the list, the fewer marks that can stand in a name or beside a figure without the check seeing them;
+# a mark the owner needs is one more character here. A mark that is the unit of a number the check reads, as % is (the per mille sign), is
+# not in the list.
+MARKS = set("“”‘’–—…→·（）：，")
+
+
+def compat_problems(text: str) -> list:
+    """The characters of a text that only look like others, or that this check does not know. A letter, a digit or a sign that NFKC
+    changes (a full-width or mathematical letter, a superscript or circled digit, a Roman numeral, a fraction, a ligature, ™ ...) is a
+    different character that looks like a plain one, so a name, a number or an address made of them would be read by the voice and the
+    viewer but not by this check. A punctuation mark or a symbol outside MARKS (a Unicode hyphen or slash, an emoji ...) is refused for
+    the same reason: it can stand in a name or an address without the check seeing it. The text of a video uses plain characters, the
+    marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
+    found = {}
+    for c in unicodedata.normalize("NFC", text):
+        if ord(c) < 128:
+            continue
+        kind = unicodedata.category(c)[0]
+        if kind == "Z" or (kind in "PS" and c in MARKS) or (kind not in "PS" and unicodedata.normalize("NFKC", c) == c):
+            continue
+        found.setdefault(c, f"{c} (U+{ord(c):04X} {unicodedata.name(c, 'unnamed')})")
+    return list(found.values())
+
+
 # the words speak_text says for a sign, and their kin, up to three spaces, colons, equals signs, dashes, opening brackets or quotes before the
 # number; not a full stop, comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
-SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=\d)", re.I)
+SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=(?:\$\s?)?\d)", re.I)
 
 
 def numbers(text: str) -> set:
@@ -497,6 +526,9 @@ def main() -> int:
     document_allow = {w.lower() for w in doc.get("allow", [])}
     allow = {w.lower() for w in args.allow} | document_allow         # --allow is the operator's; the document's own list is vetted
     failures = 0
+    if not lines:                                      # nothing to trace is not a video that traced: the narration was lost
+        print(f"{args.lines}: no lines at all; a video without narration says nothing the gate can check")
+        failures += 1
     unvetted = sorted(document_allow - VIETNAMESE_WORDS)
     if unvetted:
         print(f"{args.lines}: `allow` lists {', '.join(unvetted)}, which are not Vietnamese words typed without diacritics that this check "
@@ -518,6 +550,11 @@ def main() -> int:
         if "speak" in line and line["speak"] != speak_text(line["text"]):
             print(f"{line['id']}: `speak` is what the viewer hears and must be the spelled-out form of `text` "
                   f"(numbers_vi.speak_text), not other words; reword `text` instead")
+            failures += 1
+        plain = compat_problems(line["text"])
+        if plain:
+            print(f"{line['id']}: the text uses {', '.join(plain)}, which only look like other characters (NFKC turns "
+                  f"them into something else) or are not marks this check knows; write the plain letters, digits and signs")
             failures += 1
         problems = untraced(line["text"], blob(fields), allow)
         if problems:
@@ -545,6 +582,11 @@ def main() -> int:
               f"{'; '.join(sorted(set(parser.code)))}")
         failures += 1
     screen = VALUE_BREAK.join(parser.parts + parser.glued)
+    plain = compat_problems(screen)
+    if plain:
+        print(f"{args.html}: the page's text uses {', '.join(plain)}, which only look like other characters (NFKC turns "
+              f"them into something else) or are not marks this check knows; write the plain letters, digits and signs")
+        failures += 1
     source_blob = blob(source)
     problems = untraced(screen, source_blob, allow)
     if problems:

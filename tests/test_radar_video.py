@@ -7,6 +7,7 @@ Fixtures are real digests (draft-vi.json) copied from the github-radar repositor
 """
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import math
@@ -35,6 +36,16 @@ NAMES = ["voicestudio", "moneyprinterturbo", "orca", "impeccable"]
 
 def fixture(name):
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def write_source(project, name="voicestudio"):
+    """source/ of a project as scaffold leaves it: the digest, and provenance.json with the sha256 of its bytes."""
+    source = project / "source"
+    source.mkdir(exist_ok=True)
+    (source / "draft-vi.json").write_text(json.dumps(fixture(name)), encoding="utf-8")
+    units = [unit["key"] for unit in planlib.build_plan(planlib.load_digest(FIXTURES / f"{name}.json"))["units"]]
+    (source / "provenance.json").write_text(json.dumps({"sha256": hashlib.sha256((source / "draft-vi.json").read_bytes()).hexdigest(), "units": units}),
+                                            encoding="utf-8")
 
 
 def estimated_durations(plan):
@@ -293,7 +304,7 @@ class ReviewFindings(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / "source").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")     # what scaffold puts there
             make_video.write_composition(project, plan, tl)
             self.assertIn("all traced", make_video.require_gate(project))
@@ -858,9 +869,77 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(check_facts.untraced(text, check_facts.blob({"fact": name}), set()), [], text)
         self.assertEqual(check_facts.untraced("Open/AI", check_facts.blob({"fact": "Open／AI"}), set()), [])      # nor can the source's own be missed
         # what is not a compatibility form of one ASCII character is left alone
-        for symbol in ("™", "…", "½", "®", "°", "×", " "):
+        for symbol in ("™", "…", "®", "°", "×", " "):
             self.assertEqual(numbers_vi.plain_text(symbol), symbol, repr(symbol))
         self.assertEqual(check_facts.untraced("npm™ …", check_facts.blob({"fact": "npm"}), set()), [])
+        # the Roman numeral characters are letters (Nl): ⅩⅨ% is XIX%, and the name has to be in the source
+        self.assertEqual(numbers_vi.plain_text("ⅩⅨ% ⅷ"), "XIX% viii")
+        self.assertEqual(check_facts.untraced("ⅩⅨ%", plain, set()), ["token 'XIX%'"])
+        self.assertEqual(check_facts.untraced("ⅩⅨ%", check_facts.blob({"fact": "XIX%"}), set()), [])
+        self.assertEqual(numbers_vi.speak_text("tăng ⅩⅨ%"), "tăng XIX%")
+        self.assertEqual(numbers_vi.plain_text("〇"), "〇")                                  # a character with no ASCII form is left alone
+        # a vulgar fraction is its numerator and its denominator, set apart from a digit before it and a percent sign after it
+        self.assertEqual(numbers_vi.plain_text("½%"), " 1/2 %")
+        self.assertEqual(check_facts.numbers("½%"), {"1", "2%"})
+        self.assertEqual(check_facts.numbers("1½"), {"1", "2"})                              # 1 and 1/2, not 11/2
+        self.assertEqual(check_facts.untraced("½%", plain, set()), ["number 1", "number 2%"])
+        self.assertEqual(check_facts.untraced("⅓ và ¾", plain, set()), ["number 1", "number 3", "number 4"])
+        self.assertEqual(check_facts.untraced("½%", check_facts.blob({"fact": "tăng 1/2%"}), set()), [])
+        self.assertEqual(numbers_vi.speak_text("½%").strip(), "một/hai phần trăm")
+
+    def test_a_character_that_nfkc_changes_is_refused_in_the_text_of_a_video(self):
+        for char in ("Ｏ", "𝐎", "ⓞ", "¹", "⑲", "²", "Ⅹ", "½", "ﬁ", "™", "µ", "ª", "ｱ", "ㄱ", "㈱"):
+            problems = check_facts.compat_problems(f"dùng {char}")
+            self.assertEqual(len(problems), 1, char)
+            self.assertIn(f"U+{ord(char):04X}", problems[0], char)
+        # a punctuation mark or a symbol outside the known marks is refused too: a Unicode hyphen, slash or colon can stand in a name
+        for char in ("\u2011", "\u2010", "\u2215", "\u2044", "\u2236", "\U0001F680", "\u2116", "\u2796", "\u2212", "\u2030", "\u2031", "\u00a9", "\u00ae", "\u00b0", "\u00d7", "\u20ac", "\u2265", "\u2022", "\u2190"):
+            problems = check_facts.compat_problems(f"Open{char}AI")
+            self.assertEqual(len(problems), 1, repr(char))
+            self.assertIn(f"U+{ord(char):04X}", problems[0], repr(char))
+        source = check_facts.blob({"fact": "Open và AI"})
+        for char in ("\u2011", "\u2010"):                                   # and the gate reads them as the hyphen they look like
+            self.assertEqual(check_facts.untraced(f"Open{char}AI", source, set()), ["token 'Open-AI'"], repr(char))
+            self.assertEqual(check_facts.untraced("Open-AI", check_facts.blob({"fact": f"Open{char}AI"}), set()), [], repr(char))
+        self.assertEqual(check_facts.numbers("\u22123 và \u20105"), {"-3", "-5"})
+        # what is left alone: the Vietnamese alphabet (also decomposed), ASCII, signs NFKC keeps, punctuation, spaces
+        for text in ("Việt Nam, Hồ-Chí-Minh, nghiêng, Đức, ư ơ ê ô â ă", "Việt", "WeChat（微信）：ok，ok", "chờ… xong", "a b　c d",
+                     "→ … – — · “x” ‘y’ $5 50% C++ C# 1/2 >= 3.10"):
+            self.assertEqual(check_facts.compat_problems(text), [], text)
+        # end to end, in the narration and on the page
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        for char in ("½", "ⅩⅨ", "ＯｐｅｎＡＩ", "¹⁹"):
+            spoken = json.loads(json.dumps(doc))
+            spoken["lines"][0]["text"] += f" {char}"
+            spoken["lines"][0]["speak"] = numbers_vi.speak_text(spoken["lines"][0]["text"])        # so that only the characters are wrong
+            status, output = run_gate(digest, spoken, html)
+            self.assertEqual(status, 1, char)
+            self.assertIn("NFKC", output, char)
+            status, output = run_gate(digest, doc, html.replace(">Python<", f">Python {char}<", 1))
+            self.assertEqual(status, 1, char)
+            self.assertIn("NFKC", output, char)
+
+    def test_the_dollar_sign_is_part_of_the_figure(self):
+        for text, value in (("$19", "$19"), ("19$", "$19"), ("$ 19", "$19"), ("-$5", "-$5"), ("-$ 5", "-$5"), ("âm $ 5", "-$5"), ("$1,000", "$1000"), ("tăng $19%", "$19%")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        plain = check_facts.blob({"fact": "19 người"})
+        self.assertEqual(check_facts.untraced("$19", plain, set()), ["number $19"])                  # a price the digest does not state
+        self.assertEqual(check_facts.untraced("19$", plain, set()), ["number $19"])
+        self.assertEqual(check_facts.untraced("$19", check_facts.blob({"fact": "giá $19"}), set()), [])
+        self.assertEqual(check_facts.untraced("19$", check_facts.blob({"fact": "giá $19"}), set()), [])         # either side is the same price
+        self.assertEqual(check_facts.untraced("19", check_facts.blob({"fact": "giá $19"}), set()), ["number 19"])
+        # a shell variable or a command substitution is not a figure
+        words = check_facts.blob({"fact": "echo $HOME $(pwd) $1 và 5 $VAR"})
+        self.assertEqual(check_facts.untraced("echo $HOME $(pwd) $1", words, set()), [])
+        # the voice says it
+        self.assertEqual(numbers_vi.speak_text("giá $19"), "giá mười chín đô la")
+        self.assertEqual(numbers_vi.speak_text("giá 19$"), "giá mười chín đô la")
+        self.assertEqual(numbers_vi.speak_text("-$5"), "âm năm đô la")
+        self.assertEqual(numbers_vi.speak_text("echo $HOME"), "echo $HOME")
 
     def test_a_sign_written_as_a_word_is_the_sign(self):
         for text, value in (("âm 19%", "-19%"), ("Âm  19%", "-19%"), ("trừ 5", "-5"), ("cộng 3", "+3"), ("CỘNG 3,5", "+3.5"), ("dương 2", "+2")):
@@ -883,6 +962,24 @@ class ReviewFindings(unittest.TestCase):
         # the word the voice says for a sign is the sign the gate reads: "-19%" is said "âm mười chín phần trăm"
         self.assertEqual(numbers_vi.speak_text("-19%"), "âm mười chín phần trăm")
         self.assertEqual(check_facts.numbers("âm 19%"), check_facts.numbers("-19%"))
+
+    def test_a_sign_one_space_before_its_digits_is_still_the_sign(self):
+        for text, value in (("- 19%", "-19%"), ("(− 3)", "-3"), ("x: - 5", "-5"), ("= - 5", "-5"), ("Δ: + 2,5%", "+2.5%"), ("－ 7", "-7"), ("➖ 7", "-7")):
+            self.assertEqual(check_facts.numbers(text), {value}, text)
+        positive = check_facts.blob({"fact": "tăng 19%"})
+        self.assertEqual(check_facts.untraced("- 19%", positive, set()), ["number -19%"])
+        self.assertEqual(check_facts.untraced("- 19%", check_facts.blob({"fact": "giảm -19%"}), set()), [])
+        self.assertEqual(check_facts.untraced("-19%", check_facts.blob({"fact": "giảm: - 19%"}), set()), [])       # nor can the source's be missed
+        self.assertEqual(check_facts.untraced("-19%", check_facts.blob({"fact": "giảm - 19%"}), set()), ["number -19%"])   # a dash after a word is no sign
+        # the voice says it
+        self.assertEqual(numbers_vi.speak_text("- 19%"), "âm mười chín phần trăm")
+        self.assertEqual(numbers_vi.speak_text("tăng: + 2,5%"), "tăng: cộng hai phẩy năm phần trăm")
+        # after a word or a number the same characters are a dash, an addition or a range
+        for text, values in (("Stars - 62.958", {"62958"}), ("tăng + 19%", {"19%"}), ("1 + 1", {"1"}), ("a - 5", {"5"}), ("5 - 10 phút", {"5", "10"}),
+                             ("10 % - 5", {"10%", "5"}), ("Python 3.10 - 3.12", {"3.10", "3.12"})):
+            self.assertEqual(check_facts.numbers(text), values, text)
+        self.assertEqual(numbers_vi.speak_text("Stars - 62.958"), "Stars - sáu mươi hai nghìn chín trăm năm mươi tám")
+        self.assertEqual(numbers_vi.speak_text("5 - 10 phút"), "năm - mười phút")
 
     def test_letters_apart_by_a_new_line_inside_a_value_are_a_row_but_not_across_values(self):
         source = check_facts.blob({"fact": "VoiceStudio chạy cục bộ"})
@@ -1038,7 +1135,7 @@ class ReviewFindings(unittest.TestCase):
             project = Path(tmp)
             (project / "source").mkdir()
             (project / "assets").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
             durations = {}
             for unit in plan["units"]:
@@ -1164,9 +1261,11 @@ class ReviewFindings(unittest.TestCase):
             for line in doc["lines"]:
                 (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
             self.assertEqual(make_video.stale_voices(doc, assets), [line["id"] for line in doc["lines"]])       # nothing was voiced yet
+            doc["voice"] = "Mai Anh"
             for line in doc["lines"]:
                 line["voiced"] = make_video.voiced_fingerprint(line["text"])
                 line["clip"] = make_video.clip_fingerprint(assets / f"{line['id']}.wav")
+                line["voice"] = "Mai Anh"
             self.assertEqual(make_video.stale_voices(doc, assets), [])
             # the file is rewritten when the project is (voice does it): the record of what was voiced stays with each line
             again = make_video.voiceover_doc(plan, tl, doc)
@@ -1181,12 +1280,142 @@ class ReviewFindings(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / "source").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
             make_video.write_composition(project, plan, tl)
             args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None})()
             with self.assertRaises(SystemExit):
                 make_video.cmd_render(args, project)
+
+    def test_a_digest_edited_after_scaffold_is_not_rebuilt_voiced_or_rendered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_source(project)
+            make_video.require_source_unchanged(project)                                    # as scaffold left it
+            args = type("Args", (), {"project": str(project), "videos_dir": tmp, "asr_python": None, "tts_python": "python3"})()
+            digest_path, record_path = project / "source" / "draft-vi.json", project / "source" / "provenance.json"
+            original, record = digest_path.read_text(encoding="utf-8"), record_path.read_text(encoding="utf-8")
+
+            def stops(what, command=make_video.require_source_unchanged):
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
+                    command(args, project) if command is not make_video.require_source_unchanged else command(project)
+                self.assertIn("provenance.json", errors.getvalue(), what)
+
+            edited = json.loads(original)
+            edited["facts"]["stars"] = 999999                                               # a figure made up after the fact
+            digest_path.write_text(json.dumps(edited), encoding="utf-8")
+            stops("a number changed")
+            for name in ("cmd_rebuild", "cmd_voice", "cmd_render"):                         # no command trusts the edited file
+                stops(name, getattr(make_video, name))
+            digest_path.write_text(original + " ", encoding="utf-8")
+            stops("one byte added")
+            digest_path.write_text(original, encoding="utf-8")
+            make_video.require_source_unchanged(project)                                    # put back: fine
+            record_path.write_text(json.dumps({"sha256": "0" * 64}), encoding="utf-8")
+            stops("a record that does not match")
+            record_path.write_text(json.dumps({}), encoding="utf-8")
+            stops("a record without a hash")
+            record_path.write_text("not json", encoding="utf-8")
+            stops("a record that is not json")
+            record_path.unlink()
+            stops("no record")
+            record_path.write_text(record, encoding="utf-8")
+            make_video.require_source_unchanged(project)
+
+    def test_a_video_has_one_narrator_whatever_the_project_file_says(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
+        ids = [line["id"] for line in doc["lines"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = Path(tmp)
+            doc["voice"] = "Hải Đăng"
+            for line in doc["lines"]:
+                (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
+                line.update(voiced=make_video.voiced_fingerprint(line["text"]), clip=make_video.clip_fingerprint(assets / f"{line['id']}.wav"),
+                            voice="Hải Đăng")
+            self.assertEqual(make_video.stale_voices(doc, assets), [])
+            make_video.require_one_narrator(doc, {ids[0]}, "Hải Đăng")                      # one line again, with the same voice: fine
+            make_video.require_one_narrator(doc, set(ids), "Mai Anh")                      # every line again, with another: that changes the voice
+            errors = io.StringIO()
+            for redone, voice in (({ids[0]}, "Mai Anh"), ({ids[0], ids[1]}, "Mai Anh")):   # the project file was edited to the new voice
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+                    make_video.require_one_narrator(doc, redone, voice)
+            self.assertIn("Hải Đăng", errors.getvalue())
+            self.assertIn("would mix two voices", errors.getvalue())
+            # the file says another voice than the clips were read with: the render stops, whatever the report says
+            doc["voice"] = "Mai Anh"
+            self.assertEqual(make_video.stale_voices(doc, assets), ids)
+            doc["voice"] = "Hải Đăng"
+            del doc["lines"][1]["voice"]                                                    # a clip with no record of its narrator
+            self.assertEqual(make_video.stale_voices(doc, assets), [ids[1]])
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                make_video.require_one_narrator(doc, {ids[0]}, "Hải Đăng")
+            # the rewritten file keeps who read each line
+            doc["lines"][1]["voice"] = "Hải Đăng"
+            again = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)), doc)
+            self.assertEqual([l["voice"] for l in again["lines"]], ["Hải Đăng"] * len(ids))
+
+    def test_the_music_bed_is_always_the_one_make_pad_writes(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_source(project)
+            (project / "assets").mkdir()
+            for unit in plan["units"]:
+                subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", str(unit["est"]),
+                                str(project / "assets" / f"{unit['id']}.wav")], check=True)
+            tl = planlib.timeline(plan, {u["id"]: make_video.clip_seconds(project / "assets" / f"{u['id']}.wav") for u in plan["units"]})
+            doc = make_video.voiceover_doc(plan, tl)
+            make_video.make_pad(project / "assets" / "pad.wav", tl["duration"])
+            made = (project / "assets" / "pad.wav").read_bytes()
+            (project / "assets" / "pad.wav").write_bytes(b"RIFF....WAVE another music, or a voice")        # put there after `voice`
+            make_video.refresh_music_bed(project, plan, doc)
+            self.assertEqual((project / "assets" / "pad.wav").read_bytes(), made)
+            self.assertAlmostEqual(make_video.clip_seconds(project / "assets" / "pad.wav"), tl["duration"], delta=0.1)
+            (project / "assets" / "pad.wav").unlink()                                                   # or removed
+            make_video.refresh_music_bed(project, plan, doc)
+            self.assertEqual((project / "assets" / "pad.wav").read_bytes(), made)
+
+    def test_the_lines_of_voiceover_json_are_the_ones_scaffold_chose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_source(project)
+            chosen = json.loads((project / "source" / "provenance.json").read_text(encoding="utf-8"))["units"]
+            self.assertGreater(len(chosen), 3)
+            path = project / "voiceover.json"
+
+            def stops(what, units, record=None):
+                path.write_text(json.dumps({"lines": [{"id": f"vo-{i}", "unit": unit} for i, unit in enumerate(units, 1)]}), encoding="utf-8")
+                if record is not None:
+                    (project / "source" / "provenance.json").write_text(json.dumps(record), encoding="utf-8")
+                errors = io.StringIO()
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
+                    make_video.load_project(project)
+                self.assertIn("scaffold", errors.getvalue(), what)
+
+            stops("an emptied list", [])                                                    # music over a terminal, 0 lines "traced"
+            stops("one line dropped", chosen[:-1])
+            stops("the first line dropped", chosen[1:])
+            stops("a line added", chosen + ["caveat:9"])
+            stops("two lines exchanged", [chosen[1], chosen[0]] + chosen[2:])
+            good = {"sha256": hashlib.sha256((project / "source" / "draft-vi.json").read_bytes()).hexdigest()}
+            stops("a record without the chosen lines", chosen, good)
+            stops("a record with an empty list", chosen, {**good, "units": []})
+            path.write_text(json.dumps({"lines": [{"id": f"vo-{i}", "unit": unit} for i, unit in enumerate(chosen, 1)]}), encoding="utf-8")
+            (project / "source" / "provenance.json").write_text(json.dumps({**good, "units": chosen}), encoding="utf-8")
+            digest, plan, doc = make_video.load_project(project)                            # the chosen lines: fine
+            self.assertEqual([u["key"] for u in plan["units"]], chosen)
+        # and the facts gate by itself refuses a list with no line at all
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        status, output = run_gate(digest, {**doc, "lines": []}, html)
+        self.assertEqual(status, 1)
+        self.assertIn("no lines at all", output)
 
     def test_the_timing_of_voiceover_json_is_what_the_clips_give(self):
         digest = planlib.load_digest(FIXTURES / "voicestudio.json")
@@ -1195,7 +1424,7 @@ class ReviewFindings(unittest.TestCase):
             project = Path(tmp)
             (project / "source").mkdir()
             (project / "assets").mkdir()
-            (project / "source" / "draft-vi.json").write_text(json.dumps(fixture("voicestudio")), encoding="utf-8")
+            write_source(project)
             shutil.copyfile(REPO / "scripts" / "radar" / "assets" / "gsap.min.js", project / "gsap.min.js")
             for unit in plan["units"]:
                 subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", str(unit["est"]),
@@ -1227,7 +1456,8 @@ class ReviewFindings(unittest.TestCase):
                 errors = io.StringIO()
                 with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit, msg=what):
                     make_video.require_generated_timing(project)
-                self.assertIn("rebuild", errors.getvalue(), what)
+                # the order of the lines is the scaffold's (provenance.json), so that one is refused before the timing is looked at
+                self.assertIn("scaffold" if what.startswith("two lines in") else "rebuild", errors.getvalue(), what)
             changed(swap_starts)
             args = type("Args", (), {"project": str(project), "videos_dir": tmp})()
             make_video.cmd_rebuild(args, project)                                           # rebuild writes the timing again
@@ -1240,10 +1470,12 @@ class ReviewFindings(unittest.TestCase):
         doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
         with tempfile.TemporaryDirectory() as tmp:
             assets = Path(tmp)
+            doc["voice"] = "Mai Anh"
             for line in doc["lines"]:
                 (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
                 line["voiced"] = make_video.voiced_fingerprint(line["text"])
                 line["clip"] = make_video.clip_fingerprint(assets / f"{line['id']}.wav")
+                line["voice"] = "Mai Anh"
             self.assertEqual(make_video.stale_voices(doc, assets), [])
             # the second line's file becomes a copy of the first line's: the words are the ones that were voiced, the clip is not
             shutil.copyfile(assets / "vo-1.wav", assets / "vo-2.wav")

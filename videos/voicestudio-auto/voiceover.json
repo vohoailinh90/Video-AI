@@ -15,7 +15,8 @@
         "draft.hook"
       ],
       "voiced": "9d7cb98d030d",
-      "clip": "845a499bc401e416"
+      "clip": "845a499bc401e416",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-2",
@@ -28,7 +29,8 @@
         "draft.problem"
       ],
       "voiced": "30531635b667",
-      "clip": "f42a8575eef9e9fb"
+      "clip": "f42a8575eef9e9fb",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-3",
@@ -41,7 +43,8 @@
         "draft.problem"
       ],
       "voiced": "e9ed153a445c",
-      "clip": "30894b9a33bbc0da"
+      "clip": "30894b9a33bbc0da",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-4",
@@ -54,7 +57,8 @@
         "draft.how_it_works.steps[0]"
       ],
       "voiced": "777049f657ec",
-      "clip": "b943ec919ebcda75"
+      "clip": "b943ec919ebcda75",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-5",
@@ -67,7 +71,8 @@
         "draft.how_it_works.steps[1]"
       ],
       "voiced": "4ef05412ede4",
-      "clip": "32f429c68c8d022d"
+      "clip": "32f429c68c8d022d",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-6",
@@ -80,7 +85,8 @@
         "draft.how_it_works.steps[2]"
       ],
       "voiced": "7cee4a12ce77",
-      "clip": "af8a4019e1b5b3bb"
+      "clip": "af8a4019e1b5b3bb",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-7",
@@ -93,7 +99,8 @@
         "draft.learn[0]"
       ],
       "voiced": "c36e490fb6df",
-      "clip": "5fb6e04120e43eba"
+      "clip": "5fb6e04120e43eba",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-8",
@@ -106,7 +113,8 @@
         "draft.learn[1]"
       ],
       "voiced": "355cf2b15e4d",
-      "clip": "afdae093a72e9aeb"
+      "clip": "afdae093a72e9aeb",
+      "voice": "Hải Đăng"
     },
     {
       "id": "vo-9",
@@ -120,7 +128,8 @@
       ],
       "speak": "Mã nguồn dùng giấy phép AGPL ba chấm không, nhưng trọng số mô hình và dữ liệu giọng nói có điều kiện cấp phép riêng.",
       "voiced": "68a00ed91cbe",
-      "clip": "284b7528334d32f8"
+      "clip": "284b7528334d32f8",
+      "voice": "Hải Đăng"
     }
   ]
 }
