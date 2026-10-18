@@ -1266,6 +1266,15 @@ class ReviewFindings(unittest.TestCase):
             self.assertEqual(untraced(short, source), [], source)
         self.assertEqual(untraced("faster-whisper", "faster-whisper-large-v3"), ["token 'faster-whisper'"])      # as before
         self.assertEqual(untraced("AGPL", "AGPL-3.0"), [])
+        # the longer name is one name: it traces to itself, and neither of its parts is the source's name
+        for whole, first, rest in (("C++Builder", "C++", "Builder"), ("C#Sharp", "C#", "Sharp")):
+            self.assertEqual(untraced(whole, f"d\u00f9ng {whole}"), [], whole)
+            self.assertEqual(untraced(first, f"d\u00f9ng {whole}"), [f"token '{first}'"], whole)
+            self.assertEqual(untraced(rest, f"d\u00f9ng {whole}"), [f"token '{rest}'"], whole)
+            self.assertEqual(untraced(whole, f"d\u00f9ng {first}"), [f"token '{whole}'"], whole)
+        self.assertEqual(untraced("C++11", "chu\u1ea9n C++11"), [])
+        self.assertEqual(untraced("C++", "chu\u1ea9n C++11"), ["token 'C++'"])
+        self.assertIn("token 'C++11'", untraced("C++11", "chu\u1ea9n C++"))
 
     def test_a_combining_mark_is_refused_whatever_it_sits_on(self):
         # on a sign, a punctuation mark or a space it is drawn too, and shown() would drop it (it has nothing to join)
