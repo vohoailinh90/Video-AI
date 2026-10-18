@@ -344,16 +344,21 @@ def blob(value) -> str:
 # block a Latin letter is in (café, GPT4é, GPTⱥ).
 NAME = re.compile(r"\w+(?:[-.]\w+)*(?:\+\+?|#)?")   # faster-whisper-large-v3, bun.sh, AGPL-3.0, C++, C#: a name ends at / : space ...
 VERSION_TAIL = re.compile(r"(?:-\d+(?:\.\d+)*)+$")
+NAME_CONTINUES = re.compile(r"[\w+#]")      # what may not follow a name for it to be a name of its own (has_name asks the same of a token)
 
 
 def names_in(source_blob: str) -> set:
     """Every name the source writes, whole: letters, digits and _ joined by - or . (a / or : or space ends it), and the name before
-    a trailing version (AGPL for AGPL-3.0). faster-whisper-large-v3 is one name: faster-whisper and whisper are not in it."""
+    a trailing version (AGPL for AGPL-3.0). faster-whisper-large-v3 is one name: faster-whisper and whisper are not in it, and C++Builder
+    is not C++ (a name followed by a word character, a + or a # is part of a longer name, as has_name asks of a token)."""
     names = set()
     for chunk in ascii_chunks(source_blob, need_letter=False):      # not the pieces of a Vietnamese word: c in công is not the name C
-        for name in NAME.findall(chunk.lower()):
-            names.add(name)
-            names.add(VERSION_TAIL.sub("", name))
+        low = chunk.lower()
+        for match in NAME.finditer(low):
+            if NAME_CONTINUES.match(low[match.end():match.end() + 1]):      # C++Builder, C#Sharp, C+++, C##: the C++ or C# is part of a longer name
+                continue
+            names.add(match.group(0))
+            names.add(VERSION_TAIL.sub("", match.group(0)))
     names.discard("")
     return names
 
@@ -434,8 +439,8 @@ def compat_problems(text: str) -> list:
     them in another order (12 U+202E 34 is traced as 1234, said "mười hai ... ba mươi bốn" and may be drawn 1243). Both are named by
     their code, never printed. So is a letter of another alphabet than Latin (Greek, Cyrillic, Han, Arabic ...): the check traces only
     numbers and Latin names, so a word in that alphabet is nothing it can compare with the source, and one glued to a name (GPTα) would make
-    a name the source does not write. So is a combining mark that stays on a Latin letter or a digit after NFC (x with a circumflex, i with a dot
-    above), which a viewer sees and the name or the figure of the source never has. A numeral that has no ASCII digit (the ideographic zero 〇, the Chinese 一 and 十, Tamil and Ethiopic
+    a name the source does not write. So is any combining mark that stays after NFC (x with a circumflex, i with a dot above, a dollar sign with an
+    enclosing circle), whatever it sits on: a viewer sees it, and the name or the figure of the source never has it. A numeral that has no ASCII digit (the ideographic zero 〇, the Chinese 一 and 十, Tamil and Ethiopic
     numbers, ↂ) is refused as well: NFKC leaves it as it is and it is no punctuation, yet a viewer reads a number in it that numbers()
     cannot (the digits that plain_char folds to ASCII, Arabic-Indic ones among them, are read and traced). The text of a video uses plain
     characters, the marks of MARKS, and spaces of any width (a gap, not a character of a name)."""
@@ -443,10 +448,10 @@ def compat_problems(text: str) -> list:
     previous = ""
     for c in unicodedata.normalize("NFC", text):
         category, before, previous = unicodedata.category(c), previous, c
-        if category in ("Mn", "Me") and (before.isalnum() and unicodedata.name(before, "").startswith(("LATIN", "DIGIT")) or before.isdigit()):
-            # a combining mark that NFC could not join to its Latin letter or digit (x with a circumflex, i with a dot above): it is drawn on
-            # it, and no name or number of the source has it, so it is refused
-            found.setdefault(c, f"U+{ord(c):04X} (combining mark on {before})")
+        if category in ("Mn", "Me"):
+            # a combining mark that NFC could not join to its letter (x with a circumflex, i with a dot above) or that has nothing to join but a
+            # sign or a space ($ with an enclosing circle): it is drawn, and no name or number of the source has it, so it is refused
+            found.setdefault(c, f"U+{ord(c):04X} (combining mark on {before!r})")
             continue
         if category == "Cc" and c not in "\t\n\r" + VALUE_BREAK or category == "Cf":
             found.setdefault(c, f"U+{ord(c):04X} ({'control' if category == 'Cc' else 'invisible format'} character)")

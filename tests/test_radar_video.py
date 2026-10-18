@@ -1257,6 +1257,35 @@ class ReviewFindings(unittest.TestCase):
         html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
         self.assertEqual(run_gate(digest, doc, html)[0], 0)
 
+    def test_c_plus_plus_and_c_sharp_are_not_names_of_the_source_when_they_start_a_longer_one(self):
+        untraced = lambda text, source: check_facts.untraced(text, check_facts.blob({"x": source}), set())
+        for short, source in (("C++", "C++Builder"), ("C#", "C#Sharp"), ("C++", "C+++"), ("C#", "C##"), ("C++", "C++x"), ("C#", "C#1")):
+            self.assertEqual(untraced(short, f"dùng {source}"), [f"token '{short}'"], source)
+        for short, source in (("C++", "C++"), ("C#", "C#"), ("C++", "dùng C++, và Go"), ("C++", "C++-based"), ("C#", "dùng C#."), ("C++", "(C++)"),
+                              ("C++", "C++ và C#"), ("C#", "C++ và C#")):
+            self.assertEqual(untraced(short, source), [], source)
+        self.assertEqual(untraced("faster-whisper", "faster-whisper-large-v3"), ["token 'faster-whisper'"])      # as before
+        self.assertEqual(untraced("AGPL", "AGPL-3.0"), [])
+
+    def test_a_combining_mark_is_refused_whatever_it_sits_on(self):
+        # on a sign, a punctuation mark or a space it is drawn too, and shown() would drop it (it has nothing to join)
+        for text in ("$⃝19", "⃝", "a !́ b", "a ́b", "5⃝", "(̈)", "% ⃣", "a-̂b"):
+            problems = check_facts.compat_problems(f"có {text} đây")
+            self.assertTrue(problems, repr(text))
+            self.assertTrue(all("combining mark" in p for p in problems), (text, problems))
+        self.assertEqual(check_facts.untraced("$19", check_facts.blob({"x": "$19"}), set()), [])
+        for fine in ("tiếng Việt, Hà Nội, đ", "é và â", "İstanbul", "$19, 50%, (x), a-b"):
+            self.assertEqual(check_facts.compat_problems(fine), [], fine)
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        tl = planlib.timeline(plan, estimated_durations(plan))
+        html, doc = compose.render(plan, tl), make_video.voiceover_doc(plan, tl)
+        self.assertEqual(run_gate(digest, doc, html)[0], 0)
+        doc["lines"][0]["text"] += " $⃝19"
+        status, output = run_gate(digest, doc, html)
+        self.assertEqual(status, 1)
+        self.assertIn("U+20DD", output)
+
     def test_a_unit_too_many_is_another_value(self):
         for text, value in (("19$$", "$$19"), ("$19$", "$$19"), ("$$19", "$$19"), ("19%%", "19%%"), ("19% phần trăm", "19%%"), ("$19%%", "$19%%"),
                             ("-$$19", "-$$19"), ("$-19$", "-$$19"), ("19$", "$19"), ("$19", "$19"), ("19%", "19%"), ("19 phần trăm", "19%")):
