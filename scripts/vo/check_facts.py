@@ -435,7 +435,7 @@ def compat_problems(text: str) -> list:
 
 # the words speak_text says for a sign, and their kin, up to three spaces, colons, equals signs, dashes, opening brackets or quotes before the
 # number; not a full stop, comma or semicolon, which end a clause: "âm. 5 điểm" is a sentence and then a number
-SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=(?:\$\s?)?\d)", re.I)
+SIGN_WORDS = re.compile(r"(?<!\w)(?:(âm|trừ)|cộng|dương)[\s:=~\-–—‑(\[\"'“‘]{1,3}(?=(?:\$\s?)*[.,]?\d)", re.I)    # a number may start with its point: âm .5
 
 
 def numbers(text: str) -> set:

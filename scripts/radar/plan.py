@@ -68,21 +68,24 @@ def estimate(text: str) -> float:
 LAYOUT_CONTROLS = "\t\n\r"   # the control characters that are only white space; clean() turns them into a space
 
 
-def control_character_at(node, where="digest"):
-    """The JSON path of the first string (a key or a value) that holds a control character other than a tab or a line break, else None.
-    The plan, the scaffold report and the errors print digest text; an ESC or BEL in it starts an escape sequence that a terminal acts on
-    (a title, the clipboard, a forged log line), and a C1 control (CSI U+009B, OSC U+009D) does the same in terminals that read 8-bit
-    controls. A real digest has none, so a digest with one is not used."""
+def hidden_character_at(node, where="digest"):
+    """The JSON path of the first string (a key or a value) that holds a control character other than a tab or a line break, or a format
+    character (zero-width space or joiner, soft hyphen, BOM, a direction mark, a bidi override or isolate such as U+202E), else None.
+    The plan, the scaffold report and the errors print digest text. An ESC or BEL in it starts an escape sequence that a terminal acts on
+    (a title, the clipboard, a forged log line), a C1 control (CSI U+009B, OSC U+009D) does the same in terminals that read 8-bit controls,
+    and a bidi override draws the text after it in another order, so what is printed is not what the digest says. The facts gate refuses the
+    same characters in the text of a video; this is the same rule at the door, because `plan` and `scaffold` print before the gate runs.
+    A real digest has none, so a digest with one is not used."""
     if isinstance(node, str):
-        return where if any(unicodedata.category(c) == "Cc" and c not in LAYOUT_CONTROLS for c in node) else None
+        return where if any(unicodedata.category(c) == "Cf" or unicodedata.category(c) == "Cc" and c not in LAYOUT_CONTROLS for c in node) else None
     if isinstance(node, dict):
         for key, value in node.items():
-            found = control_character_at(key, f"{where}.<key>") or control_character_at(value, f"{where}.{key}")
+            found = hidden_character_at(key, f"{where}.<key>") or hidden_character_at(value, f"{where}.{key}")
             if found:
                 return found
     elif isinstance(node, list):
         for index, value in enumerate(node):
-            found = control_character_at(value, f"{where}[{index}]")
+            found = hidden_character_at(value, f"{where}[{index}]")
             if found:
                 return found
     return None
@@ -90,10 +93,11 @@ def control_character_at(node, where="digest"):
 
 def load_digest(path) -> dict:
     digest = json.loads(Path(path).read_text(encoding="utf-8"))
-    where = control_character_at(digest)
+    where = hidden_character_at(digest)
     if where:
         # the place only, never the text: printing it is what a terminal would act on (and repr() shows a path's own control characters)
-        raise ValueError(f"{where!r} holds a control character (an escape sequence for the terminal that prints it), so this digest is not used")
+        raise ValueError(f"{where!r} holds a control or invisible format character (an escape sequence, or a direction override, for the "
+                         f"terminal that prints it), so this digest is not used")
     if not isinstance(digest.get("draft"), dict) or not isinstance(digest.get("facts"), dict):
         raise ValueError("not a radar digest: draft-<lang>.json must have `draft` and `facts`")
     if digest.get("lang", "vi") != "vi":
