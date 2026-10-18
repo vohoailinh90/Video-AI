@@ -1243,9 +1243,11 @@ class ReviewFindings(unittest.TestCase):
             for line in doc["lines"]:
                 (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
             self.assertEqual(make_video.stale_voices(doc, assets), [line["id"] for line in doc["lines"]])       # nothing was voiced yet
+            doc["voice"] = "Mai Anh"
             for line in doc["lines"]:
                 line["voiced"] = make_video.voiced_fingerprint(line["text"])
                 line["clip"] = make_video.clip_fingerprint(assets / f"{line['id']}.wav")
+                line["voice"] = "Mai Anh"
             self.assertEqual(make_video.stale_voices(doc, assets), [])
             # the file is rewritten when the project is (voice does it): the record of what was voiced stays with each line
             again = make_video.voiceover_doc(plan, tl, doc)
@@ -1302,6 +1304,62 @@ class ReviewFindings(unittest.TestCase):
             stops("no record")
             record_path.write_text(record, encoding="utf-8")
             make_video.require_source_unchanged(project)
+
+    def test_a_video_has_one_narrator_whatever_the_project_file_says(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
+        ids = [line["id"] for line in doc["lines"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = Path(tmp)
+            doc["voice"] = "Hải Đăng"
+            for line in doc["lines"]:
+                (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
+                line.update(voiced=make_video.voiced_fingerprint(line["text"]), clip=make_video.clip_fingerprint(assets / f"{line['id']}.wav"),
+                            voice="Hải Đăng")
+            self.assertEqual(make_video.stale_voices(doc, assets), [])
+            make_video.require_one_narrator(doc, {ids[0]}, "Hải Đăng")                      # one line again, with the same voice: fine
+            make_video.require_one_narrator(doc, set(ids), "Mai Anh")                      # every line again, with another: that changes the voice
+            errors = io.StringIO()
+            for redone, voice in (({ids[0]}, "Mai Anh"), ({ids[0], ids[1]}, "Mai Anh")):   # the project file was edited to the new voice
+                with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+                    make_video.require_one_narrator(doc, redone, voice)
+            self.assertIn("Hải Đăng", errors.getvalue())
+            self.assertIn("would mix two voices", errors.getvalue())
+            # the file says another voice than the clips were read with: the render stops, whatever the report says
+            doc["voice"] = "Mai Anh"
+            self.assertEqual(make_video.stale_voices(doc, assets), ids)
+            doc["voice"] = "Hải Đăng"
+            del doc["lines"][1]["voice"]                                                    # a clip with no record of its narrator
+            self.assertEqual(make_video.stale_voices(doc, assets), [ids[1]])
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                make_video.require_one_narrator(doc, {ids[0]}, "Hải Đăng")
+            # the rewritten file keeps who read each line
+            doc["lines"][1]["voice"] = "Hải Đăng"
+            again = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)), doc)
+            self.assertEqual([l["voice"] for l in again["lines"]], ["Hải Đăng"] * len(ids))
+
+    def test_the_music_bed_is_always_the_one_make_pad_writes(self):
+        digest = planlib.load_digest(FIXTURES / "voicestudio.json")
+        plan = planlib.build_plan(digest)
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            write_source(project)
+            (project / "assets").mkdir()
+            for unit in plan["units"]:
+                subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", str(unit["est"]),
+                                str(project / "assets" / f"{unit['id']}.wav")], check=True)
+            tl = planlib.timeline(plan, {u["id"]: make_video.clip_seconds(project / "assets" / f"{u['id']}.wav") for u in plan["units"]})
+            doc = make_video.voiceover_doc(plan, tl)
+            make_video.make_pad(project / "assets" / "pad.wav", tl["duration"])
+            made = (project / "assets" / "pad.wav").read_bytes()
+            (project / "assets" / "pad.wav").write_bytes(b"RIFF....WAVE another music, or a voice")        # put there after `voice`
+            make_video.refresh_music_bed(project, plan, doc)
+            self.assertEqual((project / "assets" / "pad.wav").read_bytes(), made)
+            self.assertAlmostEqual(make_video.clip_seconds(project / "assets" / "pad.wav"), tl["duration"], delta=0.1)
+            (project / "assets" / "pad.wav").unlink()                                                   # or removed
+            make_video.refresh_music_bed(project, plan, doc)
+            self.assertEqual((project / "assets" / "pad.wav").read_bytes(), made)
 
     def test_the_lines_of_voiceover_json_are_the_ones_scaffold_chose(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1394,10 +1452,12 @@ class ReviewFindings(unittest.TestCase):
         doc = make_video.voiceover_doc(plan, planlib.timeline(plan, estimated_durations(plan)))
         with tempfile.TemporaryDirectory() as tmp:
             assets = Path(tmp)
+            doc["voice"] = "Mai Anh"
             for line in doc["lines"]:
                 (assets / f"{line['id']}.wav").write_bytes(f"clip of {line['id']}".encode())
                 line["voiced"] = make_video.voiced_fingerprint(line["text"])
                 line["clip"] = make_video.clip_fingerprint(assets / f"{line['id']}.wav")
+                line["voice"] = "Mai Anh"
             self.assertEqual(make_video.stale_voices(doc, assets), [])
             # the second line's file becomes a copy of the first line's: the words are the ones that were voiced, the clip is not
             shutil.copyfile(assets / "vo-1.wav", assets / "vo-2.wav")

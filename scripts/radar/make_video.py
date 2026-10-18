@@ -175,6 +175,13 @@ def make_pad(path: Path, seconds: float):
         fail(f"ffmpeg could not make the music bed: {result.stderr[-400:]}")
 
 
+def refresh_music_bed(project: Path, plan, doc):
+    """assets/pad.wav is made by make_pad from the length of the video, and nothing else: the facts gate does not listen, the clips are
+    fingerprinted but the bed is not a clip, and the level check after a render compares the bed with itself. A render therefore writes it
+    again, so that a file put there (another music, a voice, something without a licence) never reaches the MP4."""
+    make_pad(project / "assets" / "pad.wav", planlib.timeline(plan, clip_durations(project, doc))["duration"])
+
+
 def without_credentials(url):
     """A git remote as a public address, for provenance.json and README.md (both committed): scheme://host/path, or host:path for the
     scp style. The user name or password (user:pw@, token@), the query and the fragment are dropped, because a token can sit in any of
@@ -238,6 +245,8 @@ def voiceover_doc(plan, tl, existing=None) -> dict:
             line["voiced"] = old[unit["key"]]["voiced"]          # which words the clip in assets/ was made from
             if old[unit["key"]].get("clip"):
                 line["clip"] = old[unit["key"]]["clip"]          # and which clip that was
+            if old[unit["key"]].get("voice"):
+                line["voice"] = old[unit["key"]]["voice"]        # and who read it
         lines.append(line)
     doc = {"allow": (existing or {}).get("allow", [])}
     if (existing or {}).get("voice"):
@@ -265,7 +274,18 @@ def stale_voices(doc, assets: Path) -> list:
     never voiced, or the file is not the one that was recorded (replaced or missing)."""
     return [line["id"] for line in doc["lines"]
             if line.get("voiced") != voiced_fingerprint(line["text"])
-            or not line.get("clip") or line["clip"] != clip_fingerprint(assets / f"{line['id']}.wav")]
+            or not line.get("clip") or line["clip"] != clip_fingerprint(assets / f"{line['id']}.wav")
+            or not line.get("voice") or line["voice"] != doc.get("voice")]
+
+
+def require_one_narrator(doc, redone, voice_name):
+    """A video has one narrator. `voice` records on each line who read its clip; a run that redoes only some lines with a voice other than
+    the one the other clips were made with (or with no record of it) would mix two narrators, whatever the project file now says."""
+    kept = [line for line in doc["lines"] if line["id"] not in redone]
+    others = sorted({line.get("voice") or "an unknown voice" for line in kept if line.get("voice") != voice_name})
+    if others:
+        fail(f"the other clips of this video were read by {', '.join(others)}, not by {voice_name}: --only would mix two voices. "
+             f"Redo every line (no --only) to change the voice, or keep the voice of the other clips")
 
 
 def refresh_speak(doc) -> bool:
@@ -496,6 +516,7 @@ def cmd_voice(args, project=None) -> dict:
     if unknown:
         fail(f"not a line of voiceover.json: {unknown}")
     voice_name = resolve_voice(args.voice, doc, load_report(project), set(only) != set(ids))
+    require_one_narrator(doc, set(only), voice_name)
     doc["voice"] = voice_name
     takes_dir = build_dir(project) / "takes"
     shutil.rmtree(takes_dir, ignore_errors=True)
@@ -537,6 +558,7 @@ def cmd_voice(args, project=None) -> dict:
         if line["id"] in only:
             line["voiced"] = voiced_fingerprint(line["text"])       # the clip just copied to assets/ was made from these words
             line["clip"] = clip_fingerprint(project / "assets" / f"{line['id']}.wav")     # and it is this file
+            line["voice"] = voice_name                                                    # read by this narrator
     write_composition(project, plan, tl, doc)
     make_pad(project / "assets" / "pad.wav", tl["duration"])
 
@@ -579,6 +601,7 @@ def cmd_render(args, project=None) -> dict:
     gate_output = require_gate(project)          # before the slow steps, and a failure ends the command
     require_generated_page(project)
     require_generated_timing(project)
+    refresh_music_bed(project, plan, doc)
     stale = stale_voices(doc, project / "assets")
     if stale:
         fail(f"the clip of {', '.join(stale)} is not the one `voice` made from the line's current words (reworded since, never voiced, "
